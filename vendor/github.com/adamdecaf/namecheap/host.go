@@ -39,13 +39,13 @@ func (c *Client) SetHosts(domain string, records []Record) ([]Record, error) {
 		params["HostName"+sNumb] = records[itr].Name
 		recordType := records[itr].RecordType
 		if !CheckRecordType(recordType) {
-			return nil, fmt.Errorf("Invalid record type")
+			return nil, fmt.Errorf("Invalid record type, allowed types=%q", strings.Join(allowedRecordTypes, ", "))
 		}
 		params["RecordType"+sNumb] = recordType
 		params["Address"+sNumb] = records[itr].Address
 		params["MXPref"+sNumb] = strconv.Itoa(records[itr].MXPref)
 		if records[itr].TTL < minTTL || records[itr].TTL > maxTTL {
-			return nil, fmt.Errorf("Invalid ttl value")
+			return nil, fmt.Errorf("Invalid ttl value, min=%d, max=%d", minTTL, maxTTL)
 		}
 		params["TTL"+sNumb] = strconv.Itoa(records[itr].TTL)
 		itr += 1

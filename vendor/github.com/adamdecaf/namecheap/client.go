@@ -27,8 +27,8 @@ const (
 func New() (*Client, error) {
 	username := os.Getenv("NAMECHEAP_USERNAME")
 	apiuser := os.Getenv("NAMECHEAP_API_USER")
-	token := os.Getenv("NAMECHEAP_API_TOKEN")
-	ip := os.Getenv("NAMECHEAP_WHITELISTED_IP") // TODO(adam): attempt local read?
+	token := os.Getenv("NAMECHEAP_TOKEN")
+	ip := os.Getenv("NAMECHEAP_IP") // TODO(adam): attempt local read?
 
 	sbx := os.Getenv("NAMECHEAP_USE_SANDBOX")
 	useSbx := sbx != "" && sbx != "false"

@@ -89,39 +89,34 @@ func (r *Record) diff(other *Record) map[string]string {
 	out := make(map[string]string, 0)
 
 	if r.Name != other.Name {
-		out["Name"] = other.Name
-	}
-	if r.FriendlyName != other.FriendlyName {
-		out["FriendlyName"] = other.FriendlyName
+		out["Name"] = fmt.Sprintf("%q vs %q", r.Name, other.Name)
 	}
 	if r.Address != other.Address {
-		out["Address"] = other.Address
+		out["Address"] = fmt.Sprintf("%q vs %q", r.Address, other.Address)
 	}
 	if r.MXPref != other.MXPref {
-		out["MXPref"] = string(other.MXPref)
+		out["MXPref"] = fmt.Sprintf("%d vs %d", r.MXPref, other.MXPref)
 	}
 	if r.AssociatedAppTitle != other.AssociatedAppTitle {
-		out["AssociatedAppTitle"] = other.AssociatedAppTitle
-	}
-	if r.Id != other.Id {
-		out["Id"] = string(other.Id)
+		out["AssociatedAppTitle"] = fmt.Sprintf("%q vs %q", r.AssociatedAppTitle, other.AssociatedAppTitle)
 	}
 	if r.RecordType != other.RecordType {
-		out["RecordType"] = other.RecordType
+		out["RecordType"] = fmt.Sprintf("%q vs %q", r.RecordType, other.RecordType)
 	}
 	if r.TTL != other.TTL {
-		out["TTL"] = string(other.TTL)
+		out["TTL"] = fmt.Sprintf("%d vs %d", r.TTL, other.TTL)
 	}
 	if r.IsActive != other.IsActive {
-		out["IsActive"] = fmt.Sprintf("%v", other.IsActive)
+		out["IsActive"] = fmt.Sprintf("%v vs %v", r.IsActive, other.IsActive)
 	}
 	if r.IsDDNSEnabled != other.IsDDNSEnabled {
-		out["IsDDNSEnabled"] = fmt.Sprintf("%v", other.IsDDNSEnabled)
+		out["IsDDNSEnabled"] = fmt.Sprintf("%v vs %v", r.IsDDNSEnabled, other.IsDDNSEnabled)
 	}
 
 	return out
 }
 
+// "Equal" in the sense that clients would see them as the same
 func (r *Record) Equal(other *Record) bool {
 	return len(r.diff(other)) == 0
 }

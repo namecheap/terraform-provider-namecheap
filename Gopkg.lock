@@ -5,7 +5,7 @@
   branch = "master"
   name = "github.com/adamdecaf/namecheap"
   packages = ["."]
-  revision = "e7f6f44d37f7a1365fc9c8745491c1999c3f17ac"
+  revision = "6ddfe5da6d29bc075b100ae540f0902e601943ea"
 
 [[projects]]
   name = "github.com/agext/levenshtein"
