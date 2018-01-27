@@ -5,10 +5,53 @@ Usage
 ---------------------
 
 ```
+# Download provider
+# Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
+
+$ mkdir -p ~/.terraform.d/plugins/
+$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/0.1.0/terraform-provider-namecheap-linux
+```
+
+Then inside a file (e.g. `example.com.tf`):
+
+```
 # For example, restrict namecheap version in 0.1.x
-provider "namecheap" {
-  version = "~> 0.1"
+provider "namecheap" {}
+
+resource "namecheap_record" "www-example-com" {
+  name = "www"
+  domain = "example.com"
+  address = "127.0.0.1"
+  mx_pref = 10
+  type = "A"
 }
+```
+
+Setup terraform and view the plan output.
+
+```
+$ terraform init
+Terraform has been successfully initialized!
+
+$ terraform plan
+Terraform will perform the following actions:
+
+  + namecheap_record.www-example.com
+      id:       <computed>
+      address:  "127.0.0.1"
+      domain:   "example.com"
+      hostname: <computed>
+      mx_pref:  "10"
+      name:     "www"
+      ttl:      "60"
+      type:     "A"
+
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+$ terraform apply
+...
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
 ```
 
 Building The Provider

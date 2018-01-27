@@ -1,3 +1,4 @@
+VERSION="0.1.0-dev"
 TEST?=$$(go list ./... |grep -v 'vendor')
 GOFMT_FILES?=$$(find . -name '*.go' |grep -v vendor)
 
@@ -43,4 +44,14 @@ test-compile:
 	fi
 	go test -c $(TEST) $(TESTARGS)
 
-.PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile
+mkrel:
+	gothub release -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name $(VERSION) --pre-release
+
+upload:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/terraform-provider-namecheap-linux-amd64 github.com/adamdecaf/terraform-provider-namecheap
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/terraform-provider-namecheap-osx-amd64 github.com/adamdecaf/terraform-provider-namecheap
+	gothub upload -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name "terraform-provider-namecheap-linux" --file bin/terraform-provider-namecheap-linux-amd64
+	gothub upload -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name "terraform-provider-namecheap-osx" --file bin/terraform-provider-namecheap-osx-amd64
+
+
+.PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile mkrel upload
