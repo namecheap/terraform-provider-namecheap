@@ -61,7 +61,7 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 	mutex.Lock()
 	client := meta.(*namecheap.Client)
 	record := namecheap.Record{
-		HostName:   d.Get("name").(string),
+		Name:       d.Get("name").(string),
 		RecordType: d.Get("type").(string),
 		Address:    d.Get("address").(string),
 		MXPref:     d.Get("mx_pref").(int),
@@ -91,7 +91,7 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 		return fmt.Errorf("Failed to parse id: %s", err)
 	}
 	record := namecheap.Record{
-		HostName:   d.Get("name").(string),
+		Name:       d.Get("name").(string),
 		RecordType: d.Get("type").(string),
 		Address:    d.Get("address").(string),
 		MXPref:     d.Get("mx_pref").(int),
@@ -124,16 +124,16 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		mutex.Unlock()
 		return fmt.Errorf("Couldn't find namecheap record: %s", err)
 	}
-	d.Set("name", record.HostName)
+	d.Set("name", record.Name)
 	d.Set("type", record.RecordType)
 	d.Set("address", record.Address)
 	d.Set("mx_pref", record.MXPref)
 	d.Set("ttl", record.TTL)
 
-	if record.HostName == "" {
+	if record.Name == "" {
 		d.Set("hostname", d.Get("domain").(string))
 	} else {
-		d.Set("hostname", fmt.Sprintf("%s.%s", record.HostName, d.Get("domain").(string)))
+		d.Set("hostname", fmt.Sprintf("%s.%s", record.Name, d.Get("domain").(string)))
 	}
 
 	mutex.Unlock()
