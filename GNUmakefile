@@ -33,7 +33,7 @@ errcheck:
 	@sh -c "'$(CURDIR)/scripts/errcheck.sh'"
 
 vendor-status:
-	@govendor status
+	@dep status
 
 test-compile:
 	@if [ "$(TEST)" = "./..." ]; then \
@@ -44,4 +44,3 @@ test-compile:
 	go test -c $(TEST) $(TESTARGS)
 
 .PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile
-
