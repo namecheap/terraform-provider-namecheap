@@ -14,7 +14,7 @@ $ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com
 
 Then inside a file (e.g. `example.com.tf`):
 
-```
+```hcl
 # For example, restrict namecheap version in 0.1.x
 provider "namecheap" {}
 
@@ -29,7 +29,7 @@ resource "namecheap_record" "www-example-com" {
 
 Setup terraform and view the plan output.
 
-```
+```hcl
 $ terraform init
 Terraform has been successfully initialized!
 
