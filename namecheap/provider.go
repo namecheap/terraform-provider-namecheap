@@ -39,7 +39,8 @@ func Provider() terraform.ResourceProvider {
 
 			"use_sandbox": &schema.Schema{
 				Type:        schema.TypeBool,
-				Required:    true,
+				Optional:    true,
+				Default:     false,
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_USE_SANDBOX", nil),
 				Description: "If true, use the namecheap sandbox",
 			},
