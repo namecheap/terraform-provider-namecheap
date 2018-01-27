@@ -2,7 +2,7 @@ package namecheap
 
 import (
 	"fmt"
-	"github.com/HX-Rd/namecheap"
+	"github.com/adamdecaf/namecheap"
 )
 
 type Config struct {

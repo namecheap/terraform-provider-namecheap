@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/HX-Rd/namecheap"
+	"github.com/adamdecaf/namecheap"
 	"github.com/hashicorp/terraform/helper/schema"
 )
 

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/HX-Rd/namecheap"
+	"github.com/adamdecaf/namecheap"
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/terraform"
 )
