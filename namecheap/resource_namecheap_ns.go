@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/adamdecaf/namecheap"
 	"github.com/hashicorp/terraform/helper/schema"
-  "github.com/adamdecaf/namecheap"
 )
 
 func resourceNameCheapNS() *schema.Resource {
