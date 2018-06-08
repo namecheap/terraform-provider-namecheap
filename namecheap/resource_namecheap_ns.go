@@ -31,6 +31,8 @@ func resourceNameCheapNS() *schema.Resource {
 
 func resourceNameCheapNSCreate(d *schema.ResourceData, meta interface{}) error {
 	mutex.Lock()
+	defer mutex.Unlock()
+
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
 	var servers []string
@@ -40,11 +42,9 @@ func resourceNameCheapNSCreate(d *schema.ResourceData, meta interface{}) error {
 
 	_, err := client.SetNS(domain, servers)
 	if err != nil {
-		mutex.Unlock()
 		return fmt.Errorf("Failed to set NS: %s", err)
 	}
 	d.SetId(strings.Join(servers, ","))
-	mutex.Unlock()
 	return resourceNameCheapNSRead(d, meta)
 }
 
@@ -54,6 +54,7 @@ func resourceNameCheapNSUpdate(d *schema.ResourceData, meta interface{}) error {
 
 func resourceNameCheapNSRead(d *schema.ResourceData, meta interface{}) error {
 	mutex.Lock()
+	defer mutex.Unlock()
 
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
@@ -61,25 +62,22 @@ func resourceNameCheapNSRead(d *schema.ResourceData, meta interface{}) error {
 	servers, err := client.GetNS(domain)
 	if err != nil {
 		d.SetId("")
-		mutex.Unlock()
 		return fmt.Errorf("Failed to read servers: %s", err)
 	}
 	d.Set("servers", servers)
-	mutex.Unlock()
 	return nil
 }
 
 func resourceNameCheapNSDelete(d *schema.ResourceData, meta interface{}) error {
 	mutex.Lock()
+	defer mutex.Unlock()
 
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
 
 	err := client.ResetNS(domain)
 	if err != nil {
-		mutex.Unlock()
 		return fmt.Errorf("Failed to reset ns: %s", err)
 	}
-	mutex.Unlock()
 	return nil
 }
