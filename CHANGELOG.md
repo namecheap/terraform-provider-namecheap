@@ -1,4 +1,9 @@
-## 1.0.1 (Unreleased)
+## 1.1.0 (June 8th 2018)
+
+ADDITIONS
+
+* Added `namecheap_ns` record ([#3](https://github.com/adamdecaf/terraform-provider-namecheap/pull/3))
+
 ## 1.0.0 (September 26, 2017)
 
 * No changes from 0.1.1; just adjusting to [the new version numbering scheme](https://www.hashicorp.com/blog/hashicorp-terraform-provider-versioning/).
