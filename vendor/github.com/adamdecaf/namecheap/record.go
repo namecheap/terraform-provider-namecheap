@@ -77,7 +77,7 @@ func (c *Client) FindRecordByHash(hashId int, records []Record) (*Record, error)
 			return &record, nil
 		}
 	}
-	return nil, fmt.Errorf("Could not find the record with hash %v", hashId)
+	return nil, fmt.Errorf("Could not find the record")
 }
 
 func (c *Client) RemoveRecordByHash(hashId int, records []Record) []Record {

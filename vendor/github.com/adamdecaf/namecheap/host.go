@@ -24,7 +24,7 @@ func (c *Client) SetHosts(domain string, records []Record) ([]Record, error) {
 	var domainSplit = strings.Split(domain, ".")
 
 	if len(domainSplit) != 2 {
-		return nil, fmt.Errorf("Domain %q does not contain SLD and TLD", domainSplit)
+		return nil, fmt.Errorf("Domain does not contain SLD and TLD")
 	}
 
 	var numberOfRecords = len(records)

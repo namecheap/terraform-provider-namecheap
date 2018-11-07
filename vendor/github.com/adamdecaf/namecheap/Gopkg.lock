@@ -3,26 +3,19 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:77cb3be9b21ba7f1a4701e870c84ea8b66e7d74c7c8951c58155fdadae9414ec"
   name = "github.com/hashicorp/go-cleanhttp"
   packages = ["."]
-  pruneopts = "UT"
   revision = "d5fe4b57a186c716b0e00b8c301cbd9b4182694d"
 
 [[projects]]
-  digest = "1:a3b160ff2516eb255c54bdfe9ed2a8e48e84aa0c1b1b4ac8167a74dac368d4d6"
   name = "github.com/hashicorp/terraform"
   packages = ["helper/hashcode"]
-  pruneopts = "UT"
   revision = "a6008b8a48a749c7c167453b9cf55ffd572b9a5d"
   version = "v0.11.2"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  input-imports = [
-    "github.com/hashicorp/go-cleanhttp",
-    "github.com/hashicorp/terraform/helper/hashcode",
-  ]
+  inputs-digest = "769476e6d1795da4d3bab5821356b15bbec9193d155da61e23be49a7a28c0786"
   solver-name = "gps-cdcl"
   solver-version = 1
