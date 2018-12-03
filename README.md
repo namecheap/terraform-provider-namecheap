@@ -9,7 +9,7 @@ Usage
 # Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
 
 $ mkdir -p ~/.terraform.d/plugins/
-$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/0.1.0/terraform-provider-namecheap-linux
+$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/v1.0.0/terraform-provider-namecheap-linux-amd64
 ```
 
 Then inside a file (e.g. `example.com.tf`):
