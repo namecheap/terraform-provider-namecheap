@@ -70,11 +70,6 @@ $ cd $GOPATH/src/github.com/terraform-providers/terraform-provider-$PROVIDER_NAM
 $ make build
 ```
 
-Using the provider
-----------------------
-
-TODO
-
 Developing the Provider
 ---------------------------
 
