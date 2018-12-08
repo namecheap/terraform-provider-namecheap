@@ -1,3 +1,11 @@
+## Unreleased
+
+## 1.1.1 (December 4th 2018)
+
+BUG FIXES
+
+- Fixed timeout on record create, delete, and updates. ([#7](https://github.com/adamdecaf/terraform-provider-namecheap/issues/7))
+
 ## 1.1.0 (June 8th 2018)
 
 ADDITIONS

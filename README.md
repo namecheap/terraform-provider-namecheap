@@ -24,7 +24,7 @@ Note the command below will install the Linux binary, please check [releases](ht
 # Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
 
 $ mkdir -p ~/.terraform.d/plugins/
-$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/v1.0.0/terraform-provider-namecheap-linux-amd64
+$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/v1.1.1/terraform-provider-namecheap-linux-amd64
 ```
 
 Then inside a Terraform file within your project (Ex. `providers.tf`):
@@ -107,7 +107,9 @@ provider "namecheap" {
 Developing the Provider
 ---------------------------
 
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (version 1.8+ is *required*). You'll also need to correctly setup a [GOPATH](http://golang.org/doc/code.html#GOPATH), as well as adding `$GOPATH/bin` to your `$PATH`.
+If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (version 1.11+ is *required*). You'll also need to correctly setup a [GOPATH](http://golang.org/doc/code.html#GOPATH), as well as adding `$GOPATH/bin` to your `$PATH`.
+
+This project uses [Go Modules](https://github.com/golang/go/wiki/Modules), added in Go 1.11.
 
 To compile the provider, run `make build`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
 
