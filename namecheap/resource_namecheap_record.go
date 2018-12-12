@@ -33,33 +33,33 @@ func resourceNameCheapRecord() *schema.Resource {
 		},
 
 		Schema: map[string]*schema.Schema{
-			"domain": &schema.Schema{
+			"domain": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"name": &schema.Schema{
+			"name": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"type": &schema.Schema{
+			"type": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"address": &schema.Schema{
+			"address": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"mx_pref": &schema.Schema{
+			"mx_pref": {
 				Type:     schema.TypeInt,
 				Optional: true,
 				Default:  ncDefaultMXPref,
 			},
-			"ttl": &schema.Schema{
+			"ttl": {
 				Type:     schema.TypeInt,
 				Optional: true,
 				Default:  ncDefaultTTL,
 			},
-			"hostname": &schema.Schema{
+			"hostname": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
