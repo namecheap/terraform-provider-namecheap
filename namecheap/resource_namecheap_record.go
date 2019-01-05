@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/adamdecaf/namecheap"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -12,8 +13,10 @@ import (
 // We need a mutex here because of the underlying api
 var mutex = &sync.Mutex{}
 
-const ncDefaultTTL int = 1800
+// This is the "Auto" TTL setting in Namecheap
+const ncDefaultTTL int = 1799
 const ncDefaultMXPref int = 10
+const ncDefaultTimeout time.Duration = 30
 
 func resourceNameCheapRecord() *schema.Resource {
 	return &schema.Resource{
@@ -22,34 +25,41 @@ func resourceNameCheapRecord() *schema.Resource {
 		Read:   resourceNameCheapRecordRead,
 		Delete: resourceNameCheapRecordDelete,
 
+		Timeouts: &schema.ResourceTimeout{
+			Create: schema.DefaultTimeout(ncDefaultTimeout * time.Second),
+			Update: schema.DefaultTimeout(ncDefaultTimeout * time.Second),
+			Read:   schema.DefaultTimeout(ncDefaultTimeout * time.Second),
+			Delete: schema.DefaultTimeout(ncDefaultTimeout * time.Second),
+		},
+
 		Schema: map[string]*schema.Schema{
-			"domain": &schema.Schema{
+			"domain": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"name": &schema.Schema{
+			"name": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"type": &schema.Schema{
+			"type": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"address": &schema.Schema{
+			"address": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"mx_pref": &schema.Schema{
+			"mx_pref": {
 				Type:     schema.TypeInt,
 				Optional: true,
-				Default:  10,
+				Default:  ncDefaultMXPref,
 			},
-			"ttl": &schema.Schema{
+			"ttl": {
 				Type:     schema.TypeInt,
 				Optional: true,
-				Default:  1800,
+				Default:  ncDefaultTTL,
 			},
-			"hostname": &schema.Schema{
+			"hostname": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},

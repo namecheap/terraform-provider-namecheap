@@ -133,3 +133,6 @@ In order to run the full suite of Acceptance tests, run `make testacc`.
 ```bash
 $ make testacc
 ```
+
+Another good way to test builds is to symlink the binary `terraform-provider-namecheap` that you are building into the `~/.terraform.d/plugins/` directory.
+
