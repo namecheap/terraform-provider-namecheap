@@ -1,6 +1,9 @@
 Namecheap Terraform Provider
 ==================
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/adamdecaf/terraform-provider-namecheap)](https://goreportcard.com/report/github.com/adamdecaf/terraform-provider-namecheap)
+[![Support via Flattr](https://button.flattr.com/flattr-badge-large.png)](https://flattr.com/@adamdecaf)
+
 A Terraform Provider for Namecheap domain dns configuration.
 
 Prerequisites
@@ -135,4 +138,3 @@ $ make testacc
 ```
 
 Another good way to test builds is to symlink the binary `terraform-provider-namecheap` that you are building into the `~/.terraform.d/plugins/` directory.
-
