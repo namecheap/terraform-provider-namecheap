@@ -88,7 +88,7 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 	for {
 		_, err := client.AddRecord(d.Get("domain").(string), &record)
 		if err != nil {
-			log.Printf("[TRACE] Err: %v", err.Error())
+			log.Printf("[INFO] Err: %v", err.Error())
 
 			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
 				log.Printf("[WARN] Bad Namecheap API response received, backing off for %d seconds...",
@@ -100,10 +100,7 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 					break
 				}
 				continue
-			} else {
-				log.Printf("[INFO] Error")
 			}
-			mutex.Unlock()
 			return fmt.Errorf("Failed to create namecheap Record: %s", err)
 		}
 		hashId := client.CreateHash(&record)
@@ -138,7 +135,7 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 	for {
 		err = client.UpdateRecord(domain, hashId, &record)
 		if err != nil {
-			log.Printf("[TRACE] Err: %v", err.Error())
+			log.Printf("[INFO] Err: %v", err.Error())
 
 			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
 				log.Printf("[WARN] Bad Namecheap API response received, backing off for %v seconds...",
@@ -151,7 +148,6 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 				}
 				continue
 			}
-			mutex.Unlock()
 			log.Printf("[ERROR] Failed to update namecheap record: %s", err)
 			break
 		}
@@ -181,7 +177,7 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		record, err := client.ReadRecord(domain, hashId)
 		if err != nil {
 			log.Printf("[TRACE] Record: %v", record)
-			log.Printf("[TRACE] Err: %v", err.Error())
+			log.Printf("[INFO] Err: %v", err.Error())
 			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
 				log.Printf("[WARN] Bad Namecheap API response received, backing off for %v seconds...",
 					apiThrottleBackoffTime)
