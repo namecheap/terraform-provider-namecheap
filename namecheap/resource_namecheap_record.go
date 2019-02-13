@@ -71,6 +71,30 @@ func resourceNameCheapRecord() *schema.Resource {
 	}
 }
 
+func retryApiCall(f func() error) error {
+	apiThrottleBackoffTime := 2
+	for {
+		if err := f(); err != nil {
+			log.Printf("[INFO] Err: %v", err.Error())
+			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
+				log.Printf("[WARN] Bad Namecheap API response received, backing off for %d seconds...", apiThrottleBackoffTime)
+
+				time.Sleep(time.Duration(apiThrottleBackoffTime) * time.Second)
+
+				apiThrottleBackoffTime = apiThrottleBackoffTime * ncBackoffMultiplier
+
+				if apiThrottleBackoffTime > ncMaxThrottleRetry {
+					log.Printf("[ERROR] API Retry Limit Reached. Couldn't find namecheap record: %v", err)
+					break
+				}
+				continue // retry
+			}
+			return fmt.Errorf("Failed to create namecheap Record: %s", err)
+		}
+	}
+	return nil
+}
+
 func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) error {
 	mutex.Lock()
 
@@ -83,30 +107,16 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	apiThrottleBackoffTime := 2
-
-	for {
+	err := retryApiCall(func() error {
 		_, err := client.AddRecord(d.Get("domain").(string), &record)
-		if err != nil {
-			log.Printf("[INFO] Err: %v", err.Error())
-
-			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
-				log.Printf("[WARN] Bad Namecheap API response received, backing off for %d seconds...",
-					apiThrottleBackoffTime)
-				time.Sleep(time.Duration(apiThrottleBackoffTime) * time.Second)
-				apiThrottleBackoffTime = apiThrottleBackoffTime * ncBackoffMultiplier
-				if apiThrottleBackoffTime > ncMaxThrottleRetry {
-					log.Printf("[ERROR] API Retry Limit Reached. Couldn't find namecheap record: %v", err)
-					break
-				}
-				continue
-			}
-			return fmt.Errorf("Failed to create namecheap Record: %s", err)
-		}
-		hashId := client.CreateHash(&record)
-		d.SetId(strconv.Itoa(hashId))
-		break
+		return err
+	})
+	if err != nil {
+		return err
 	}
+
+	hashId := client.CreateHash(&record)
+	d.SetId(strconv.Itoa(hashId))
 
 	mutex.Unlock()
 	return resourceNameCheapRecordRead(d, meta)
@@ -130,31 +140,15 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	apiThrottleBackoffTime := 2
-
-	for {
-		err = client.UpdateRecord(domain, hashId, &record)
-		if err != nil {
-			log.Printf("[INFO] Err: %v", err.Error())
-
-			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
-				log.Printf("[WARN] Bad Namecheap API response received, backing off for %v seconds...",
-					apiThrottleBackoffTime)
-				time.Sleep(time.Duration(apiThrottleBackoffTime) * time.Second)
-				apiThrottleBackoffTime = apiThrottleBackoffTime * ncBackoffMultiplier
-				if apiThrottleBackoffTime > ncMaxThrottleRetry {
-					log.Printf("[ERROR] API Retry Limit Reached. Couldn't find namecheap record: %v", err)
-					break
-				}
-				continue
-			}
-			log.Printf("[ERROR] Failed to update namecheap record: %s", err)
-			break
-		}
-		newHashId := client.CreateHash(&record)
-		d.SetId(strconv.Itoa(newHashId))
-		break
+	err = retryApiCall(func() error {
+		return client.UpdateRecord(domain, hashId, &record)
+	})
+	if err != nil {
+		return err
 	}
+
+	newHashId := client.CreateHash(&record)
+	d.SetId(strconv.Itoa(newHashId))
 
 	mutex.Unlock()
 	return resourceNameCheapRecordRead(d, meta)
@@ -171,39 +165,28 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		return fmt.Errorf("Failed to parse id: %s", err)
 	}
 
-	apiThrottleBackoffTime := 2
-
-	for {
-		record, err := client.ReadRecord(domain, hashId)
-		if err != nil {
-			log.Printf("[TRACE] Record: %v", record)
-			log.Printf("[INFO] Err: %v", err.Error())
-			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
-				log.Printf("[WARN] Bad Namecheap API response received, backing off for %v seconds...",
-					apiThrottleBackoffTime)
-				time.Sleep(time.Duration(apiThrottleBackoffTime) * time.Second)
-				apiThrottleBackoffTime = apiThrottleBackoffTime * ncBackoffMultiplier
-				if apiThrottleBackoffTime > ncMaxThrottleRetry {
-					log.Printf("[ERROR] API Retry Limit Reached. Couldn't find namecheap record: %v", err)
-					break
-				}
-				continue
-			}
-			return fmt.Errorf("Couldn't find namecheap record: %s", err)
+	var record *namecheap.Record
+	err = retryApiCall(func() error {
+		rec, err := client.ReadRecord(domain, hashId)
+		if err == nil {
+			record = rec
 		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
 
-		d.Set("name", record.Name)
-		d.Set("type", record.RecordType)
-		d.Set("address", record.Address)
-		d.Set("mx_pref", record.MXPref)
-		d.Set("ttl", record.TTL)
+	d.Set("name", record.Name)
+	d.Set("type", record.RecordType)
+	d.Set("address", record.Address)
+	d.Set("mx_pref", record.MXPref)
+	d.Set("ttl", record.TTL)
 
-		if record.Name == "" {
-			d.Set("hostname", d.Get("domain").(string))
-		} else {
-			d.Set("hostname", fmt.Sprintf("%s.%s", record.Name, d.Get("domain").(string)))
-		}
-		break
+	if record.Name == "" {
+		d.Set("hostname", d.Get("domain").(string))
+	} else {
+		d.Set("hostname", fmt.Sprintf("%s.%s", record.Name, d.Get("domain").(string)))
 	}
 
 	return nil
@@ -220,28 +203,7 @@ func resourceNameCheapRecordDelete(d *schema.ResourceData, meta interface{}) err
 		return fmt.Errorf("Failed to parse id: %s", err)
 	}
 
-	apiThrottleBackoffTime := 2
-
-	for {
-		err = client.DeleteRecord(domain, hashId)
-		if err != nil {
-			log.Printf("[TRACE] Err: %v", err.Error())
-
-			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
-				log.Printf("[WARN] Bad Namecheap API response received, backing off for %d seconds...",
-					apiThrottleBackoffTime)
-				time.Sleep(time.Duration(apiThrottleBackoffTime) * time.Second)
-				apiThrottleBackoffTime = apiThrottleBackoffTime * ncBackoffMultiplier
-				if apiThrottleBackoffTime > ncMaxThrottleRetry {
-					log.Printf("[ERROR] API Retry Limit Reached. Bailing: %v", err)
-					break
-				}
-				continue
-			}
-			return fmt.Errorf("Failed to delete namecheap record: %s", err)
-		}
-		break
-	}
-
-	return nil
+	return retryApiCall(func() error {
+		return client.DeleteRecord(domain, hashId)
+	})
 }
