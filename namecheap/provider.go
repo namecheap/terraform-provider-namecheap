@@ -1,6 +1,11 @@
 package namecheap
 
 import (
+	"fmt"
+	"log"
+	"strings"
+	"time"
+
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/hashicorp/terraform/terraform"
 )
@@ -65,4 +70,28 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	}
 
 	return config.Client()
+}
+
+func retryApiCall(f func() error) error {
+	apiThrottleBackoffTime := 2
+	for {
+		if err := f(); err != nil {
+			log.Printf("[INFO] Err: %v", err.Error())
+			if strings.Contains(err.Error(), "expected element type <ApiResponse> but have <html>") {
+				log.Printf("[WARN] Bad Namecheap API response received, backing off for %d seconds...", apiThrottleBackoffTime)
+
+				time.Sleep(time.Duration(apiThrottleBackoffTime) * time.Second)
+
+				apiThrottleBackoffTime = apiThrottleBackoffTime * ncBackoffMultiplier
+
+				if apiThrottleBackoffTime > ncMaxThrottleRetry {
+					log.Printf("[ERROR] API Retry Limit Reached. Couldn't find namecheap record: %v", err)
+					break
+				}
+				continue // retry
+			}
+			return fmt.Errorf("Failed to create namecheap Record: %s", err)
+		}
+	}
+	return nil
 }
