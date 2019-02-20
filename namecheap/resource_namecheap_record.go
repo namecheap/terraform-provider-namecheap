@@ -17,6 +17,8 @@ var mutex = &sync.Mutex{}
 const ncDefaultTTL int = 1799
 const ncDefaultMXPref int = 10
 const ncDefaultTimeout time.Duration = 30
+const ncMaxThrottleRetry int = 60
+const ncBackoffMultiplier int = 2
 
 func resourceNameCheapRecord() *schema.Resource {
 	return &schema.Resource{
@@ -79,12 +81,14 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	_, err := client.AddRecord(d.Get("domain").(string), &record)
-
+	err := retryApiCall(func() error {
+		_, err := client.AddRecord(d.Get("domain").(string), &record)
+		return err
+	})
 	if err != nil {
-		mutex.Unlock()
-		return fmt.Errorf("Failed to create namecheap Record: %s", err)
+		return err
 	}
+
 	hashId := client.CreateHash(&record)
 	d.SetId(strconv.Itoa(hashId))
 
@@ -109,11 +113,14 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 		MXPref:     d.Get("mx_pref").(int),
 		TTL:        d.Get("ttl").(int),
 	}
-	err = client.UpdateRecord(domain, hashId, &record)
+
+	err = retryApiCall(func() error {
+		return client.UpdateRecord(domain, hashId, &record)
+	})
 	if err != nil {
-		mutex.Unlock()
-		return fmt.Errorf("Failed to update namecheap record: %s", err)
+		return err
 	}
+
 	newHashId := client.CreateHash(&record)
 	d.SetId(strconv.Itoa(newHashId))
 
@@ -132,10 +139,18 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		return fmt.Errorf("Failed to parse id: %s", err)
 	}
 
-	record, err := client.ReadRecord(domain, hashId)
+	var record *namecheap.Record
+	err = retryApiCall(func() error {
+		rec, err := client.ReadRecord(domain, hashId)
+		if err == nil {
+			record = rec
+		}
+		return err
+	})
 	if err != nil {
-		return fmt.Errorf("Couldn't find namecheap record: %s", err)
+		return err
 	}
+
 	d.Set("name", record.Name)
 	d.Set("type", record.RecordType)
 	d.Set("address", record.Address)
@@ -147,6 +162,7 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 	} else {
 		d.Set("hostname", fmt.Sprintf("%s.%s", record.Name, d.Get("domain").(string)))
 	}
+
 	return nil
 }
 
@@ -160,10 +176,8 @@ func resourceNameCheapRecordDelete(d *schema.ResourceData, meta interface{}) err
 	if err != nil {
 		return fmt.Errorf("Failed to parse id: %s", err)
 	}
-	err = client.DeleteRecord(domain, hashId)
 
-	if err != nil {
-		return fmt.Errorf("Failed to delete namecheap record: %s", err)
-	}
-	return nil
+	return retryApiCall(func() error {
+		return client.DeleteRecord(domain, hashId)
+	})
 }
