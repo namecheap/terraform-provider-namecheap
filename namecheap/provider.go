@@ -91,6 +91,8 @@ func retryApiCall(f func() error) error {
 				continue // retry
 			}
 			return fmt.Errorf("Failed to create namecheap Record: %s", err)
+		} else {
+			return nil
 		}
 	}
 	return nil
