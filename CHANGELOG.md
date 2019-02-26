@@ -1,4 +1,8 @@
-## Unreleased
+## 1.2.0 (Feb 26th 2019)
+
+IMPROVEMENTS
+
+- Added backoff and retry for namecheap API errors.
 
 ## 1.1.1 (December 4th 2018)
 
