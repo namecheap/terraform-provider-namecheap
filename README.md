@@ -27,7 +27,7 @@ Note the command below will install the Linux binary, please check [releases](ht
 # Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
 
 $ mkdir -p ~/.terraform.d/plugins/
-$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/v1.2.0/terraform-provider-namecheap-linux-amd64
+$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.2.0/terraform-provider-namecheap-linux-amd64
 ```
 
 Then inside a Terraform file within your project (Ex. `providers.tf`):
