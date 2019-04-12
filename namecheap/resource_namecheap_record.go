@@ -13,13 +13,6 @@ import (
 // We need a mutex here because of the underlying api
 var mutex = &sync.Mutex{}
 
-// This is the "Auto" TTL setting in Namecheap
-const ncDefaultTTL int = 1799
-const ncDefaultMXPref int = 10
-const ncDefaultTimeout time.Duration = 30
-const ncMaxThrottleRetry int = 60
-const ncBackoffMultiplier int = 2
-
 func resourceNameCheapRecord() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceNameCheapRecordCreate,
