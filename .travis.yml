@@ -3,6 +3,11 @@ language: go
 go:
   - 1.11.x
   - 1.12.x
+
+env:
+  matrix:
+    - GO111MODULE=on
+
 script:
 - make test
 
