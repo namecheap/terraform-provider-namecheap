@@ -22,12 +22,22 @@ First you'll need to manually install this Terraform Provider for now until we g
 
 Note the command below will install the Linux binary, please check [releases](https://github.com/adamdecaf/terraform-provider-namecheap/releases) page for Windows and Mac builds.
 
+## Linux
+
 ```bash
 # Download provider
 # Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
 
 $ mkdir -p ~/.terraform.d/plugins/
 $ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.2.0/terraform-provider-namecheap-linux-amd64
+```
+
+## Mac
+
+```bash
+$ mkdir -p ~/.terraform.d/plugins/
+$ curl https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.2.0/terraform-provider-namecheap-osx-amd64 > ~/.terraform.d/plugins/terraform-provider-namecheap
+$ chmox +x ~/.terraform.d/plugins/terraform-provider-namecheap
 ```
 
 Then inside a Terraform file within your project (Ex. `providers.tf`):
