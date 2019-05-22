@@ -1,3 +1,19 @@
+## 1.3.0 (May 22nd 2019)
+
+UPGRADES
+
+- Upgraded Terraform to `v0.12.0`
+   - Please [read the release notes](https://github.com/hashicorp/terraform/releases/tag/v0.12.0) and [Terraform upgrade guide](https://www.terraform.io/upgrade-guides/0-12.html)
+- Updated various dependencies and the adamdecaf/namecheap library
+
+IMPROVEMENTS
+
+- namecheap: lower max retry attemts and time.Sleep period
+
+BUILD
+
+- build: remove vendor/ directory
+
 ## 1.2.0 (Feb 26th 2019)
 
 IMPROVEMENTS

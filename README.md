@@ -22,6 +22,11 @@ First you'll need to manually install this Terraform Provider for now until we g
 
 Note the command below will install the Linux binary, please check [releases](https://github.com/adamdecaf/terraform-provider-namecheap/releases) page for Windows and Mac builds.
 
+| Terraform Version | terraform-provider-namecheap Version |
+|----|----|
+| 0.11 | [1.2.0](https://github.com/adamdecaf/terraform-provider-namecheap/releases/tag/1.2.0) |
+| 0.12 | [1.3.0](https://github.com/adamdecaf/terraform-provider-namecheap/releases/tag/1.3.0) |
+
 ## Linux
 
 ```bash
