@@ -147,6 +147,8 @@ github.com/hashicorp/go-cleanhttp v0.5.0 h1:wvCrVc9TjDls6+YGAF2hAifE1E5U1+b4tH6K
 github.com/hashicorp/go-cleanhttp v0.5.0/go.mod h1:JpRdi6/HCYpAwUzNwuwqhbovhLtngrth3wmdIIUrZ80=
 github.com/hashicorp/go-getter v1.1.0 h1:iGVeg7L4V5FTFV3D6w+1NAyvth7BIWWSzD60pWloe2Q=
 github.com/hashicorp/go-getter v1.1.0/go.mod h1:q+PoBhh16brIKwJS9kt18jEtXHTg2EGkmrA9P7HVS+U=
+github.com/hashicorp/go-getter v1.3.0 h1:pFMSFlI9l5NaeuzkpE3L7BYk9qQ9juTAgXW/H0cqxcU=
+github.com/hashicorp/go-getter v1.3.0/go.mod h1:/O1k/AizTN0QmfEKknCYGvICeyKUDqCYA8vvWtGWDeQ=
 github.com/hashicorp/go-hclog v0.0.0-20180709165350-ff2cf002a8dd/go.mod h1:9bjs9uLqI8l75knNv3lV1kA55veR+WUPSiKIWcQHudI=
 github.com/hashicorp/go-hclog v0.0.0-20181001195459-61d530d6c27f/go.mod h1:5CU+agLiy3J7N7QjHK5d05KxGsuXiQLrjA0H7acj2lQ=
 github.com/hashicorp/go-hclog v0.7.0 h1:TwD6x3r9IdHnoVSBmfvEgKKLRu08augeYi8fwWcbmiE=
@@ -189,6 +191,8 @@ github.com/hashicorp/hcl2 v0.0.0-20190416162332-2c5a4b7d729a h1:doKt9ZBCYgYQrGK6
 github.com/hashicorp/hcl2 v0.0.0-20190416162332-2c5a4b7d729a/go.mod h1:HtEzazM5AZ9fviNEof8QZB4T1Vz9UhHrGhnMPzl//Ek=
 github.com/hashicorp/hcl2 v0.0.0-20190503210054-6e4ec17113ca h1:roLn75Q2QkZE1V3kitKaOazz0INIj53v4OlH4kJzWbA=
 github.com/hashicorp/hcl2 v0.0.0-20190503210054-6e4ec17113ca/go.mod h1:4oI94iqF3GB10QScn46WqbG0kgTUpha97SAzzg2+2ec=
+github.com/hashicorp/hcl2 v0.0.0-20190515223218-4b22149b7cef h1:xZRvbcwHY8zhaxDwgkmpAp2emwZkVn7p3gat0zhq2X0=
+github.com/hashicorp/hcl2 v0.0.0-20190515223218-4b22149b7cef/go.mod h1:4oI94iqF3GB10QScn46WqbG0kgTUpha97SAzzg2+2ec=
 github.com/hashicorp/hil v0.0.0-20190212112733-ab17b08d6590/go.mod h1:n2TSygSNwsLJ76m8qFXTSc7beTb+auJxYdqrnoqwZWE=
 github.com/hashicorp/hil v0.0.0-20190212132231-97b3a9cdfa93 h1:T1Q6ag9tCwun16AW+XK3tAql24P4uTGUMIn1/92WsQQ=
 github.com/hashicorp/hil v0.0.0-20190212132231-97b3a9cdfa93/go.mod h1:n2TSygSNwsLJ76m8qFXTSc7beTb+auJxYdqrnoqwZWE=
@@ -202,6 +206,8 @@ github.com/hashicorp/terraform v0.12.0-beta2 h1:3kHXjX/GgmH3dSvVN2MX5arBfYaykSZ4
 github.com/hashicorp/terraform v0.12.0-beta2/go.mod h1:A3NsI7WT87OMgpcD15cu6dK2YNpihchZp5fxUf8EHBg=
 github.com/hashicorp/terraform v0.12.0-rc1 h1:sTOrvFeoklMBsEHNhu25APyMyATTOeUUiuXm+PpLjDg=
 github.com/hashicorp/terraform v0.12.0-rc1/go.mod h1:mLbSyFcATc332aCwDeX9cziNg/dUb6ZJzRVd1KgrDOk=
+github.com/hashicorp/terraform v0.12.0 h1:It2vmod2dBMB4+r+aUW2Afx0HlftyUwzNsNH3I2vrJ8=
+github.com/hashicorp/terraform v0.12.0/go.mod h1:Ke0ig9gGZ8rhV6OddAhBYt5nXmpvXsuNQQ8w9qYBZfU=
 github.com/hashicorp/terraform-config-inspect v0.0.0-20190327195015-8022a2663a70 h1:oZm5nE11yhzsTRz/YrUyDMSvixePqjoZihwn8ipuOYI=
 github.com/hashicorp/terraform-config-inspect v0.0.0-20190327195015-8022a2663a70/go.mod h1:ItvqtvbC3K23FFET62ZwnkwtpbKZm8t8eMcWjmVVjD8=
 github.com/hashicorp/vault v0.10.4/go.mod h1:KfSyffbKxoVyspOdlaGVjIuwLobi07qD1bAbosPMpP0=
@@ -379,6 +385,8 @@ github.com/zclconf/go-cty v0.0.0-20190320224746-fd76348b9329/go.mod h1:xnAOWiHeO
 github.com/zclconf/go-cty v0.0.0-20190426224007-b18a157db9e2/go.mod h1:xnAOWiHeOqg2nWS62VtQ7pbOu17FtxJNW8RLEih+O3s=
 github.com/zclconf/go-cty v0.0.0-20190430221426-d36a6f0dbffd h1:NZOOU7h+pDtcKo6xlqm8PwnarS8nJ+6+I83jT8ZfLPI=
 github.com/zclconf/go-cty v0.0.0-20190430221426-d36a6f0dbffd/go.mod h1:xnAOWiHeOqg2nWS62VtQ7pbOu17FtxJNW8RLEih+O3s=
+github.com/zclconf/go-cty v0.0.0-20190516203816-4fecf87372ec h1:MSeYjmyjucsFbecMTxg63ASg23lcSARP/kr9sClTFfk=
+github.com/zclconf/go-cty v0.0.0-20190516203816-4fecf87372ec/go.mod h1:xnAOWiHeOqg2nWS62VtQ7pbOu17FtxJNW8RLEih+O3s=
 go.opencensus.io v0.18.0 h1:Mk5rgZcggtbvtAun5aJzAtjKKN/t0R3jJPlWILlv938=
 go.opencensus.io v0.18.0/go.mod h1:vKdFvxhtzZ9onBp9VKHK8z/sRpBMnKAsufL7wlDrCOA=
 go.uber.org/atomic v1.3.2/go.mod h1:gD2HeocX3+yG+ygLZcrzQJaqmWj9AIm7n08wl/qW/PE=
@@ -440,6 +448,7 @@ golang.org/x/sys v0.0.0-20190222072716-a9d3bda3a223/go.mod h1:STP8DvDyc/dI5b8T5h
 golang.org/x/sys v0.0.0-20190225065934-cc5685c2db12 h1:Zw7eRv6INHGfu15LVRN1vrrwusJbnfJjAZn3D1VkQIE=
 golang.org/x/sys v0.0.0-20190225065934-cc5685c2db12/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.0.0-20190412213103-97732733099d/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20190502175342-a43fa875dd82 h1:vsphBvatvfbhlb4PO1BYSr9dzugGxJ/SQHoNufZJq1w=
 golang.org/x/sys v0.0.0-20190502175342-a43fa875dd82/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
 golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
