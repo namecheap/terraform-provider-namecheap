@@ -1,3 +1,10 @@
+## 1.4.0 (Unreleased)
+
+ADDITIONS
+
+- Support `terraform import` for `namecheap_record`
+   - Example: `terraform import namecheap_record.foo 'foo.domain.tld/A/127.0.0.1'`
+
 ## 1.3.0 (May 22nd 2019)
 
 UPGRADES

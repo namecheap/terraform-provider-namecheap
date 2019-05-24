@@ -1,4 +1,4 @@
-VERSION="1.3.0"
+VERSION="1.4.0-rc1"
 TEST?=$$(go list ./... |grep -v 'vendor')
 GOFMT_FILES?=$$(find . -name '*.go' |grep -v vendor)
 
