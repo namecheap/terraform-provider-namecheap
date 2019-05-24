@@ -3,6 +3,7 @@ package namecheap
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,10 @@ func resourceNameCheapRecord() *schema.Resource {
 		Update: resourceNameCheapRecordUpdate,
 		Read:   resourceNameCheapRecordRead,
 		Delete: resourceNameCheapRecordDelete,
+
+		Importer: &schema.ResourceImporter{
+			State: schema.ImportStatePassthrough,
+		},
 
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(ncDefaultTimeout * time.Second),
@@ -97,7 +102,7 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 	hashId, err := strconv.Atoi(d.Id())
 	if err != nil {
 		mutex.Unlock()
-		return fmt.Errorf("Failed to parse id: %s", err)
+		return fmt.Errorf("Failed to parse id=%q: %s", d.Id(), err)
 	}
 	record := namecheap.Record{
 		Name:       d.Get("name").(string),
@@ -125,15 +130,50 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	var record *namecheap.Record
+
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
 	hashId, err := strconv.Atoi(d.Id())
 	if err != nil {
-		return fmt.Errorf("Failed to parse id: %s", err)
+		// Attempt to import, assume d.Id is in the following formats:
+		// - '@.domain.tld/A/127.0.0.1'
+		// - 'test.domain.tld/A/127.0.0.1'
+		parts := strings.Split(d.Id(), "/")
+		if len(parts) != 3 {
+			return fmt.Errorf("read: failed to parse %q as import ID", d.Id())
+		}
+		domainParts := strings.Split(parts[0], ".")
+		if len(domainParts) < 2 {
+			return fmt.Errorf("read: invalid domain %q to import", parts[0])
+		}
+
+		// Get 'domain.tld' hosts
+		records, err := client.GetHosts(domainParts[len(domainParts)-2] + "." + domainParts[len(domainParts)-1])
+		if err != nil {
+			return fmt.Errorf("read: failed to GetHosts domain=%q: %s", parts[0], err)
+		}
+		hash := client.CreateHash(&namecheap.Record{
+			Name:       domainParts[0], // '@' or 'tld'
+			RecordType: parts[1],
+			Address:    parts[2],
+		})
+		if rec, err := client.FindRecordByHash(hash, records); err != nil {
+			return fmt.Errorf("read: problem finding record for %s/%s/%s: %v", parts[0], parts[1], parts[2], err)
+		} else {
+			// Mutate global state and set 'id' to our computed hash
+			record = rec
+			d.SetId(fmt.Sprintf("%d", hash))
+			d.Set("domain", domainParts[len(domainParts)-2]+"."+domainParts[len(domainParts)-1])
+			d.Set("hostname", parts[0])
+		}
 	}
 
-	var record *namecheap.Record
 	err = retryApiCall(func() error {
+		if record != nil {
+			return nil // already found via 'terraform import'
+		}
+
 		rec, err := client.ReadRecord(domain, hashId)
 		if err == nil {
 			record = rec
@@ -167,7 +207,7 @@ func resourceNameCheapRecordDelete(d *schema.ResourceData, meta interface{}) err
 	domain := d.Get("domain").(string)
 	hashId, err := strconv.Atoi(d.Id())
 	if err != nil {
-		return fmt.Errorf("Failed to parse id: %s", err)
+		return fmt.Errorf("Failed to parse id=%q: %s", d.Id(), err)
 	}
 
 	return retryApiCall(func() error {
