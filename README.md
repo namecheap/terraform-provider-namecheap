@@ -34,23 +34,23 @@ Note the command below will install the Linux binary, please check [releases](ht
 # Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
 
 $ mkdir -p ~/.terraform.d/plugins/
-$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.2.0/terraform-provider-namecheap-linux-amd64
+$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.3.0/terraform-provider-namecheap-linux-amd64
 ```
 
 ## Mac
 
 ```bash
 $ mkdir -p ~/.terraform.d/plugins/
-$ curl https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.2.0/terraform-provider-namecheap-osx-amd64 > ~/.terraform.d/plugins/terraform-provider-namecheap
+$ curl -L https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.3.0/terraform-provider-namecheap-osx-amd64 > ~/.terraform.d/plugins/terraform-provider-namecheap
 $ chmod +x ~/.terraform.d/plugins/terraform-provider-namecheap
 ```
 
 Then inside a Terraform file within your project (Ex. `providers.tf`):
 
 ```hcl
-# For example, restrict namecheap version to 1.2.0
+# For example, restrict namecheap version to 1.3.0
 provider "namecheap" {
-  version = "~> 1.2"
+  version = "~> 1.3"
 }
 
 # Create a DNS A Record for a domain you own
