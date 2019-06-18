@@ -158,7 +158,7 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 			RecordType: parts[1],
 			Address:    parts[2],
 		})
-		if rec, err := client.FindRecordByHash(hash, records); err != nil {
+		if rec, err := client.FindRecordByHash(hash, records); err != nil || rec == nil {
 			return fmt.Errorf("read: problem finding record for %s/%s/%s: %v", parts[0], parts[1], parts[2], err)
 		} else {
 			// Mutate global state and set 'id' to our computed hash
@@ -175,13 +175,16 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		}
 
 		rec, err := client.ReadRecord(domain, hashId)
-		if err == nil {
+		if err == nil && rec != nil {
 			record = rec
 		}
 		return err
 	})
 	if err != nil {
 		return err
+	}
+	if record == nil {
+		return fmt.Errorf("Unable to find domain %s", d.Id())
 	}
 
 	d.Set("name", record.Name)
