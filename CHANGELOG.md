@@ -1,4 +1,4 @@
-## 1.4.0 (Unreleased)
+## 1.4.0 (August 7th 2019)
 
 ADDITIONS
 
