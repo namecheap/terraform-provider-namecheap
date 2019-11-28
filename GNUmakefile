@@ -44,16 +44,9 @@ test-compile:
 	fi
 	go test -c $(TEST) $(TESTARGS)
 
-mkrel:
-	gothub release -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name $(VERSION) --pre-release
-
-upload:
+dist:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/terraform-provider-namecheap-linux-amd64 github.com/adamdecaf/terraform-provider-namecheap
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/terraform-provider-namecheap-osx-amd64 github.com/adamdecaf/terraform-provider-namecheap
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/terraform-provider-namecheap.exe github.com/adamdecaf/terraform-provider-namecheap
-	gothub upload -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name "terraform-provider-namecheap-linux" --file bin/terraform-provider-namecheap-linux-amd64
-	gothub upload -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name "terraform-provider-namecheap-osx" --file bin/terraform-provider-namecheap-osx-amd64
-	gothub upload -u adamdecaf -r terraform-provider-namecheap -t $(VERSION) --name "terraform-provider-namecheap.exe" --file bin/terraform-provider-namecheap.exe
 
-
-.PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile mkrel upload
+.PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile
