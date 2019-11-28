@@ -45,7 +45,7 @@ Then inside a Terraform file within your project (Ex. `providers.tf`):
 ```hcl
 # For example, restrict namecheap version to 1.5.0
 provider "namecheap" {
-  version = "~> 1.3"
+  version = "~> 1.5"
 }
 
 # Create a DNS A Record for a domain you own
@@ -120,7 +120,7 @@ provider "namecheap" {
 Developing the Provider
 ---------------------------
 
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (version 1.11+ is *required*). You'll also need to correctly setup a [GOPATH](http://golang.org/doc/code.html#GOPATH), as well as adding `$GOPATH/bin` to your `$PATH`.
+If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (version 1.13+ is recommended). You'll also need to correctly setup a [GOPATH](http://golang.org/doc/code.html#GOPATH), as well as adding `$GOPATH/bin` to your `$PATH`.
 
 This project uses [Go Modules](https://github.com/golang/go/wiki/Modules), added in Go 1.11.
 
