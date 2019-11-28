@@ -18,3 +18,15 @@ branches:
 
 matrix:
   fast_finish: true
+
+deploy:
+  provider: releases
+  api_key:
+    secure: JcMYqOIrDWTgwSVfLPOOBa38ZTl+bDfhvunXsZz1oFtNfGk9Aqn/1Wu3CW6y9LCFVlVd/ZgTTwV6thQ6BPrtrkGkAHELMLrsOjJbrKyu9FK/i4w7TU5b8cXp8j8Z8Z8SN/1yYAW1LxfI2ZMi38PbYsVJvQy9unZM3Cv4/WhM48N0Tsa2lpLzIVoW2/MCwGMM8qm58jMKwUy2eceFstevoe2lIBbo3hDb7SHgq6fDhuG5Usa4LA9zhViXxjX+1z4LJd1U/yd0hxfDKh/+OXJofjPfIbE3jFpSev2NsdYaTndmyCWOJSqvxSe9AY1nn51u2rXAF6s57Hn3bn40NPDOn6eneqxAEMov6ABW4+EcVNx76NRcRDs1Co13uQdc54dA9jXRl8S12ZgVbmwZRi9DKnBuOB8E675XqJs8EO++9BEJbpv5Jg+4zeuj8xCw8BzCGp01lYTey2jHohBalj1OkHC7WFgnONa2krtGKhIEM0KNf5yQXUVgwapEraW11fisdtuZEUUowEt6peCqXKajE7peGWiJf7e+8M4xiFox8DqCjmZwm70dhly0uBE2K1hPKDlaJOZHtiqBeL19lOiwKNNs4LOvJiQswZJIqgTfE4vh0NNo4M8FDPpLksKEz2sYF8RAUnejib6LHPHFgbe1m0Qje19jlxhjL/2GrAmtHYU=
+  file_glob: true
+  file: bin/terraform-provider-namecheap*
+  on:
+    repo: adamdecaf/terraform-provider-namecheap
+    tags: true
+    go: 1.13.x
+  skip_cleanup: true
