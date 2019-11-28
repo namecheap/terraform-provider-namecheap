@@ -1,3 +1,14 @@
+## 1.5.0 (November 28 2019)
+
+ADDITIONS
+
+- add support for ALIAS and CAA resource records
+
+IMPROVEMENTS
+
+- namecheap: upgrade terraform to terraform-plugin-sdk v1.3.0
+- build: compile with Go 1.12 and 1.13, modernize dist step
+
 ## 1.4.0 (August 7th 2019)
 
 ADDITIONS

@@ -12,12 +12,11 @@ env:
 script:
   - make test
 
-branches:
-  only:
-    - master
-
 matrix:
   fast_finish: true
+
+before_deploy:
+  - make dist
 
 deploy:
   provider: releases
@@ -30,3 +29,6 @@ deploy:
     tags: true
     go: 1.13.x
   skip_cleanup: true
+
+after_deploy:
+  - make release-push
