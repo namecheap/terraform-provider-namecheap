@@ -37,7 +37,7 @@ $ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap https://github.com
 ```bash
 $ mkdir -p ~/.terraform.d/plugins/
 $ curl -L https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.5.0/terraform-provider-namecheap-osx-amd64 > ~/.terraform.d/plugins/terraform-provider-namecheap
-$ chmod +x ~/.terraform.d/plugins/terraform-provider-namecheap
+$ chmod +x ~/.terraform.d/plugins/terraform-provider-namecheap_v1.5.0
 ```
 
 Then inside a Terraform file within your project (Ex. `providers.tf`):
@@ -148,3 +148,43 @@ $ make testacc
 ```
 
 Another good way to test builds is to symlink the binary `terraform-provider-namecheap` that you are building into the `~/.terraform.d/plugins/` directory.
+
+
+Troubleshooting the Provider
+---------------------------
+
+Problem: `Error: Failed to create namecheap Record: Could not find the record with hash`
+Solution: Double check your IP did not change and make sure it is whitelisted with Namecheaps API. Also ensure the domain names you have in your terraform config are still associated with your account (in cases like where you let one expire). In these rare edge-cases, you may have to delete the object with the bad domain name manually from your terraform.tfstate file but be very careful! Backup your state file before doing tring to remove it manually. You'll want to remove the whole json object which would consist of something like this:
+
+```
+    {
+      "mode": "managed",
+      "type": "namecheap_record",
+      "name": "yourbaddomain-com",
+      "provider": "provider.namecheap",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "address": "127.202.111.111",
+            "domain": "yourbaddomain.com",
+            "hostname": "@.yourbaddomain.com",
+            "id": "2759530601",
+            "mx_pref": 10,
+            "name": "@",
+            "timeouts": {
+              "create": null,
+              "delete": null,
+              "read": null,
+              "update": null
+            },
+            "ttl": 1799,
+            "type": "A"
+          },
+          "depends_on": [
+            "module.somethingusingitmaybe"
+          ]
+        }
+      ]
+    },
+```
