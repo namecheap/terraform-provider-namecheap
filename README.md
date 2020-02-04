@@ -154,37 +154,4 @@ Troubleshooting the Provider
 ---------------------------
 
 Problem: `Error: Failed to create namecheap Record: Could not find the record with hash`
-Solution: Double check your IP did not change and make sure it is whitelisted with Namecheaps API. Also ensure the domain names you have in your terraform config are still associated with your account (in cases like where you let one expire). In these rare edge-cases, you may have to delete the object with the bad domain name manually from your terraform.tfstate file but be very careful! Backup your state file before doing tring to remove it manually. You'll want to remove the whole json object which would consist of something like this:
-
-```
-    {
-      "mode": "managed",
-      "type": "namecheap_record",
-      "name": "yourbaddomain-com",
-      "provider": "provider.namecheap",
-      "instances": [
-        {
-          "schema_version": 0,
-          "attributes": {
-            "address": "127.202.111.111",
-            "domain": "yourbaddomain.com",
-            "hostname": "@.yourbaddomain.com",
-            "id": "2759530601",
-            "mx_pref": 10,
-            "name": "@",
-            "timeouts": {
-              "create": null,
-              "delete": null,
-              "read": null,
-              "update": null
-            },
-            "ttl": 1799,
-            "type": "A"
-          },
-          "depends_on": [
-            "module.somethingusingitmaybe"
-          ]
-        }
-      ]
-    },
-```
+Solution: Double check your IP did not change and make sure it is whitelisted with Namecheaps API. Also ensure the domain names you have in your terraform config are still associated with your account (in cases like where you let one expire). In these rare edge-cases, you may have to delete the bad domain records by running `terraform state rm namecheap_record.the_tf_name_of_your_record`.
