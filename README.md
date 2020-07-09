@@ -148,3 +148,10 @@ $ make testacc
 ```
 
 Another good way to test builds is to symlink the binary `terraform-provider-namecheap` that you are building into the `~/.terraform.d/plugins/` directory.
+
+
+Troubleshooting the Provider
+---------------------------
+
+Problem: `Error: Failed to create namecheap Record: Could not find the record with hash`
+Solution: Double check your IP did not change and make sure it is whitelisted with Namecheaps API. Also ensure the domain names you have in your terraform config are still associated with your account (in cases like where you let one expire). In these rare edge-cases, you may have to delete the bad domain records by running `terraform state rm namecheap_record.the_tf_name_of_your_record`.
