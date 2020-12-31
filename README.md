@@ -40,6 +40,11 @@ $ curl -L https://github.com/adamdecaf/terraform-provider-namecheap/releases/dow
 $ chmod +x ~/.terraform.d/plugins/terraform-provider-namecheap
 ```
 
+## Windows
+```powershell
+Invoke-WebRequest -Uri https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.5.0/terraform-provider-namecheap.exe -OutFile ( New-Item -Path $env:APPDATA\terraform.d\plugins\registry.terraform.io\hashicorp\namecheap\1.5.0\windows_amd64\terraform-provider-namecheap_v1.5.0.exe -Force )
+```
+
 Then inside a Terraform file within your project (Ex. `providers.tf`):
 
 ```hcl
