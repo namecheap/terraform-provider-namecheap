@@ -18,34 +18,29 @@ Once you've done that, make note of the API token, your IP address, and your use
 Usage
 ---------------------
 
-First you'll need to manually install this Terraform Provider for now until we get this into the official providers.
-
-Note the command below will install the Linux binary, please check [releases](https://github.com/adamdecaf/terraform-provider-namecheap/releases) page for Windows and Mac builds.
-
-## Linux
-
-```bash
-# Download provider
-# Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
-
-$ mkdir -p ~/.terraform.d/plugins/
-$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap_v1.5.0 https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.5.0/terraform-provider-namecheap-linux-amd64
-```
-
-## Mac
-
-```bash
-$ mkdir -p ~/.terraform.d/plugins/
-$ curl -L https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.5.0/terraform-provider-namecheap-osx-amd64 > ~/.terraform.d/plugins/terraform-provider-namecheap
-$ chmod +x ~/.terraform.d/plugins/terraform-provider-namecheap
-```
-
 Then inside a Terraform file within your project (Ex. `providers.tf`):
 
+Using the provider
+----------------------
+
+Make sure your API details are correct in the provider block.
+
 ```hcl
-# For example, restrict namecheap version to 1.5.0
+terraform {
+  required_providers {
+    namecheap = {
+      source  = "robgmills/namecheap"
+      version = "1.5.1"
+    }
+  }
+}
+
 provider "namecheap" {
-  version = "~> 1.5"
+  username = "your_username" # Also set by env variable `NAMECHEAP_USERNAME`
+  api_user = "your_username" # Same as username; also set by env variable `NAMECHEAP_API_USER`
+  token = "your_token" # Also set by env variable `NAMECHEAP_TOKEN`
+  ip = "your.ip.address.here" # Also set by env variable `NAMECHEAP_IP`
+  use_sandbox = false # Toggle for testing/sandbox mode # Also set by env variable `NAMECHEAP_USE_SANDBOX`
 }
 
 # Create a DNS A Record for a domain you own
@@ -100,21 +95,6 @@ Enter the provider directory and build the provider
 ```bash
 $ cd $GOPATH/src/github.com/adamdecaf/terraform-provider-namecheap
 $ make build
-```
-
-Using the provider
-----------------------
-
-Make sure your API details are correct in the provider block.
-
-```hcl
-provider "namecheap" {
-  username = "your_username"
-  api_user = "your_username" # Same as username
-  token = "your_token"
-  ip = "your.ip.address.here"
-  use_sandbox = false # Toggle for testing/sandbox mode
-}
 ```
 
 Developing the Provider
