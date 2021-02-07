@@ -9,4 +9,4 @@ require (
 	github.com/ulikunitz/xz v0.5.6 // indirect
 )
 
-go 1.13
+go 1.15
