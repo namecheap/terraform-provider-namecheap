@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/adamdecaf/namecheap"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // We need a mutex here because of the underlying api
