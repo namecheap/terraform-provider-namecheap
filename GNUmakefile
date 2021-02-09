@@ -50,3 +50,6 @@ dist:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/terraform-provider-namecheap.exe github.com/adamdecaf/terraform-provider-namecheap
 
 .PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile
+
+lint:
+	golint -set_exit_status $(TEST)

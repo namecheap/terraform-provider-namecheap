@@ -74,11 +74,11 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	log.Printf("[ROB] NAMECHEAP_USE_SANDBOX: %s; use_sandbox: %v", os.Getenv("NAMECHEAP_USE_SANDBOX"), d.Get("use_sandbox"))
 
 	config := Config{
-		username:    d.Get("username").(string),
-		api_user:    d.Get("api_user").(string),
-		token:       d.Get("token").(string),
-		ip:          d.Get("ip").(string),
-		use_sandbox: d.Get("use_sandbox").(bool),
+		username:   d.Get("username").(string),
+		apiUser:    d.Get("api_user").(string),
+		token:      d.Get("token").(string),
+		ip:         d.Get("ip").(string),
+		useSandbox: d.Get("use_sandbox").(bool),
 	}
 
 	return config.Client()
@@ -102,9 +102,8 @@ func retryAPICall(f func() error) error {
 				continue // retry
 			}
 			return fmt.Errorf("Failed to create namecheap Record: %s", err)
-		} else {
-			return nil
 		}
+
+		return nil
 	}
-	return nil
 }
