@@ -79,7 +79,7 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	err := retryApiCall(func() error {
+	err := retryAPICall(func() error {
 		_, err := client.AddRecord(d.Get("domain").(string), &record)
 		return err
 	})
@@ -112,7 +112,7 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	err = retryApiCall(func() error {
+	err = retryAPICall(func() error {
 		return client.UpdateRecord(domain, hashId, &record)
 	})
 	if err != nil {
@@ -169,7 +169,7 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		}
 	}
 
-	err = retryApiCall(func() error {
+	err = retryAPICall(func() error {
 		if record != nil {
 			return nil // already found via 'terraform import'
 		}
@@ -210,7 +210,7 @@ func resourceNameCheapRecordDelete(d *schema.ResourceData, meta interface{}) err
 		return fmt.Errorf("Failed to parse id=%q: %s", d.Id(), err)
 	}
 
-	return retryApiCall(func() error {
+	return retryAPICall(func() error {
 		return client.DeleteRecord(domain, hashId)
 	})
 }
