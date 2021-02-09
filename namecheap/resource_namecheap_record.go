@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/adamdecaf/namecheap"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 // We need a mutex here because of the underlying api
@@ -79,7 +79,7 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	err := retryApiCall(func() error {
+	err := retryAPICall(func() error {
 		_, err := client.AddRecord(d.Get("domain").(string), &record)
 		return err
 	})
@@ -87,8 +87,8 @@ func resourceNameCheapRecordCreate(d *schema.ResourceData, meta interface{}) err
 		return err
 	}
 
-	hashId := client.CreateHash(&record)
-	d.SetId(strconv.Itoa(hashId))
+	hashID := client.CreateHash(&record)
+	d.SetId(strconv.Itoa(hashID))
 
 	mutex.Unlock()
 	return resourceNameCheapRecordRead(d, meta)
@@ -99,7 +99,7 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
-	hashId, err := strconv.Atoi(d.Id())
+	hashID, err := strconv.Atoi(d.Id())
 	if err != nil {
 		mutex.Unlock()
 		return fmt.Errorf("Failed to parse id=%q: %s", d.Id(), err)
@@ -112,15 +112,15 @@ func resourceNameCheapRecordUpdate(d *schema.ResourceData, meta interface{}) err
 		TTL:        d.Get("ttl").(int),
 	}
 
-	err = retryApiCall(func() error {
-		return client.UpdateRecord(domain, hashId, &record)
+	err = retryAPICall(func() error {
+		return client.UpdateRecord(domain, hashID, &record)
 	})
 	if err != nil {
 		return err
 	}
 
-	newHashId := client.CreateHash(&record)
-	d.SetId(strconv.Itoa(newHashId))
+	newHashID := client.CreateHash(&record)
+	d.SetId(strconv.Itoa(newHashID))
 
 	mutex.Unlock()
 	return resourceNameCheapRecordRead(d, meta)
@@ -134,7 +134,7 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
-	hashId, err := strconv.Atoi(d.Id())
+	hashID, err := strconv.Atoi(d.Id())
 	if err != nil {
 		// Attempt to import, assume d.Id is in the following formats:
 		// - '@.domain.tld/A/127.0.0.1'
@@ -158,23 +158,26 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 			RecordType: parts[1],
 			Address:    parts[2],
 		})
-		if rec, err := client.FindRecordByHash(hash, records); err != nil {
+
+		rec, err := client.FindRecordByHash(hash, records)
+
+		if err != nil {
 			return fmt.Errorf("read: problem finding record for %s/%s/%s: %v", parts[0], parts[1], parts[2], err)
-		} else {
-			// Mutate global state and set 'id' to our computed hash
-			record = rec
-			d.SetId(fmt.Sprintf("%d", hash))
-			d.Set("domain", domainParts[len(domainParts)-2]+"."+domainParts[len(domainParts)-1])
-			d.Set("hostname", parts[0])
 		}
+
+		// Mutate global state and set 'id' to our computed hash
+		record = rec
+		d.SetId(fmt.Sprintf("%d", hash))
+		d.Set("domain", domainParts[len(domainParts)-2]+"."+domainParts[len(domainParts)-1])
+		d.Set("hostname", parts[0])
 	}
 
-	err = retryApiCall(func() error {
+	err = retryAPICall(func() error {
 		if record != nil {
 			return nil // already found via 'terraform import'
 		}
 
-		rec, err := client.ReadRecord(domain, hashId)
+		rec, err := client.ReadRecord(domain, hashID)
 		if err == nil {
 			record = rec
 		}
@@ -205,12 +208,12 @@ func resourceNameCheapRecordDelete(d *schema.ResourceData, meta interface{}) err
 
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
-	hashId, err := strconv.Atoi(d.Id())
+	hashID, err := strconv.Atoi(d.Id())
 	if err != nil {
 		return fmt.Errorf("Failed to parse id=%q: %s", d.Id(), err)
 	}
 
-	return retryApiCall(func() error {
-		return client.DeleteRecord(domain, hashId)
+	return retryAPICall(func() error {
+		return client.DeleteRecord(domain, hashID)
 	})
 }

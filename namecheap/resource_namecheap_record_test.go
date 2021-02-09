@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/adamdecaf/namecheap"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccNamecheapRecord_Basic(t *testing.T) {
@@ -20,8 +20,8 @@ func TestAccNamecheapRecord_Basic(t *testing.T) {
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckNamecheapRecordDestroy,
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: fmt.Sprintf(testAccCheckNamecheapRecordConfig_basic, domain),
+			{
+				Config: fmt.Sprintf(testAccCheckNamecheapRecordConfigBasic, domain),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckNamecheapRecordExists("namecheap_record.foobar", &record),
 					testAccCheckNamecheapRecordAttributes(&record),
@@ -46,8 +46,8 @@ func TestAccNamecheapRecord_Updated(t *testing.T) {
 		Providers:    testAccProviders,
 		CheckDestroy: testAccCheckNamecheapRecordDestroy,
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: fmt.Sprintf(testAccCheckNamecheapRecordConfig_basic, domain),
+			{
+				Config: fmt.Sprintf(testAccCheckNamecheapRecordConfigBasic, domain),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckNamecheapRecordExists("namecheap_record.foobar", &record),
 					testAccCheckNamecheapRecordAttributes(&record),
@@ -59,8 +59,8 @@ func TestAccNamecheapRecord_Updated(t *testing.T) {
 						"namecheap_record.foobar", "address", "test.domain."),
 				),
 			},
-			resource.TestStep{
-				Config: fmt.Sprintf(testAccCheckNamecheapRecordConfig_new_value, domain),
+			{
+				Config: fmt.Sprintf(testAccCheckNamecheapRecordConfigNewValue, domain),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckNamecheapRecordExists("namecheap_record.foobar", &record),
 					testAccCheckNamecheapRecordAttributesUpdated(&record),
@@ -84,13 +84,13 @@ func testAccCheckNamecheapRecordDestroy(s *terraform.State) error {
 			continue
 		}
 
-		intId, err := strconv.Atoi(rs.Primary.ID)
+		intID, err := strconv.Atoi(rs.Primary.ID)
 
 		if err != nil {
 			return fmt.Errorf("Error in converting string id to int id")
 		}
 
-		_, err = client.ReadRecord(rs.Primary.Attributes["domain"], intId)
+		_, err = client.ReadRecord(rs.Primary.Attributes["domain"], intID)
 
 		if err == nil {
 			return fmt.Errorf("Record still exists")
@@ -136,13 +136,13 @@ func testAccCheckNamecheapRecordExists(n string, record *namecheap.Record) resou
 
 		client := testAccProvider.Meta().(*namecheap.Client)
 
-		intId, err := strconv.Atoi(rs.Primary.ID)
+		intID, err := strconv.Atoi(rs.Primary.ID)
 
 		if err != nil {
 			return fmt.Errorf("Error in converting string id to int id")
 		}
 
-		foundRecord, err := client.ReadRecord(rs.Primary.Attributes["domain"], intId)
+		foundRecord, err := client.ReadRecord(rs.Primary.Attributes["domain"], intID)
 
 		if err != nil {
 			return err
@@ -154,7 +154,7 @@ func testAccCheckNamecheapRecordExists(n string, record *namecheap.Record) resou
 	}
 }
 
-const testAccCheckNamecheapRecordConfig_basic = `
+const testAccCheckNamecheapRecordConfigBasic = `
 resource "namecheap_record" "foobar" {
 	domain = "%s"
 	name = "www"
@@ -162,7 +162,7 @@ resource "namecheap_record" "foobar" {
 	type = "CNAME"
 }`
 
-const testAccCheckNamecheapRecordConfig_new_value = `
+const testAccCheckNamecheapRecordConfigNewValue = `
 resource "namecheap_record" "foobar" {
 	domain = "%s"
 	name = "www"
