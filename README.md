@@ -18,34 +18,29 @@ Once you've done that, make note of the API token, your IP address, and your use
 Usage
 ---------------------
 
-First you'll need to manually install this Terraform Provider for now until we get this into the official providers.
-
-Note the command below will install the Linux binary, please check [releases](https://github.com/adamdecaf/terraform-provider-namecheap/releases) page for Windows and Mac builds.
-
-## Linux
-
-```bash
-# Download provider
-# Terraform Docs: https://www.terraform.io/docs/configuration/providers.html#third-party-plugins
-
-$ mkdir -p ~/.terraform.d/plugins/
-$ wget -O ~/.terraform.d/plugins/terraform-provider-namecheap_v1.5.0 https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.5.0/terraform-provider-namecheap-linux-amd64
-```
-
-## Mac
-
-```bash
-$ mkdir -p ~/.terraform.d/plugins/
-$ curl -L https://github.com/adamdecaf/terraform-provider-namecheap/releases/download/1.5.0/terraform-provider-namecheap-osx-amd64 > ~/.terraform.d/plugins/terraform-provider-namecheap
-$ chmod +x ~/.terraform.d/plugins/terraform-provider-namecheap
-```
-
 Then inside a Terraform file within your project (Ex. `providers.tf`):
 
+Using the provider
+----------------------
+
+Make sure your API details are correct in the provider block.
+
 ```hcl
-# For example, restrict namecheap version to 1.5.0
+terraform {
+  required_providers {
+    namecheap = {
+      source  = "robgmills/namecheap"
+      version = "1.7.0"
+    }
+  }
+}
+
 provider "namecheap" {
-  version = "~> 1.5"
+  username = "your_username" # Also set by env variable `NAMECHEAP_USERNAME`
+  api_user = "your_username" # Same as username; also set by env variable `NAMECHEAP_API_USER`
+  token = "your_token" # Also set by env variable `NAMECHEAP_TOKEN`
+  ip = "your.ip.address.here" # Also set by env variable `NAMECHEAP_IP`
+  use_sandbox = false # Toggle for testing/sandbox mode; Also set by env variable `NAMECHEAP_USE_SANDBOX`
 }
 
 # Create a DNS A Record for a domain you own
@@ -88,48 +83,24 @@ Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
 Building The Provider
 ---------------------
 
-Clone repository to: `$GOPATH/src/github.com/adamdecaf/terraform-provider-namecheap`
-
 ```bash
-$ mkdir -p $GOPATH/src/github.com/adamdecaf ; cd $GOPATH/src/github.com/adamdecaf
-$ git clone git@github.com:adamdecaf/terraform-provider-namecheap
-```
-
-Enter the provider directory and build the provider
-
-```bash
+$ go get github.com/adamdecaf/terraform-provider-namecheap
 $ cd $GOPATH/src/github.com/adamdecaf/terraform-provider-namecheap
 $ make build
-```
-
-Using the provider
-----------------------
-
-Make sure your API details are correct in the provider block.
-
-```hcl
-provider "namecheap" {
-  username = "your_username"
-  api_user = "your_username" # Same as username
-  token = "your_token"
-  ip = "your.ip.address.here"
-  use_sandbox = false # Toggle for testing/sandbox mode
-}
 ```
 
 Developing the Provider
 ---------------------------
 
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (version 1.13+ is recommended). You'll also need to correctly setup a [GOPATH](http://golang.org/doc/code.html#GOPATH), as well as adding `$GOPATH/bin` to your `$PATH`.
+If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (version 1.15+ is recommended). You'll also need to correctly setup a [GOPATH](http://golang.org/doc/code.html#GOPATH), as well as adding `$GOPATH/bin` to your `$PATH`.
 
 This project uses [Go Modules](https://github.com/golang/go/wiki/Modules), added in Go 1.11.
 
 To compile the provider, run `make build`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
 
 ```bash
-$ make bin
-...
-$ $GOPATH/bin/terraform-provider-namecheap
+$ make build
+$ ls $GOPATH/bin/terraform-provider-namecheap
 ...
 ```
 
@@ -141,14 +112,22 @@ $ make test
 
 In order to run the full suite of Acceptance tests, run `make testacc`.
 
-*Note:* Acceptance tests create real resources, and often cost money to run.
+*Note:* Acceptance tests create real resources, and often cost money to run.  They are also dependent on environment variables to configure the test instance of the provider.
 
 ```bash
 $ make testacc
 ```
 
-Another good way to test builds is to symlink the binary `terraform-provider-namecheap` that you are building into the `~/.terraform.d/plugins/` directory.
+To contribute changes, please open a PR by forking the repository, adding the fork to your local copy of the git repository, create a branch, commit your changes, and open a PR:
 
+```bash
+$ git remote add fork git@github.com/youruser/terraform-provider-namechep
+$ git checkout -b your-new-feature
+$ git add .
+$ git commit -m "Add a new feature"
+$ git push -u fork your-new-feature
+...
+```
 
 Troubleshooting the Provider
 ---------------------------

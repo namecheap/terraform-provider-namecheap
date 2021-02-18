@@ -27,6 +27,9 @@ bin/
 
 website/vendor
 
+# direnv file containing sensitive environment variables used in dev/test
+.envrc
+
 # Test exclusions
 !command/test-fixtures/**/*.tfstate
 !command/test-fixtures/**/.terraform/

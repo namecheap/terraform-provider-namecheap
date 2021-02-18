@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/adamdecaf/namecheap"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
 func resourceNameCheapNS() *schema.Resource {
@@ -39,7 +39,7 @@ func resourceNameCheapNSCreate(d *schema.ResourceData, meta interface{}) error {
 		servers = append(servers, server.(string))
 	}
 
-	err := retryApiCall(func() error {
+	err := retryAPICall(func() error {
 		_, err := client.SetNS(domain, servers)
 		return err
 	})
@@ -65,7 +65,7 @@ func resourceNameCheapNSRead(d *schema.ResourceData, meta interface{}) error {
 	domain := d.Get("domain").(string)
 
 	var servers []string
-	err := retryApiCall(func() error {
+	err := retryAPICall(func() error {
 		svcs, err := client.GetNS(domain)
 		if err != nil {
 			return err
@@ -88,7 +88,7 @@ func resourceNameCheapNSDelete(d *schema.ResourceData, meta interface{}) error {
 	client := meta.(*namecheap.Client)
 	domain := d.Get("domain").(string)
 
-	err := retryApiCall(func() error {
+	err := retryAPICall(func() error {
 		return client.ResetNS(domain)
 	})
 	if err != nil {
