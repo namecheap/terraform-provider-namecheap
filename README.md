@@ -1,5 +1,6 @@
 # Namecheap Terraform Provider
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/namecheap/terraform-provider-namecheap.svg)](https://pkg.go.dev/github.com/namecheap/terraform-provider-namecheap)
 [![Go Report Card](https://goreportcard.com/badge/github.com/namecheap/terraform-provider-namecheap)](https://goreportcard.com/report/github.com/namecheap/terraform-provider-namecheap)
 
 A Terraform Provider for Namecheap domain dns configuration.
