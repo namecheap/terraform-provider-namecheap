@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/adamdecaf/terraform-provider-namecheap/namecheap"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/plugin"
+	"github.com/namecheap/terraform-provider-namecheap/namecheap"
 )
 
 func main() {
