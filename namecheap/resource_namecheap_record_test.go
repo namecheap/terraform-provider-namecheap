@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/adamdecaf/namecheap"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
+	"github.com/namecheap/go-namecheap-sdk"
 )
 
 func TestAccNamecheapRecord_Basic(t *testing.T) {

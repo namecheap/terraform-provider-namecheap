@@ -45,9 +45,9 @@ test-compile:
 	go test -c $(TEST) $(TESTARGS)
 
 dist:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/terraform-provider-namecheap-linux-amd64 github.com/adamdecaf/terraform-provider-namecheap
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/terraform-provider-namecheap-osx-amd64 github.com/adamdecaf/terraform-provider-namecheap
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/terraform-provider-namecheap.exe github.com/adamdecaf/terraform-provider-namecheap
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/terraform-provider-namecheap-linux-amd64 github.com/namecheap/terraform-provider-namecheap
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/terraform-provider-namecheap-osx-amd64 github.com/namecheap/terraform-provider-namecheap
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/terraform-provider-namecheap.exe github.com/namecheap/terraform-provider-namecheap
 
 .PHONY: build test testacc vet fmt fmtcheck errcheck vendor-status test-compile
 

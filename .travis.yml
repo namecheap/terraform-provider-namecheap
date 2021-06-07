@@ -25,7 +25,7 @@ deploy:
   file_glob: true
   file: bin/terraform-provider-namecheap*
   on:
-    repo: adamdecaf/terraform-provider-namecheap
+    repo: namecheap/terraform-provider-namecheap
     tags: true
     go: 1.15.x
   skip_cleanup: true

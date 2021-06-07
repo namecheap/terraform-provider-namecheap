@@ -1,13 +1,11 @@
-Namecheap Terraform Provider
-==================
+# Namecheap Terraform Provider
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/adamdecaf/terraform-provider-namecheap)](https://goreportcard.com/report/github.com/adamdecaf/terraform-provider-namecheap)
-[![Support via Flattr](https://button.flattr.com/flattr-badge-large.png)](https://flattr.com/@adamdecaf)
+[![Go Reference](https://pkg.go.dev/badge/github.com/namecheap/terraform-provider-namecheap.svg)](https://pkg.go.dev/github.com/namecheap/terraform-provider-namecheap)
+[![Go Report Card](https://goreportcard.com/badge/github.com/namecheap/terraform-provider-namecheap)](https://goreportcard.com/report/github.com/namecheap/terraform-provider-namecheap)
 
 A Terraform Provider for Namecheap domain dns configuration.
 
-Prerequisites
----------------------
+## Prerequisites
 
 First you'll need to apply for API access to Namecheap. You can do that on this [API admin page](https://ap.www.namecheap.com/settings/tools/apiaccess/).
 
@@ -15,13 +13,11 @@ Next, find out your IP address and add that IP (or any other IPs accessing this 
 
 Once you've done that, make note of the API token, your IP address, and your username to fill into our `provider` block.
 
-Usage
----------------------
+# Usage
 
 Then inside a Terraform file within your project (Ex. `providers.tf`):
 
-Using the provider
-----------------------
+## Using the provider
 
 Make sure your API details are correct in the provider block.
 
@@ -84,8 +80,8 @@ Building The Provider
 ---------------------
 
 ```bash
-$ go get github.com/adamdecaf/terraform-provider-namecheap
-$ cd $GOPATH/src/github.com/adamdecaf/terraform-provider-namecheap
+$ go get github.com/namecheap/terraform-provider-namecheap
+$ cd $GOPATH/src/github.com/namecheap/terraform-provider-namecheap
 $ make build
 ```
 

@@ -3,7 +3,7 @@ package namecheap
 import (
 	"fmt"
 
-	"github.com/adamdecaf/namecheap"
+	"github.com/namecheap/go-namecheap-sdk"
 )
 
 // Config contains required namecheap client configuration settings.
