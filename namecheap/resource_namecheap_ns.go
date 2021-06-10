@@ -77,7 +77,7 @@ func resourceNameCheapNSRead(d *schema.ResourceData, meta interface{}) error {
 		d.SetId("")
 		return fmt.Errorf("Failed to read servers: %s", err)
 	}
-	d.Set("servers", servers)
+	_ = d.Set("servers", servers)
 	return nil
 }
 

@@ -168,8 +168,8 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		// Mutate global state and set 'id' to our computed hash
 		record = rec
 		d.SetId(fmt.Sprintf("%d", hash))
-		d.Set("domain", domainParts[len(domainParts)-2]+"."+domainParts[len(domainParts)-1])
-		d.Set("hostname", parts[0])
+		_ = d.Set("domain", domainParts[len(domainParts)-2]+"."+domainParts[len(domainParts)-1])
+		_ = d.Set("hostname", parts[0])
 	}
 
 	err = retryAPICall(func() error {
@@ -187,16 +187,16 @@ func resourceNameCheapRecordRead(d *schema.ResourceData, meta interface{}) error
 		return err
 	}
 
-	d.Set("name", record.Name)
-	d.Set("type", record.RecordType)
-	d.Set("address", record.Address)
-	d.Set("mx_pref", record.MXPref)
-	d.Set("ttl", record.TTL)
+	_ = d.Set("name", record.Name)
+	_ = d.Set("type", record.RecordType)
+	_ = d.Set("address", record.Address)
+	_ = d.Set("mx_pref", record.MXPref)
+	_ = d.Set("ttl", record.TTL)
 
 	if record.Name == "" {
-		d.Set("hostname", d.Get("domain").(string))
+		_ = d.Set("hostname", d.Get("domain").(string))
 	} else {
-		d.Set("hostname", fmt.Sprintf("%s.%s", record.Name, d.Get("domain").(string)))
+		_ = d.Set("hostname", fmt.Sprintf("%s.%s", record.Name, d.Get("domain").(string)))
 	}
 
 	return nil
