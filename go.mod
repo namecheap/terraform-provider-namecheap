@@ -10,4 +10,4 @@ require (
 	google.golang.org/grpc v1.32.0 // indirect
 )
 
-go 1.15
+go 1.16
