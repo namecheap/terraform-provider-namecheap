@@ -1,0 +1,8 @@
+issues:
+  exclude-rules:
+    - linters:
+        - staticcheck
+      # Ignored line namecheap/resource_namecheap_record.go:25
+      # - Deprecation warning:
+      #   State: schema.ImportStatePassthrough
+      text: "SA1019:"
