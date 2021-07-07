@@ -14,7 +14,7 @@ website/node_modules
 .vagrant/
 *.backup
 ./*.tfstate
-.terraform/
+.terraform*
 *.log
 *.bak
 *~
