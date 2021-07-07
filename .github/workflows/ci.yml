@@ -18,7 +18,7 @@ jobs:
           go-version: 1.16
 
       - name: Check
-        run: make vet
+        run: make check
 
       - name: Lint
         uses: golangci/golangci-lint-action@v2
