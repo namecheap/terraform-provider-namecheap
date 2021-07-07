@@ -14,30 +14,35 @@ func Provider() *schema.Provider {
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "A registered user name for namecheap",
+				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_USER_NAME", nil),
 			},
 
 			"api_user": {
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "A registered api user for namecheap",
+				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_API_USER", nil),
 			},
 
 			"api_key": {
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "The namecheap API key",
+				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_API_KEY", nil),
 			},
 
 			"client_ip": {
 				Type:        schema.TypeString,
 				Required:    true,
 				Description: "IP address of the machine running terraform that is whitelisted",
+				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_CLIENT_IP", nil),
 			},
 
 			"use_sandbox": {
 				Type:        schema.TypeBool,
 				Optional:    true,
 				Description: "Use sandbox API endpoints",
+				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_USE_SANDBOX", false),
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
