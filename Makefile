@@ -41,3 +41,9 @@ install_linux_amd64: build
 # https://golangci-lint.run/usage/install/#local-installation
 lint:
 	golangci-lint run
+
+# Make sure you have installed https://github.com/hashicorp/terraform-plugin-docs
+docs:
+	tfplugindocs
+
+.PHONY: format check test build release install_darwin_amd64 install_linux_amd64 lint docs
