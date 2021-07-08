@@ -60,7 +60,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 						"address": {
 							Type:        schema.TypeString,
 							Required:    true,
-							Description: "Possible values are URL or IP address. The value for this parameter is based on RecordType",
+							Description: "Possible values are URL or IP address. The value for this parameter is based on record type",
 						},
 						"mx_pref": {
 							Type:        schema.TypeInt,
@@ -72,7 +72,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 							Type:        schema.TypeInt,
 							Optional:    true,
 							Default:     1799,
-							Description: "Time to live for all record types.Possible values: any value between 60 to 60000",
+							Description: "Time to live for all record types. Possible values: any value between 60 to 60000",
 						},
 					},
 				},
