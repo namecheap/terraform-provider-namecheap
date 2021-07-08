@@ -17,13 +17,13 @@ description: |-
 
 ### Required
 
-- **domain** (String)
+- **domain** (String) Purchased available domain name on your account
 
 ### Optional
 
-- **email_type** (String)
+- **email_type** (String) Possible values: NONE, FWD, MXE, MX, OX
 - **id** (String) The ID of this resource.
-- **mode** (String)
+- **mode** (String) Possible values: MERGE (default), OVERWRITE
 - **nameservers** (List of String)
 - **record** (Block Set) (see [below for nested schema](#nestedblock--record))
 
@@ -32,13 +32,13 @@ description: |-
 
 Required:
 
-- **address** (String)
-- **hostname** (String)
-- **type** (String)
+- **address** (String) Possible values are URL or IP address. The value for this parameter is based on record type
+- **hostname** (String) Sub-domain/hostname to create the record for
+- **type** (String) Possible values: A, AAAA, ALIAS, CAA, CNAME, MX, MXE, NS, TXT, URL, URL301, FRAME
 
 Optional:
 
-- **mx_pref** (Number)
-- **ttl** (Number)
+- **mx_pref** (Number) MX preference for host. Applicable for MX records only
+- **ttl** (Number) Time to live for all record types. Possible values: any value between 60 to 60000
 
 
