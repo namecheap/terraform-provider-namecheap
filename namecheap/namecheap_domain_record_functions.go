@@ -207,7 +207,8 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 	var newDomainRecords []namecheap.DomainsDNSHostRecord
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
-		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
+		filteredRemoteRecords := filterDefaultParkingRecords(remoteRecordsResponse.DomainDNSGetHostsResult.Hosts, &domain)
+		for _, remoteRecord := range *filteredRemoteRecords {
 			domainRecord := namecheap.DomainsDNSHostRecord{
 				HostName:   remoteRecord.Name,
 				RecordType: remoteRecord.Type,
@@ -554,4 +555,19 @@ func getFixedAddressOfRecord(record *namecheap.DomainsDNSHostRecord) (*string, e
 	}
 
 	return record.Address, nil
+}
+
+// filterDefaultParkingRecords filters default parking records from records
+func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetailed, domain *string) *[]namecheap.DomainsDNSHostRecordDetailed {
+	var filteredRecords []namecheap.DomainsDNSHostRecordDetailed
+
+	for _, record := range *records {
+		if (*record.Type == "CNAME" && *record.Name == "www" && *record.Address == "parkingpage.namecheap.com.") ||
+			(*record.Type == "URL" && *record.Name == "@" && strings.HasPrefix(*record.Address, "http://www."+*domain)) {
+			continue
+		}
+		filteredRecords = append(filteredRecords, record)
+	}
+
+	return &filteredRecords
 }
