@@ -206,7 +206,8 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			}
 			_ = data.Set("nameservers", *realNameservers)
 		}
-		return nil
+
+		_ = data.Set("record", []interface{}{})
 	} else {
 		if strings.EqualFold(mode, ncModeMerge) {
 			realRecords, realEmailType, err := readRecordsMerge(domain, records, client)
@@ -230,6 +231,8 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 				_ = data.Set("email_type", *realEmailType)
 			}
 		}
+
+		_ = data.Set("nameservers", []string{})
 	}
 
 	return nil
@@ -263,11 +266,19 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		emailType = &emailTypeString
 	}
 
+	nsResponse, err := client.DomainsDNS.GetList(domain)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
 	// If the previous state contains nameservers, but the new one does not contain,
 	// then reset nameservers before applying records.
 	// This case is possible when user removed nameservers lines and pasted records, so before applying records,
 	// we must reset nameservers to defaults, otherwise we will face API exception
-	if strings.EqualFold(mode, ncModeOverwrite) && oldNameserversLen != 0 && newNameserversLen == 0 {
+	if (strings.EqualFold(mode, ncModeOverwrite) && oldNameserversLen != 0 && newNameserversLen == 0) ||
+		// This condition resolves the issue if a user set up records on TF file, but in fact, manually enabled custom DNS.
+		// Before applying records, we have to set default DNS
+		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
 		_, err := client.DomainsDNS.SetDefault(domain)
 		if err != nil {
 			return diag.FromErr(err)
