@@ -60,7 +60,7 @@ func readNameserversMerge(domain string, currentNameservers []string, client *na
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && nsResponse.DomainDNSGetListResult.Nameservers != nil {
 		for _, currentNs := range currentNameservers {
 			for _, remoteNs := range *nsResponse.DomainDNSGetListResult.Nameservers {
-				if currentNs == remoteNs {
+				if strings.EqualFold(currentNs, remoteNs) {
 					foundNameservers = append(foundNameservers, currentNs)
 					break
 				}
@@ -100,7 +100,7 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 			found := false
 
 			for _, prevNs := range previousNameservers {
-				if prevNs == remoteNs {
+				if strings.EqualFold(prevNs, remoteNs) {
 					found = true
 				}
 			}
@@ -157,7 +157,7 @@ func deleteNameserversMerge(domain string, previousNameservers []string, client 
 		found := false
 
 		for _, currentNs := range previousNameservers {
-			if remoteNs == currentNs {
+			if strings.EqualFold(remoteNs, currentNs) {
 				found = true
 			}
 		}
@@ -243,7 +243,7 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 func createRecordsOverwrite(domain string, emailType *string, records []interface{}, client *namecheap.Client) error {
 	domainRecords := convertRecordTypeSetToDomainRecords(&records)
 
-	emailTypeValue := "NONE"
+	emailTypeValue := ncEmailTypeNONE
 	if emailType != nil {
 		emailTypeValue = *emailType
 	}
@@ -284,7 +284,7 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 			currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 			for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
 				remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-				if currentRecordHash == remoteRecordHash {
+				if strings.EqualFold(currentRecordHash, remoteRecordHash) {
 					remoteRecord.Address = currentRecord.Address
 					foundRecords = append(foundRecords, *convertDomainRecordDetailedToTypeSetRecord(&remoteRecord))
 					break
@@ -320,7 +320,7 @@ func readRecordsOverwrite(domain string, currentRecords []interface{}, client *n
 
 				currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 
-				if currentRecordHash == remoteRecordHash {
+				if strings.EqualFold(currentRecordHash, remoteRecordHash) {
 					remoteRecord.Address = currentRecord.Address
 					break
 				}
@@ -357,7 +357,7 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 					return err
 				}
 				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
-				if remoteRecordHash == prevRecordHash {
+				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
 					found = true
 					break
 				}
@@ -413,7 +413,7 @@ func deleteRecordsMerge(domain string, previousRecords []interface{}, client *na
 					return err
 				}
 				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
-				if remoteRecordHash == prevRecordHash {
+				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
 					found = true
 					break
 				}
@@ -452,7 +452,7 @@ func deleteRecordsOverwrite(domain string, client *namecheap.Client) error {
 	_, err := client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &records,
-		EmailType: namecheap.String("NONE"),
+		EmailType: namecheap.String(ncEmailTypeNONE),
 		Flag:      nil,
 		Tag:       nil,
 	})
