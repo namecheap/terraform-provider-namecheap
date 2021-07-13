@@ -14,11 +14,12 @@ const (
 	ncModeMerge     = "MERGE"
 	ncModeOverwrite = "OVERWRITE"
 
-	ncEmailTypeNONE = "NONE"
-	ncEmailTypeFWD  = "FWD"
-	ncEmailTypeMXE  = "MXE"
-	ncEmailTypeMX   = "MX"
-	ncEmailTypeOX   = "OX"
+	ncEmailTypeNONE  = "NONE"
+	ncEmailTypeFWD   = "FWD"
+	ncEmailTypeMXE   = "MXE"
+	ncEmailTypeMX    = "MX"
+	ncEmailTypeOX    = "OX"
+	ncEmailTypeGMAIL = "GMAIL"
 )
 
 func resourceNamecheapDomainRecords() *schema.Resource {
@@ -43,8 +44,8 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"nameservers"},
 				Type:          schema.TypeString,
 				Optional:      true,
-				ValidateFunc:  validation.StringInSlice([]string{ncEmailTypeNONE, ncEmailTypeFWD, ncEmailTypeMXE, ncEmailTypeMX, ncEmailTypeOX}, false),
-				Description:   fmt.Sprintf("Possible values: %s, %s, %s, %s, %s", ncEmailTypeNONE, ncEmailTypeFWD, ncEmailTypeMXE, ncEmailTypeMX, ncEmailTypeOX),
+				ValidateFunc:  validation.StringInSlice([]string{ncEmailTypeNONE, ncEmailTypeFWD, ncEmailTypeMXE, ncEmailTypeMX, ncEmailTypeOX, ncEmailTypeGMAIL}, false),
+				Description:   fmt.Sprintf("Possible values: %s, %s, %s, %s, %s, %s", ncEmailTypeNONE, ncEmailTypeFWD, ncEmailTypeMXE, ncEmailTypeMX, ncEmailTypeOX, ncEmailTypeGMAIL),
 			},
 			"mode": {
 				Type:         schema.TypeString,
