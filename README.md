@@ -2,6 +2,10 @@
 
 A Terraform Provider for Namecheap domain dns configuration.
 
+- [Namecheap Provider Documentation](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs)
+- [Guide: Migration to v2.0.0 new major release](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/namecheap_provider_migration_v2.0.0)
+- [Guide: Namecheap domain records](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/namecheap_domain_records_guide)
+
 ## Prerequisites
 
 First you'll need to apply for API access to Namecheap. You can do that on
@@ -12,11 +16,7 @@ this [whitelist admin page](https://ap.www.namecheap.com/settings/tools/apiacces
 
 Once you've done that, make note of the API key, your IP address, and your username to fill into our `provider` block.
 
-# Usage
-
-Then inside a Terraform file within your project (Ex. `providers.tf`):
-
-## Using the provider
+## Usage Example
 
 Make sure your API details are correct in the provider block.
 
@@ -60,3 +60,7 @@ resource "namecheap_domain_records" "domain2-com" {
   ]
 }
 ```
+
+### Contributing
+
+You're welcome to post issues and send your pull requests.
