@@ -4,10 +4,10 @@ page_title: Migration guide for v2.0.0 release
 
 # Migration guide for v2.0.0 release
 
-The Namecheap Provider v2.0.0 is our new major release with much improved and stabilised the general workflow. This
-guide will explain how to upgrade your old terraform files regarding new v2 format requirements.
+The Namecheap Provider v2.0.0 is our new major release with much improved and stabilized the workflow. This guide will
+explain how to upgrade your old terraform files regarding new v2 format requirements.
 
-Most justification of a new approach has been described
+Major justification of a new approach has been described
 in [github issue](https://github.com/namecheap/terraform-provider-namecheap/issues/46).
 
 Primarily, the guide will consist of examples with old format of specific record and new one with a few notes. You have
@@ -60,7 +60,10 @@ Now nameservers should be set via `namecheap_domain_records` resource.
 ```terraform
 resource "namecheap_ns" "domain-com" {
   domain = "my-domain.com"
-  servers = ["ns-1.domain-47.com", "ns-2.domain-48.com"]
+  servers = [
+    "ns-1.domain-47.com",
+    "ns-2.domain-48.com"
+  ]
 }
 ```
 
@@ -71,20 +74,22 @@ resource "namecheap_domain_records" "my-domain2-com" {
   domain = "my-domain.com"
   mode = "OVERWRITE"
 
-  nameservers = ["ns-1.domain-47.com", "ns-2.domain-48.com"]
+  nameservers = [
+    "ns-1.domain-47.com",
+    "ns-2.domain-48.com"
+  ]
 }
 ```
 
 Mode `OVERWRITE` means that the new `nameservers` list will overwrite existing settings (for example, if you set some
-servers manually or via other terraform instance). This was the default behavior for our previous version of terraform
-provider and recommended for this migration guide.
+nameservers manually or via other terraform instance). This was the default behavior for our previous version of
+terraform provider and recommended for this migration guide.
 
 ## Domain records migration (old: namecheap_record)
 
 Now domain records should be set via `namecheap_domain_records` resource.
 
 ### Old format
-
 
 ```terraform
 resource "namecheap_record" "blog-my-domain-com" {
@@ -117,7 +122,7 @@ resource "namecheap_domain_records" "my-domain-com" {
     address = "10.11.12.13"
     ttl = 1800
   }
-  
+
   record {
     hostname = "app"
     type = "A"
@@ -131,3 +136,4 @@ Previously, each record was a separate resource. Now we have a combined `nameche
 can collect all records that should be added for domain.
 
 ~> Previous version had a bug with applying MX records since you hadn't an ability to set email settings.
+Follow [Namecheap Domain Records Guide](namecheap_domain_records_guide.md#email-type) "Email type" section.

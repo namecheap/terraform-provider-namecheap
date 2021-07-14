@@ -11,7 +11,7 @@ First of all we recommend to read our
 article [Host records setup](https://www.namecheap.com/support/knowledgebase/article.aspx/434/2237/how-do-i-set-up-host-records-for-a-domain/)
 to get an intro into all available record types provided by Namecheap and workarounds around it.
 
-Due to our API structure, the provider has restrictions. Follow [restrictions](#restrictions) section to read more.
+Follow [restrictions](#restrictions) section to read more about our API and Provider restrictions.
 
 ## Domain
 
@@ -19,7 +19,7 @@ Domain is required. Before using, you must buy the domain and be sure it is avai
 
 ## Mode
 
-The resource can work in two modes: `OVERWRITE` and `MERGE` (default).
+The resource can work with two modes: `OVERWRITE` and `MERGE` (default).
 
 ### `MERGE`
 
@@ -258,4 +258,5 @@ non-cached information.
 ## Restrictions
 
 Unfortunately, you're not able to create the following record types: `SRV`, `A + Dynamic DNS Record` due to our API
-restrictions.
+restrictions. For this case you can use `MERGE` mode - set up `SRV` or `Dynamic DNS Record` manually and control other
+records via terraform.
