@@ -26,7 +26,22 @@ func createNameserversMerge(domain string, nameservers []string, client *nameche
 			newNameservers = append(newNameservers, *nsResponse.DomainDNSGetListResult.Nameservers...)
 		}
 
-		newNameservers = append(newNameservers, nameservers...)
+		for _, nameserver := range nameservers {
+			found := false
+
+			if nsResponse.DomainDNSGetListResult.Nameservers != nil {
+				for _, remoteNameserver := range *nsResponse.DomainDNSGetListResult.Nameservers {
+					if strings.EqualFold(nameserver, remoteNameserver) {
+						found = true
+						break
+					}
+				}
+			}
+
+			if !found {
+				newNameservers = append(newNameservers, nameserver)
+			}
+		}
 
 		_, err := client.DomainsDNS.SetCustom(domain, newNameservers)
 		if err != nil {
@@ -204,11 +219,14 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 		return err
 	}
 
+	recordsConverted := convertRecordTypeSetToDomainRecords(&records)
+	newRecordsMap := make(map[string]*namecheap.DomainsDNSHostRecord)
 	var newDomainRecords []namecheap.DomainsDNSHostRecord
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		filteredRemoteRecords := filterDefaultParkingRecords(remoteRecordsResponse.DomainDNSGetHostsResult.Hosts, &domain)
 		for _, remoteRecord := range *filteredRemoteRecords {
+			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
 			domainRecord := namecheap.DomainsDNSHostRecord{
 				HostName:   remoteRecord.Name,
 				RecordType: remoteRecord.Type,
@@ -217,13 +235,24 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 				TTL:        remoteRecord.TTL,
 			}
 
-			newDomainRecords = append(newDomainRecords, domainRecord)
+			newRecordsMap[remoteRecordHash] = &domainRecord
 		}
 	}
 
-	recordsConverted := convertRecordTypeSetToDomainRecords(&records)
+	for _, record := range *recordsConverted {
+		fixedAddress, err := getFixedAddressOfRecord(&record)
+		if err != nil {
+			return err
+		}
+		recordHash := hashRecord(*record.HostName, *record.RecordType, *fixedAddress)
 
-	newDomainRecords = append(newDomainRecords, *recordsConverted...)
+		newRecord := record
+		newRecordsMap[recordHash] = &newRecord
+	}
+
+	for _, record := range newRecordsMap {
+		newDomainRecords = append(newDomainRecords, *record)
+	}
 
 	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    namecheap.String(domain),
