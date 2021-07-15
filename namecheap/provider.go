@@ -33,9 +33,10 @@ func Provider() *schema.Provider {
 
 			"client_ip": {
 				Type:        schema.TypeString,
-				Required:    true,
-				Description: "IP address of the machine running terraform that is whitelisted",
+				Optional:    true,
+				Description: "Client IP address",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_CLIENT_IP", nil),
+				Default:     "0.0.0.0",
 			},
 
 			"use_sandbox": {
