@@ -13,12 +13,6 @@ import (
 const (
 	ncModeMerge     = "MERGE"
 	ncModeOverwrite = "OVERWRITE"
-
-	ncEmailTypeNONE = "NONE"
-	ncEmailTypeFWD  = "FWD"
-	ncEmailTypeMXE  = "MXE"
-	ncEmailTypeMX   = "MX"
-	ncEmailTypeOX   = "OX"
 )
 
 func resourceNamecheapDomainRecords() *schema.Resource {
@@ -43,8 +37,8 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"nameservers"},
 				Type:          schema.TypeString,
 				Optional:      true,
-				ValidateFunc:  validation.StringInSlice([]string{ncEmailTypeNONE, ncEmailTypeFWD, ncEmailTypeMXE, ncEmailTypeMX, ncEmailTypeOX}, false),
-				Description:   fmt.Sprintf("Possible values: %s, %s, %s, %s, %s", ncEmailTypeNONE, ncEmailTypeFWD, ncEmailTypeMXE, ncEmailTypeMX, ncEmailTypeOX),
+				ValidateFunc:  validation.StringInSlice(namecheap.AllowedEmailTypeValues, false),
+				Description:   fmt.Sprintf("Possible values: %s", strings.TrimSpace(strings.Join(namecheap.AllowedEmailTypeValues, ", "))),
 			},
 			"mode": {
 				Type:         schema.TypeString,
@@ -67,8 +61,8 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 						"type": {
 							Type:         schema.TypeString,
 							Required:     true,
-							ValidateFunc: validation.StringInSlice([]string{"A", "AAAA", "ALIAS", "CAA", "CNAME", "MX", "MXE", "NS", "TXT", "URL", "URL301", "FRAME"}, false),
-							Description:  "Possible values: A, AAAA, ALIAS, CAA, CNAME, MX, MXE, NS, TXT, URL, URL301, FRAME",
+							ValidateFunc: validation.StringInSlice(namecheap.AllowedRecordTypeValues, false),
+							Description:  fmt.Sprintf("Possible values: %s", strings.TrimSpace(strings.Join(namecheap.AllowedRecordTypeValues, ", "))),
 						},
 						"address": {
 							Type:        schema.TypeString,
@@ -85,7 +79,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 							Type:        schema.TypeInt,
 							Optional:    true,
 							Default:     1799,
-							Description: "Time to live for all record types. Possible values: any value between 60 to 60000",
+							Description: fmt.Sprintf("Time to live for all record types. Possible values: any value between %d to %d", namecheap.MinTTL, namecheap.MaxTTL),
 						},
 					},
 				},

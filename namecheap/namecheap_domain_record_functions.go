@@ -243,15 +243,15 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 func createRecordsOverwrite(domain string, emailType *string, records []interface{}, client *namecheap.Client) error {
 	domainRecords := convertRecordTypeSetToDomainRecords(&records)
 
-	emailTypeValue := ncEmailTypeNONE
+	emailTypeValue := namecheap.String(namecheap.EmailTypeNone)
 	if emailType != nil {
-		emailTypeValue = *emailType
+		emailTypeValue = emailType
 	}
 
 	_, err := client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   domainRecords,
-		EmailType: &emailTypeValue,
+		EmailType: emailTypeValue,
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -452,7 +452,7 @@ func deleteRecordsOverwrite(domain string, client *namecheap.Client) error {
 	_, err := client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &records,
-		EmailType: namecheap.String(ncEmailTypeNONE),
+		EmailType: namecheap.String(namecheap.EmailTypeNone),
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -546,11 +546,14 @@ func fixAddressEndWithDot(address *string) *string {
 // - for CAA records with iodef key word, if no quotes wrapping the domain, then the quotes will be added
 // - for other cases the method will just return the address equal to input one
 func getFixedAddressOfRecord(record *namecheap.DomainsDNSHostRecord) (*string, error) {
-	if *record.RecordType == "CNAME" || *record.RecordType == "ALIAS" || *record.RecordType == "NS" || *record.RecordType == "MX" {
+	if *record.RecordType == namecheap.RecordTypeCNAME ||
+		*record.RecordType == namecheap.RecordTypeAlias ||
+		*record.RecordType == namecheap.RecordTypeNS ||
+		*record.RecordType == namecheap.RecordTypeMX {
 		return fixAddressEndWithDot(record.Address), nil
 	}
 
-	if *record.RecordType == "CAA" && strings.Contains(*record.Address, "iodef") {
+	if *record.RecordType == namecheap.RecordTypeCAA && strings.Contains(*record.Address, "iodef") {
 		return fixCAAIodefAddressValue(record.Address)
 	}
 
@@ -562,8 +565,8 @@ func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetail
 	var filteredRecords []namecheap.DomainsDNSHostRecordDetailed
 
 	for _, record := range *records {
-		if (*record.Type == "CNAME" && *record.Name == "www" && *record.Address == "parkingpage.namecheap.com.") ||
-			(*record.Type == "URL" && *record.Name == "@" && strings.HasPrefix(*record.Address, "http://www."+*domain)) {
+		if (*record.Type == namecheap.RecordTypeCNAME && *record.Name == "www" && *record.Address == "parkingpage.namecheap.com.") ||
+			(*record.Type == namecheap.RecordTypeURL && *record.Name == "@" && strings.HasPrefix(*record.Address, "http://www."+*domain)) {
 			continue
 		}
 		filteredRecords = append(filteredRecords, record)
