@@ -44,7 +44,7 @@ resource "namecheap_domain_records" "domain-com" {
 - `user_name` (`NAMECHEAP_USER_NAME`) - (Required) A registered user name for Namecheap.
 - `api_user` (`NAMECHEAP_API_USER`) - (Required) A registered api user for Namecheap
 - `api_key` (`NAMECHEAP_API_KEY`) - (Required) The Namecheap API key
-- `client_ip` (`NAMECHEAP_CLIENT_IP`) - (Required) IP address of the machine running terraform that is whitelisted
+- `client_ip` (`NAMECHEAP_CLIENT_IP`) - (Optional) Client IP address
 - `use_sandbox` (`NAMECHEAP_USE_SANDBOX`) - (Optional) Use sandbox API endpoints. If `true`, all API requests will be
   made through `sandbox.namecheap.com` endpoint. You can [sign up](https://www.sandbox.namecheap.com/myaccount/signup/)
   a free sandbox account
