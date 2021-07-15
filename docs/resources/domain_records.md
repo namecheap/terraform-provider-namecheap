@@ -60,3 +60,5 @@ resource "namecheap_domain_records" "my-domain2-com" {
 - `type` - (Required) Possible values: A, AAAA, ALIAS, CAA, CNAME, MX, MXE, NS, TXT, URL, URL301, FRAME
 - `mx_pref` - (Optional) MX preference for host. Applicable for MX records only
 - `ttl` - (Optional) Time to live for all record types. Possible values: any value between 60 to 60000
+
+~> It is strongly recommended to set `address` and `hostname` in lower case to prevent undefined behavior!  
