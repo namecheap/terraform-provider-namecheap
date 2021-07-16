@@ -34,6 +34,9 @@ The same workflow works for both: `record` items and `nameservers`.
 
 -> This is the default behavior, however, we recommend to set the mode explicitly.
 
+~> Upon creating a new resource with the records or nameservers that already exist, the provider will throw a duplicate
+error.
+
 ### `OVERWRITE`
 
 Unlike [MERGE](#merge), `OVERWRITE` always removes existing records and force overwrites with provided in terraform
