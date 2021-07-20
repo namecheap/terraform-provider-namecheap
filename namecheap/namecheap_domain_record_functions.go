@@ -328,7 +328,7 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 			currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 			for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
 				remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-				if strings.EqualFold(currentRecordHash, remoteRecordHash) {
+				if currentRecordHash == remoteRecordHash {
 					remoteRecord.Address = currentRecord.Address
 					foundRecords = append(foundRecords, *convertDomainRecordDetailedToTypeSetRecord(&remoteRecord))
 					break
@@ -364,8 +364,8 @@ func readRecordsOverwrite(domain string, currentRecords []interface{}, client *n
 
 				currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 
-				if strings.EqualFold(currentRecordHash, remoteRecordHash) {
-					remoteRecord.Address = currentRecord.Address
+				if currentRecordHash == remoteRecordHash {
+					*remoteRecord.Address = *currentRecord.Address
 					break
 				}
 
@@ -619,6 +619,8 @@ func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetail
 	return &filteredRecords
 }
 
+// stringifyNCRecord returns a string with hostname, record type and address of the record
+// This function mostly serves to print error details for user
 func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {
 	return fmt.Sprintf("{hostname = %s, type = %s, address = %s}", *record.HostName, *record.RecordType, *record.Address)
 }
