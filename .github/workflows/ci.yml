@@ -8,6 +8,7 @@ on:
 jobs:
 
   check:
+    name: Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -27,3 +28,23 @@ jobs:
 
       - name: Test
         run: make test
+
+  acceptance_test:
+    name: Acceptance test
+    runs-on: self-hosted
+    needs: check
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+
+      - name: Acceptance Test
+        run: make testacc
+        env:
+          NAMECHEAP_USER_NAME: ${{ secrets.NAMECHEAP_USER_NAME }}
+          NAMECHEAP_API_USER: ${{ secrets.NAMECHEAP_API_USER }}
+          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          NAMECHEAP_TEST_DOMAIN: ${{ secrets.NAMECHEAP_TEST_DOMAIN }}
