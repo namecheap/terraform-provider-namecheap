@@ -25,26 +25,100 @@ jobs:
         uses: golangci/golangci-lint-action@v2
         with:
           version: v1.41.1
+          skip-pkg-cache: true
 
       - name: Test
         run: make test
 
+  start-runner:
+    name: Start self-hosted EC2 runner
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: namecheap/ec2-github-runner@main
+        with:
+          mode: start
+          github-token: ${{ secrets.GH_TOKEN }}
+          ec2-image-owner: 699717368611
+          ec2-image-filters: >
+            [
+              { "Name": "name", "Values": ["nc-amzn2-ami-hvm-x86_64-gp2-master-*"] }
+            ]
+          ec2-instance-type: t3.nano
+          subnet-id: subnet-01c4ff5a
+          security-group-id: sg-106ec76d
+          eip-allocation-id: eipalloc-1796f61b
+          iam-role-name: AmazonSSMRoleForInstancesQuickSetup
+          aws-resource-tags: >
+            [
+              { "Key": "Name", "Value": "github_runner" },
+              { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
+            ]
+
   acceptance_test:
     name: Acceptance test
-    runs-on: self-hosted
-    needs: check
+    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
+    needs: start-runner
+    concurrency: acceptance_test # allow to run the only one instance of the current acceptance_test job
     steps:
       - uses: actions/checkout@v2
 
       - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: 1.16
+        run: |
+          curl https://dl.google.com/go/go1.16.6.linux-amd64.tar.gz -o go1.16.6.linux-amd64.tar.gz
+          rm -rf .go-instance
+          mkdir .go-instance
+          tar -C .go-instance -xzf go1.16.6.linux-amd64.tar.gz
+          echo "#!/bin/bash" >> go-env.sh
+          echo "" >> go-env.sh
+          echo "export PATH=$PATH:$(pwd)/.go-instance/go/bin" >> go-env.sh
+          echo "export HOME=$(pwd)" >> go-env.sh
+          chmod +x go-env.sh
+          source go-env.sh
+          go version
+          go env GOPATH
 
       - name: Acceptance Test
-        run: make testacc
+        run: |
+          export CGO_ENABLED=0
+          source go-env.sh
+          make testacc
         env:
           NAMECHEAP_USER_NAME: ${{ secrets.NAMECHEAP_USER_NAME }}
           NAMECHEAP_API_USER: ${{ secrets.NAMECHEAP_API_USER }}
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          NAMECHEAP_USE_SANDBOX: ${{ secrets.NAMECHEAP_USE_SANDBOX }}
           NAMECHEAP_TEST_DOMAIN: ${{ secrets.NAMECHEAP_TEST_DOMAIN }}
+
+  stop-runner:
+    name: Stop self-hosted EC2 runner
+    needs:
+      - start-runner
+      - acceptance_test
+    runs-on: ubuntu-latest
+    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Stop EC2 runner
+        uses: namecheap/ec2-github-runner@main
+        with:
+          mode: stop
+          github-token: ${{ secrets.GH_TOKEN }}
+          label: ${{ needs.start-runner.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
