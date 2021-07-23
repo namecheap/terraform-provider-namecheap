@@ -45,7 +45,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 ## Argument Reference
 
 - `domain` - (Required) Purchased available domain name on your account
-- `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`.
+- `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`
 - `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX. Conflicts with `nameservers`
 - `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record`
   records. Conflicts with `nameservers`
@@ -60,3 +60,5 @@ resource "namecheap_domain_records" "my-domain2-com" {
 - `type` - (Required) Possible values: A, AAAA, ALIAS, CAA, CNAME, MX, MXE, NS, TXT, URL, URL301, FRAME
 - `mx_pref` - (Optional) MX preference for host. Applicable for MX records only
 - `ttl` - (Optional) Time to live for all record types. Possible values: any value between 60 to 60000
+
+~> It is strongly recommended to set `address`, `hostname`, `nameservers` in lower case to prevent undefined behavior!  

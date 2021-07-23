@@ -2,6 +2,8 @@ package namecheap_provider
 
 import (
 	"fmt"
+	"github.com/hashicorp/go-cty/cty"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"strings"
 )
@@ -9,16 +11,16 @@ import (
 // createNameserversMerge has the following behaviour:
 // - if nameservers have been set manually, then this method merge the provided ones with manually set
 // - else this is overwriting existent ones
-func createNameserversMerge(domain string, nameservers []string, client *namecheap.Client) error {
+func createNameserversMerge(domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
 		_, err := client.DomainsDNS.SetCustom(domain, nameservers)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 	} else {
 		var newNameservers []string
@@ -26,11 +28,29 @@ func createNameserversMerge(domain string, nameservers []string, client *nameche
 			newNameservers = append(newNameservers, *nsResponse.DomainDNSGetListResult.Nameservers...)
 		}
 
-		newNameservers = append(newNameservers, nameservers...)
+		for index, nameserver := range nameservers {
+			if nsResponse.DomainDNSGetListResult.Nameservers != nil {
+				for _, remoteNameserver := range *nsResponse.DomainDNSGetListResult.Nameservers {
+					if strings.EqualFold(nameserver, remoteNameserver) {
+						return diag.Diagnostics{diag.Diagnostic{
+							Severity: diag.Error,
+							Summary:  "Duplicate nameserver",
+							Detail:   fmt.Sprintf("Nameserver %s is already exist!", nameserver),
+							AttributePath: cty.Path{
+								cty.GetAttrStep{Name: "nameservers"},
+								cty.IndexStep{Key: cty.NumberIntVal(int64(index))},
+							},
+						}}
+					}
+				}
+			}
+
+			newNameservers = append(newNameservers, nameserver)
+		}
 
 		_, err := client.DomainsDNS.SetCustom(domain, newNameservers)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 	}
 
@@ -38,10 +58,10 @@ func createNameserversMerge(domain string, nameservers []string, client *nameche
 }
 
 // createNameserversOverwrite force overwrites the nameservers
-func createNameserversOverwrite(domain string, nameservers []string, client *namecheap.Client) error {
+func createNameserversOverwrite(domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	_, err := client.DomainsDNS.SetCustom(domain, nameservers)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
@@ -49,10 +69,10 @@ func createNameserversOverwrite(domain string, nameservers []string, client *nam
 
 // readNameserversMerge read real nameservers, check whether there's available the current ones, return only
 // the records from currentNameservers argument that are really exist
-func readNameserversMerge(domain string, currentNameservers []string, client *namecheap.Client) (*[]string, error) {
+func readNameserversMerge(domain string, currentNameservers []string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 
 	var foundNameservers []string
@@ -72,10 +92,10 @@ func readNameserversMerge(domain string, currentNameservers []string, client *na
 }
 
 // readNameserversOverwrite returns remote real nameservers
-func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]string, error) {
+func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
-		return nil, err
+		return nil, diag.FromErr(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS || nsResponse.DomainDNSGetListResult.Nameservers == nil {
@@ -87,10 +107,10 @@ func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]strin
 
 // readNameserversOverwrite fetches real nameservers from API, remove previousNameservers records, insert currentNameservers
 // thus, we have a merge between manually set ones via Namecheap Domain Control Panel and via terraform
-func updateNameserversMerge(domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) error {
+func updateNameserversMerge(domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var newNameservers []string
@@ -114,20 +134,20 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 	newNameservers = append(newNameservers, currentNameservers...)
 
 	if len(newNameservers) == 1 {
-		return fmt.Errorf("unable to proceed with one remained nameserver, you must have at least 2 nameservers")
+		return diag.Errorf("Unable to proceed with one remained nameserver, you must have at least 2 nameservers")
 	}
 
 	if len(newNameservers) == 0 {
 		_, err := client.DomainsDNS.SetDefault(domain)
 		if err != nil {
-			return nil
+			return diag.FromErr(err)
 		}
 		return nil
 	}
 
 	_, err = client.DomainsDNS.SetCustom(domain, newNameservers)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
@@ -136,10 +156,10 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 // deleteNameserversMerge deletes the only nameservers that have been set in terraform file
 // NOTE: be sure that after executing this method at least 2 nameservers should remain otherwise you will have a error
 // NOTE: if there's remained 0 nameservers, the default ones will be set
-func deleteNameserversMerge(domain string, previousNameservers []string, client *namecheap.Client) error {
+func deleteNameserversMerge(domain string, previousNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
@@ -148,7 +168,7 @@ func deleteNameserversMerge(domain string, previousNameservers []string, client 
 	}
 
 	if nsResponse.DomainDNSGetListResult.Nameservers == nil {
-		return fmt.Errorf("invalid nameservers response (this is internal error, please report us about it)")
+		return diag.Errorf("Invalid nameservers response (this is internal error, please report us about it)")
 	}
 
 	var remainNameservers []string
@@ -168,47 +188,50 @@ func deleteNameserversMerge(domain string, previousNameservers []string, client 
 	}
 
 	if len(remainNameservers) == 1 {
-		return fmt.Errorf("unable to proceed with one remained nameserver, you must have at least 2 nameservers")
+		return diag.Errorf("Unable to proceed with one remained nameserver, you must have at least 2 nameservers")
 	}
 
 	if len(remainNameservers) == 0 {
 		_, err := client.DomainsDNS.SetDefault(domain)
 		if err != nil {
-			return nil
+			return diag.FromErr(err)
 		}
 		return nil
 	}
 
 	_, err = client.DomainsDNS.SetCustom(domain, remainNameservers)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
 // deleteNameserversOverwrite resets nameservers settings to default (set default Namecheap's nameservers)
-func deleteNameserversOverwrite(domain string, client *namecheap.Client) error {
+func deleteNameserversOverwrite(domain string, client *namecheap.Client) diag.Diagnostics {
 	_, err := client.DomainsDNS.SetDefault(domain)
 	if err != nil {
-		return nil
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
 // createRecordsMerge merges new records with already existing ones on Namecheap
-func createRecordsMerge(domain string, emailType *string, records []interface{}, client *namecheap.Client) error {
+func createRecordsMerge(domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
+	recordsConverted := convertRecordTypeSetToDomainRecords(&records)
+	newRecordsMap := make(map[string]*namecheap.DomainsDNSHostRecord)
 	var newDomainRecords []namecheap.DomainsDNSHostRecord
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		filteredRemoteRecords := filterDefaultParkingRecords(remoteRecordsResponse.DomainDNSGetHostsResult.Hosts, &domain)
 		for _, remoteRecord := range *filteredRemoteRecords {
+			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
 			domainRecord := namecheap.DomainsDNSHostRecord{
 				HostName:   remoteRecord.Name,
 				RecordType: remoteRecord.Type,
@@ -217,13 +240,34 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 				TTL:        remoteRecord.TTL,
 			}
 
-			newDomainRecords = append(newDomainRecords, domainRecord)
+			newRecordsMap[remoteRecordHash] = &domainRecord
 		}
 	}
 
-	recordsConverted := convertRecordTypeSetToDomainRecords(&records)
+	for _, record := range *recordsConverted {
+		fixedAddress, err := getFixedAddressOfRecord(&record)
+		if err != nil {
+			return diag.FromErr(err)
+		}
+		recordHash := hashRecord(*record.HostName, *record.RecordType, *fixedAddress)
 
-	newDomainRecords = append(newDomainRecords, *recordsConverted...)
+		if newRecordsMap[recordHash] != nil {
+			return diag.Diagnostics{
+				diag.Diagnostic{
+					Severity: diag.Error,
+					Summary:  "Duplicate record",
+					Detail:   fmt.Sprintf("Record %s is already exist!", stringifyNCRecord(&record)),
+				},
+			}
+		}
+
+		newRecord := record
+		newRecordsMap[recordHash] = &newRecord
+	}
+
+	for _, record := range newRecordsMap {
+		newDomainRecords = append(newDomainRecords, *record)
+	}
 
 	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    namecheap.String(domain),
@@ -233,14 +277,14 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 		Tag:       nil,
 	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
 // createRecordsOverwrite overwrites existing records with provided new ones
-func createRecordsOverwrite(domain string, emailType *string, records []interface{}, client *namecheap.Client) error {
+func createRecordsOverwrite(domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	domainRecords := convertRecordTypeSetToDomainRecords(&records)
 
 	emailTypeValue := namecheap.String(namecheap.EmailTypeNone)
@@ -256,18 +300,18 @@ func createRecordsOverwrite(domain string, emailType *string, records []interfac
 		Tag:       nil,
 	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
-	return nil
+	return diag.Diagnostics{}
 }
 
 // readRecordsMerge reads all remote records, return only the currentRecords that are exist in remote records
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func readRecordsMerge(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, error) {
+func readRecordsMerge(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, diag.FromErr(err)
 	}
 
 	currentRecordsConverted := convertRecordTypeSetToDomainRecords(&currentRecords)
@@ -278,13 +322,13 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 		for _, currentRecord := range *currentRecordsConverted {
 			currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, diag.FromErr(err)
 			}
 
 			currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 			for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
 				remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-				if strings.EqualFold(currentRecordHash, remoteRecordHash) {
+				if currentRecordHash == remoteRecordHash {
 					remoteRecord.Address = currentRecord.Address
 					foundRecords = append(foundRecords, *convertDomainRecordDetailedToTypeSetRecord(&remoteRecord))
 					break
@@ -298,10 +342,10 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 
 // readRecordsOverwrite returns the records that are exist on Namecheap
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func readRecordsOverwrite(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, error) {
+func readRecordsOverwrite(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, diag.FromErr(err)
 	}
 
 	currentRecordsConverted := convertRecordTypeSetToDomainRecords(&currentRecords)
@@ -315,13 +359,13 @@ func readRecordsOverwrite(domain string, currentRecords []interface{}, client *n
 			for _, currentRecord := range *currentRecordsConverted {
 				currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, diag.FromErr(err)
 				}
 
 				currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 
-				if strings.EqualFold(currentRecordHash, remoteRecordHash) {
-					remoteRecord.Address = currentRecord.Address
+				if currentRecordHash == remoteRecordHash {
+					*remoteRecord.Address = *currentRecord.Address
 					break
 				}
 
@@ -336,10 +380,10 @@ func readRecordsOverwrite(domain string, currentRecords []interface{}, client *n
 
 // updateRecordsMerge fetches remote records, remove previousRecords from remote, add currentRecords and return the final list
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func updateRecordsMerge(domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) error {
+func updateRecordsMerge(domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var newRecordList []namecheap.DomainsDNSHostRecord
@@ -354,7 +398,7 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 			for _, prevRecord := range *previousRecordsMapped {
 				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
 				if err != nil {
-					return err
+					return diag.FromErr(err)
 				}
 				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
 				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
@@ -385,7 +429,7 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 		Tag:       nil,
 	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
@@ -393,10 +437,10 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 
 // deleteRecordsMerge removes only previousRecords from remote records
 // NOTE: method has address fix. Refer to internal.GetFixedAddressOfRecord
-func deleteRecordsMerge(domain string, previousRecords []interface{}, client *namecheap.Client) error {
+func deleteRecordsMerge(domain string, previousRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	var remainedRecords []namecheap.DomainsDNSHostRecord
@@ -410,7 +454,7 @@ func deleteRecordsMerge(domain string, previousRecords []interface{}, client *na
 			for _, prevRecord := range *previousRecordsMapped {
 				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
 				if err != nil {
-					return err
+					return diag.FromErr(err)
 				}
 				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
 				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
@@ -439,14 +483,14 @@ func deleteRecordsMerge(domain string, previousRecords []interface{}, client *na
 		Tag:       nil,
 	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
 }
 
 // deleteRecordsOverwrite removes all records
-func deleteRecordsOverwrite(domain string, client *namecheap.Client) error {
+func deleteRecordsOverwrite(domain string, client *namecheap.Client) diag.Diagnostics {
 	var records []namecheap.DomainsDNSHostRecord
 
 	_, err := client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
@@ -457,7 +501,7 @@ func deleteRecordsOverwrite(domain string, client *namecheap.Client) error {
 		Tag:       nil,
 	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
 	return nil
@@ -524,7 +568,7 @@ func fixCAAIodefAddressValue(address *string) (*string, error) {
 	}
 
 	if len(addressValuesFixed) != 3 {
-		return nil, fmt.Errorf("invalid value \"%s\"", *address)
+		return nil, fmt.Errorf("Invalid value \"%s\"", *address)
 	}
 
 	addressValuesFixed[2] = fmt.Sprintf(`"%s"`, addressValuesFixed[2])
@@ -573,4 +617,10 @@ func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetail
 	}
 
 	return &filteredRecords
+}
+
+// stringifyNCRecord returns a string with hostname, record type and address of the record
+// This function mostly serves to print error details for user
+func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {
+	return fmt.Sprintf("{hostname = %s, type = %s, address = %s}", *record.HostName, *record.RecordType, *record.Address)
 }

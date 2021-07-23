@@ -63,4 +63,4 @@ resource "namecheap_domain_records" "domain2-com" {
 
 ### Contributing
 
-You're welcome to post issues and send your pull requests.
+To contribute, please read our [contributing](CONTRIBUTING.md) docs.  
