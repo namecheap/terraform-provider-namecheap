@@ -95,11 +95,11 @@ jobs:
           source go-env.sh
           make testacc
         env:
-          NAMECHEAP_USER_NAME: ncexampleuser
-          NAMECHEAP_API_USER: ncexampleuser
-          NAMECHEAP_TEST_DOMAIN: test-domain.live
-          NAMECHEAP_USE_SANDBOX: true
-          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          NAMECHEAP_USER_NAME: NCStaffvladlenf
+          NAMECHEAP_API_USER: NCStaffvladlenf
+          NAMECHEAP_TEST_DOMAIN: terraform-provider-name.cheap
+          NAMECHEAP_USE_SANDBOX: false
+          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY_NCSTAFFVLADLENF }}
 
   stop-runner:
     name: Stop self-hosted EC2 runner
