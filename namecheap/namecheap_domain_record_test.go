@@ -111,6 +111,16 @@ func testAccDomainRecordsContain(response *namecheap.DomainsDNSGetHostsCommandRe
 	}
 }
 
+func testAccDomainRecordsEmailType(response *namecheap.DomainsDNSGetHostsCommandResponse, emailType string) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		if *response.DomainDNSGetHostsResult.EmailType != emailType {
+			return fmt.Errorf("Expected email type %s, but received %s", emailType, *response.DomainDNSGetHostsResult.EmailType)
+		}
+
+		return nil
+	}
+}
+
 func testAccDomainNameserversLength(response *namecheap.DomainsDNSGetListCommandResponse, expectedLength int) resource.TestCheckFunc {
 	return func(state *terraform.State) error {
 		if response == nil || response.DomainDNSGetListResult == nil {
@@ -433,6 +443,396 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 						}
 					`, *testAccDomain),
 					ExpectError: regexp.MustCompile("Error: Duplicate nameserver"),
+				},
+			},
+		})
+	})
+}
+
+// Tests the case when for mode MERGE we have multiple resources related to the same domain to set up different records
+// Such resources should execute synchronously to prevent racing and set the correct data
+func TestAccNamecheapDomainRecords_MergeMultipleRecordsInDifferentResources(t *testing.T) {
+	t.Run("resources_with_records", func(t *testing.T) {
+		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				resetDomainRecords(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+				testAccDomainRecordsLength(&domainRecordsResponse, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-record-one" {
+							domain = "%[1]s"
+							mode = "MERGE"
+						
+							record {
+								hostname = "sub1"
+								type = "A"
+								address = "11.11.11.11"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-two" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+						
+						  	record {
+								hostname = "sub2"
+								type = "A"
+								address = "22.22.22.22"
+						  	}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+						testAccDomainRecordsLength(&domainRecordsResponse, 2),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.11.11"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub2"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("22.22.22.22"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-record-one" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+						
+						  	record {
+								hostname = "sub11"
+								type = "A"
+								address = "11.11.111.111"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-two" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+						
+						  	record {
+								hostname = "sub22"
+								type = "A"
+								address = "22.22.222.222"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-three" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+						
+						  	record {
+								hostname = "sub3"
+								type = "A"
+								address = "33.33.33.33"
+						  	}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+						testAccDomainRecordsLength(&domainRecordsResponse, 3),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub11"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.111.111"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub22"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("22.22.222.222"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub3"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("33.33.33.33"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("resources_with_mx_records", func(t *testing.T) {
+		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				resetDomainRecords(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+				testAccDomainRecordsLength(&domainRecordsResponse, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-record-one" {
+							domain = "%[1]s"
+							mode = "MERGE"
+						
+							record {
+								hostname = "sub1"
+								type = "A"
+								address = "11.11.11.11"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-two" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+							email_type = "MX"
+						
+						  	record {
+								hostname = "@"
+								type = "MX"
+								address = "mail.domain.com"
+						  	}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+						testAccDomainRecordsLength(&domainRecordsResponse, 2),
+						testAccDomainRecordsEmailType(&domainRecordsResponse, namecheap.EmailTypeMX),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.11.11"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("@"),
+							Type:    namecheap.String("MX"),
+							Address: namecheap.String("mail.domain.com."),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-record-one" {
+							domain = "%[1]s"
+							mode = "MERGE"
+						
+							record {
+								hostname = "sub11"
+								type = "A"
+								address = "11.11.111.111"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-two" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+							email_type = "MX"
+						
+						  	record {
+								hostname = "@"
+								type = "MX"
+								address = "mail.domain-new.com"
+						  	}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+						testAccDomainRecordsLength(&domainRecordsResponse, 2),
+						testAccDomainRecordsEmailType(&domainRecordsResponse, namecheap.EmailTypeMX),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub11"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.111.111"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("@"),
+							Type:    namecheap.String("MX"),
+							Address: namecheap.String("mail.domain-new.com."),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("resources_with_mxe_record", func(t *testing.T) {
+		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				resetDomainRecords(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+				testAccDomainRecordsLength(&domainRecordsResponse, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-record-one" {
+							domain = "%[1]s"
+							mode = "MERGE"
+						
+							record {
+								hostname = "sub1"
+								type = "A"
+								address = "11.11.11.11"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-two" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+							email_type = "MXE"
+						
+						  	record {
+								hostname = "%[1]s"
+								type = "MXE"
+								address = "22.33.44.55"
+						  	}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+						testAccDomainRecordsLength(&domainRecordsResponse, 2),
+						testAccDomainRecordsEmailType(&domainRecordsResponse, namecheap.EmailTypeMXE),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.11.11"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    testAccDomain,
+							Type:    namecheap.String("MXE"),
+							Address: namecheap.String("22.33.44.55"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-record-one" {
+							domain = "%[1]s"
+							mode = "MERGE"
+						
+							record {
+								hostname = "sub11"
+								type = "A"
+								address = "11.11.111.111"
+						  	}
+						}
+						
+						resource "namecheap_domain_records" "my-domain-record-two" {
+						  	domain = "%[1]s"
+						  	mode = "MERGE"
+							email_type = "MXE"
+						
+						  	record {
+								hostname = "%[1]s"
+								type = "MXE"
+								address = "33.44.55.66"
+						  	}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
+						testAccDomainRecordsLength(&domainRecordsResponse, 2),
+						testAccDomainRecordsEmailType(&domainRecordsResponse, namecheap.EmailTypeMXE),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub11"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.111.111"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    testAccDomain,
+							Type:    namecheap.String("MXE"),
+							Address: namecheap.String("33.44.55.66"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("nameservers", func(t *testing.T) {
+		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainNameserversAPIFetch(&domainNameserversResponse),
+				testAccDomainNameserversDefault(&domainNameserversResponse),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain-one" {
+							domain = "%[1]s"
+							mode = "MERGE"
+
+							nameservers = [
+								"ns-380.awsdns-47.com",
+								"ns-1076.awsdns-06.org",
+							]
+						}
+
+						resource "namecheap_domain_records" "my-domain-two" {
+							domain = "%[1]s"
+							mode = "MERGE"
+
+							nameservers = [
+								"dns1.namecheaphosting.com",
+								"dns2.namecheaphosting.com",
+							]
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
+						testAccDomainNameserversLength(&domainNameserversResponse, 4),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "dns1.namecheaphosting.com"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "dns2.namecheaphosting.com"),
+					),
 				},
 			},
 		})
