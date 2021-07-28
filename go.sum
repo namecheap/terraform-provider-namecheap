@@ -260,8 +260,8 @@ github.com/mitchellh/mapstructure v1.1.2/go.mod h1:FVVH3fgwuzCH5S8UJGiWEs2h04kUh
 github.com/mitchellh/reflectwalk v1.0.0/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
 github.com/mitchellh/reflectwalk v1.0.2 h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zxSIeXaQ=
 github.com/mitchellh/reflectwalk v1.0.2/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
-github.com/namecheap/go-namecheap-sdk/v2 v2.0.1 h1:H4FXyJTpYMfpAeciNF/QD4KYPYOv9lJi8vdzApU9JZ0=
-github.com/namecheap/go-namecheap-sdk/v2 v2.0.1/go.mod h1:Op6xLoiTxvFxa1V/kR0fcFcxlBMkrRHirxvcOdTPhNU=
+github.com/namecheap/go-namecheap-sdk/v2 v2.0.2 h1:FUWRoVrw7mRZJH18SOfSK8T1nvaPxZusG3vowJgai0E=
+github.com/namecheap/go-namecheap-sdk/v2 v2.0.2/go.mod h1:Op6xLoiTxvFxa1V/kR0fcFcxlBMkrRHirxvcOdTPhNU=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nsf/jsondiff v0.0.0-20200515183724-f29ed568f4ce h1:RPclfga2SEJmgMmz2k+Mg7cowZ8yv4Trqw9UsJby758=
 github.com/nsf/jsondiff v0.0.0-20200515183724-f29ed568f4ce/go.mod h1:uFMI8w+ref4v2r9jz+c9i1IfIttS/OkmLfrk1jne5hs=

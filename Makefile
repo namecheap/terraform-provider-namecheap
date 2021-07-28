@@ -10,12 +10,12 @@ check:
 	go vet ./...
 
 test:
-	go test -v ./... -count=1
+	go test ./namecheap -v -count=1
 
 # Please set the following ENV variables for this test:
 # NAMECHEAP_USER_NAME, NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_TEST_DOMAIN, NAMECHEAP_USE_SANDBOX (optional, default is false)
 testacc:
-	TF_ACC=1 go test -v ./... -run=TestAcc -count=1
+	TF_ACC=1 go test ./namecheap -v -run=TestAcc -count=1
 
 build:
 	go build -o ${BINARY}
