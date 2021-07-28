@@ -37,13 +37,6 @@ func setDomainRecords(t *testing.T, emailType *string, records *[]namecheap.Doma
 	}
 }
 
-func setDomainNameservers(t *testing.T, nameservers *[]string) {
-	_, err := namecheapSDKClient.DomainsDNS.SetCustom(*testAccDomain, *nameservers)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func testAccDomainRecordsAPIFetch(response *namecheap.DomainsDNSGetHostsCommandResponse) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		resp, err := namecheapSDKClient.DomainsDNS.GetHosts(*testAccDomain)
@@ -292,32 +285,18 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("create_records_on_conflict", func(t *testing.T) {
+	t.Run("create_duplicate_records_conflict", func(t *testing.T) {
 		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
 			PreCheck: func() {
 				resetDomainNameservers(t)
-				setDomainRecords(t, namecheap.String(namecheap.EmailTypeNone), &[]namecheap.DomainsDNSHostRecord{
-					{
-						HostName:   namecheap.String("sub1"),
-						RecordType: namecheap.String(namecheap.RecordTypeA),
-						Address:    namecheap.String("22.22.22.22"),
-						TTL:        namecheap.Int(1799),
-					},
-				})
+				resetDomainRecords(t)
 			},
 			ProviderFactories: testAccProviderFactories,
 			CheckDestroy: resource.ComposeTestCheckFunc(
 				testAccDomainRecordsAPIFetch(&domainRecordsResp),
-				testAccDomainRecordsLength(&domainRecordsResp, 1),
-				testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
-					Name:    namecheap.String("sub1"),
-					Type:    namecheap.String(namecheap.RecordTypeA),
-					Address: namecheap.String("22.22.22.22"),
-					MXPref:  namecheap.Int(10),
-					TTL:     namecheap.Int(1799),
-				}),
+				testAccDomainRecordsLength(&domainRecordsResp, 0),
 			),
 			Steps: []resource.TestStep{
 				{
@@ -333,175 +312,11 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 							}
 						}
 					`, *testAccDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate record"),
-				},
-			},
-		})
-	})
-
-	t.Run("create_ns_on_empty", func(t *testing.T) {
-		var domainRecordsResp namecheap.DomainsDNSGetListCommandResponse
-
-		resource.Test(t, resource.TestCase{
-			PreCheck: func() {
-				resetDomainNameservers(t)
-			},
-			ProviderFactories: testAccProviderFactories,
-			CheckDestroy: resource.ComposeTestCheckFunc(
-				testAccDomainNameserversAPIFetch(&domainRecordsResp),
-				testAccDomainNameserversDefault(&domainRecordsResp),
-			),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain" {
-							domain = "%s"
-							mode = "MERGE"
-
-							nameservers = [
-								"dns1.namecheaphosting.com",
-								"dns2.namecheaphosting.com",
-							]
-						}
-					`, *testAccDomain),
 					Check: resource.ComposeTestCheckFunc(
-						testAccDomainNameserversAPIFetch(&domainRecordsResp),
-						testAccDomainNameserversLength(&domainRecordsResp, 2),
-						testAccDomainNameserversContain(&domainRecordsResp, "dns1.namecheaphosting.com"),
-						testAccDomainNameserversContain(&domainRecordsResp, "dns2.namecheaphosting.com"),
-					),
-				},
-			},
-		})
-	})
-
-	t.Run("create_ns_if_exists", func(t *testing.T) {
-		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
-
-		resource.Test(t, resource.TestCase{
-			PreCheck: func() {
-				setDomainNameservers(t, &[]string{"ns-380.awsdns-47.com", "ns-1076.awsdns-06.org"})
-			},
-			ProviderFactories: testAccProviderFactories,
-			CheckDestroy: resource.ComposeTestCheckFunc(
-				testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-				testAccDomainNameserversLength(&domainNameserversResponse, 2),
-				testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
-				testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
-			),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain" {
-							domain = "%s"
-							mode = "MERGE"
-
-							nameservers = [
-								"dns1.namecheaphosting.com",
-								"dns2.namecheaphosting.com",
-							]
-						}
-					`, *testAccDomain),
-					Check: resource.ComposeTestCheckFunc(
-						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-						testAccDomainNameserversLength(&domainNameserversResponse, 4),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "dns1.namecheaphosting.com"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "dns2.namecheaphosting.com"),
-					),
-				},
-			},
-		})
-	})
-
-	t.Run("create_ns_on_conflict", func(t *testing.T) {
-		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
-
-		resource.Test(t, resource.TestCase{
-			PreCheck: func() {
-				setDomainNameservers(t, &[]string{"ns-380.awsdns-47.com", "ns-1076.awsdns-06.org", "dns1.namecheaphosting.com"})
-			},
-			ProviderFactories: testAccProviderFactories,
-			CheckDestroy: resource.ComposeTestCheckFunc(
-				testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-				testAccDomainNameserversLength(&domainNameserversResponse, 2),
-				testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
-				testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
-				testAccDomainNameserversContain(&domainNameserversResponse, "dns1.namecheaphosting.com"),
-			),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain" {
-							domain = "%s"
-							mode = "MERGE"
-
-							nameservers = [
-								"dns1.namecheaphosting.com",
-							]
-						}
-					`, *testAccDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate nameserver"),
-				},
-			},
-		})
-	})
-}
-
-// Tests the case when for mode MERGE we have multiple resources related to the same domain to set up different records
-// Such resources should execute synchronously to prevent racing and set the correct data
-func TestAccNamecheapDomainRecords_MergeMultipleRecordsInDifferentResources(t *testing.T) {
-	t.Run("resources_with_records", func(t *testing.T) {
-		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
-
-		resource.Test(t, resource.TestCase{
-			PreCheck: func() {
-				resetDomainNameservers(t)
-				resetDomainRecords(t)
-			},
-			ProviderFactories: testAccProviderFactories,
-			CheckDestroy: resource.ComposeTestCheckFunc(
-				testAccDomainRecordsAPIFetch(&domainRecordsResponse),
-				testAccDomainRecordsLength(&domainRecordsResponse, 0),
-			),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain-record-one" {
-							domain = "%[1]s"
-							mode = "MERGE"
-						
-							record {
-								hostname = "sub1"
-								type = "A"
-								address = "11.11.11.11"
-						  	}
-						}
-						
-						resource "namecheap_domain_records" "my-domain-record-two" {
-						  	domain = "%[1]s"
-						  	mode = "MERGE"
-						
-						  	record {
-								hostname = "sub2"
-								type = "A"
-								address = "22.22.22.22"
-						  	}
-						}
-					`, *testAccDomain),
-					Check: resource.ComposeTestCheckFunc(
-						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
-						testAccDomainRecordsLength(&domainRecordsResponse, 2),
-						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 1),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    namecheap.String("sub1"),
-							Type:    namecheap.String("A"),
-							Address: namecheap.String("11.11.11.11"),
-							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
-						}),
-						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
-							Name:    namecheap.String("sub2"),
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("22.22.22.22"),
 							MXPref:  namecheap.Int(10),
@@ -511,70 +326,35 @@ func TestAccNamecheapDomainRecords_MergeMultipleRecordsInDifferentResources(t *t
 				},
 				{
 					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain-record-one" {
-						  	domain = "%[1]s"
-						  	mode = "MERGE"
-						
-						  	record {
-								hostname = "sub11"
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%[1]s"
+							mode = "MERGE"
+
+							record {
+								hostname = "sub1"
 								type = "A"
-								address = "11.11.111.111"
-						  	}
+								address = "22.22.22.22"
+							}
 						}
-						
-						resource "namecheap_domain_records" "my-domain-record-two" {
-						  	domain = "%[1]s"
-						  	mode = "MERGE"
-						
-						  	record {
-								hostname = "sub22"
+
+						resource "namecheap_domain_records" "my-domain-two" {
+							domain = "%[1]s"
+							mode = "MERGE"
+
+							record {
+								hostname = "sub1"
 								type = "A"
-								address = "22.22.222.222"
-						  	}
-						}
-						
-						resource "namecheap_domain_records" "my-domain-record-three" {
-						  	domain = "%[1]s"
-						  	mode = "MERGE"
-						
-						  	record {
-								hostname = "sub3"
-								type = "A"
-								address = "33.33.33.33"
-						  	}
+								address = "22.22.22.22"
+							}
 						}
 					`, *testAccDomain),
-					Check: resource.ComposeTestCheckFunc(
-						testAccDomainRecordsAPIFetch(&domainRecordsResponse),
-						testAccDomainRecordsLength(&domainRecordsResponse, 3),
-						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
-							Name:    namecheap.String("sub11"),
-							Type:    namecheap.String("A"),
-							Address: namecheap.String("11.11.111.111"),
-							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
-						}),
-						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
-							Name:    namecheap.String("sub22"),
-							Type:    namecheap.String("A"),
-							Address: namecheap.String("22.22.222.222"),
-							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
-						}),
-						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
-							Name:    namecheap.String("sub3"),
-							Type:    namecheap.String("A"),
-							Address: namecheap.String("33.33.33.33"),
-							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
-						}),
-					),
+					ExpectError: regexp.MustCompile("Error: Duplicate record"),
 				},
 			},
 		})
 	})
 
-	t.Run("resources_with_mx_records", func(t *testing.T) {
+	t.Run("resources_with_mx_records_parallel", func(t *testing.T) {
 		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -682,7 +462,7 @@ func TestAccNamecheapDomainRecords_MergeMultipleRecordsInDifferentResources(t *t
 		})
 	})
 
-	t.Run("resources_with_mxe_record", func(t *testing.T) {
+	t.Run("resources_with_mxe_record_parallel", func(t *testing.T) {
 		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -790,7 +570,102 @@ func TestAccNamecheapDomainRecords_MergeMultipleRecordsInDifferentResources(t *t
 		})
 	})
 
-	t.Run("nameservers", func(t *testing.T) {
+	t.Run("create_ns_on_empty", func(t *testing.T) {
+		var domainRecordsResp namecheap.DomainsDNSGetListCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainNameserversAPIFetch(&domainRecordsResp),
+				testAccDomainNameserversDefault(&domainRecordsResp),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							nameservers = [
+								"dns1.namecheaphosting.com",
+								"dns2.namecheaphosting.com",
+							]
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainNameserversAPIFetch(&domainRecordsResp),
+						testAccDomainNameserversLength(&domainRecordsResp, 2),
+						testAccDomainNameserversContain(&domainRecordsResp, "dns1.namecheaphosting.com"),
+						testAccDomainNameserversContain(&domainRecordsResp, "dns2.namecheaphosting.com"),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("create_ns_on_conflict", func(t *testing.T) {
+		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainNameserversAPIFetch(&domainNameserversResponse),
+				testAccDomainNameserversDefault(&domainNameserversResponse),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							nameservers = [
+								"ns-380.awsdns-47.com",
+								"ns-1076.awsdns-06.org",
+							]
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
+						testAccDomainNameserversLength(&domainNameserversResponse, 2),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%[1]s"
+							mode = "MERGE"
+
+							nameservers = [
+								"ns-380.awsdns-47.com",
+								"ns-1076.awsdns-06.org",
+							]
+						}
+
+						resource "namecheap_domain_records" "my-domain-two" {
+							domain = "%[1]s"
+							mode = "MERGE"
+
+							nameservers = [
+								"ns-380.awsdns-47.com",
+							]
+						}
+					`, *testAccDomain),
+					ExpectError: regexp.MustCompile("Error: Duplicate nameserver"),
+				},
+			},
+		})
+	})
+
+	t.Run("create_ns_parallel", func(t *testing.T) {
 		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
 
 		resource.Test(t, resource.TestCase{
