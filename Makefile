@@ -51,4 +51,7 @@ lint:
 docs:
 	tfplugindocs
 
-.PHONY: format check test build release install_darwin_amd64 install_linux_amd64 lint docs
+vendor:
+	go mod vendor
+
+.PHONY: format check test build release install_darwin_amd64 install_linux_amd64 lint docs vendor
