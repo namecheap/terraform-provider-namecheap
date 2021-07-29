@@ -10,7 +10,7 @@ check:
 	go vet ./...
 
 test:
-	go test ./namecheap -v -count=1
+	go test -v ./namecheap/... -count=1 -cover
 
 # Please set the following ENV variables for this test:
 # NAMECHEAP_USER_NAME, NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_TEST_DOMAIN, NAMECHEAP_USE_SANDBOX (optional, default is false)
@@ -51,4 +51,7 @@ lint:
 docs:
 	tfplugindocs
 
-.PHONY: format check test build release install_darwin_amd64 install_linux_amd64 lint docs
+vendor:
+	go mod vendor
+
+.PHONY: format check test build release install_darwin_amd64 install_linux_amd64 lint docs vendor

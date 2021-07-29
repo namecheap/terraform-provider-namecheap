@@ -578,10 +578,17 @@ func fixCAAIodefAddressValue(address *string) (*string, error) {
 	}
 
 	if len(addressValuesFixed) != 3 {
-		return nil, fmt.Errorf("Invalid value \"%s\"", *address)
+		return nil, fmt.Errorf(`Invalid value "%s"`, *address)
 	}
 
-	addressValuesFixed[2] = fmt.Sprintf(`"%s"`, addressValuesFixed[2])
+	hasPrefixQuote := strings.HasPrefix(addressValuesFixed[2], `"`)
+	hasSuffixQuite := strings.HasSuffix(addressValuesFixed[2], `"`)
+
+	if !hasPrefixQuote && !hasSuffixQuite {
+		addressValuesFixed[2] = fmt.Sprintf(`"%s"`, addressValuesFixed[2])
+	} else if !hasPrefixQuote || !hasSuffixQuite {
+		return nil, fmt.Errorf(`Invalid value "%s"`, *address)
+	}
 
 	addressNew := strings.Join(addressValuesFixed, " ")
 	return &addressNew, nil
@@ -614,7 +621,7 @@ func getFixedAddressOfRecord(record *namecheap.DomainsDNSHostRecord) (*string, e
 	return record.Address, nil
 }
 
-// filterDefaultParkingRecords filters default parking records from records
+// filterDefaultParkingRecords filters out default parking records
 func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetailed, domain *string) *[]namecheap.DomainsDNSHostRecordDetailed {
 	var filteredRecords []namecheap.DomainsDNSHostRecordDetailed
 

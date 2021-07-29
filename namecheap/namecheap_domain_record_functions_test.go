@@ -13,13 +13,25 @@ func TestFixCAAIodefAddressValue(t *testing.T) {
 		Output string
 	}{
 		{"0 iodef domain.com", `0 iodef "domain.com"`},
-		{"0 iodef http://google.com", `0 iodef "http://google.com"`},
+		{"0 iodef http://domain.com", `0 iodef "http://domain.com"`},
+		{"  0 iodef http://domain.com  ", `0 iodef "http://domain.com"`},
+		{`0 iodef "http://domain.com"`, `0 iodef "http://domain.com"`},
 	}
 
 	for i, caseItem := range cases {
 		t.Run("test_"+strconv.Itoa(i+1), func(t *testing.T) {
 			fixedValue, _ := fixCAAIodefAddressValue(&caseItem.Input)
 			assert.Equal(t, caseItem.Output, *fixedValue)
+		})
+	}
+
+	errorCases := []string{"", "random", "random string", `0 iodef "http://domain.com`, `0 iodef "http://domain.com`}
+
+	for i, errorCaseItem := range errorCases {
+		t.Run("test_error_"+strconv.Itoa(i+1), func(t *testing.T) {
+			_, err := fixCAAIodefAddressValue(&errorCaseItem)
+			assert.NotNil(t, err)
+			assert.Errorf(t, err, `Invalid value "`+errorCaseItem+`"`)
 		})
 	}
 }
@@ -176,6 +188,96 @@ func TestResolveEmailType(t *testing.T) {
 			assert.Equal(t, &caseItem.ExpectedEmailType, resolveEmailType(&caseItem.Records, &caseItem.EmailType))
 		})
 	}
+}
+
+func TestFilterDefaultParkingRecords(t *testing.T) {
+	t.Run("should_filter", func(t *testing.T) {
+		domain := "domain.com"
+
+		records := []namecheap.DomainsDNSHostRecordDetailed{
+			{
+				Name:    namecheap.String("www"),
+				Type:    namecheap.String(namecheap.RecordTypeCNAME),
+				Address: namecheap.String("parkingpage.namecheap.com."),
+			},
+			{
+				Name:    namecheap.String("@"),
+				Type:    namecheap.String(namecheap.RecordTypeURL),
+				Address: namecheap.String("http://www.domain.com/?from=@"),
+			},
+		}
+
+		filteredRecords := filterDefaultParkingRecords(&records, &domain)
+
+		assert.NotNil(t, filteredRecords)
+		assert.Len(t, *filteredRecords, 0)
+	})
+
+	t.Run("should_not_filter", func(t *testing.T) {
+		domain := "domain.com"
+
+		records := []namecheap.DomainsDNSHostRecordDetailed{
+			{
+				Name:    namecheap.String("www"),
+				Type:    namecheap.String(namecheap.RecordTypeCNAME),
+				Address: namecheap.String("page.another-domain.com."),
+			},
+			{
+				Name:    namecheap.String("@"),
+				Type:    namecheap.String(namecheap.RecordTypeURL),
+				Address: namecheap.String("http://page.another-domain.com/?from=@"),
+			},
+		}
+
+		filteredRecords := filterDefaultParkingRecords(&records, &domain)
+
+		assert.NotNil(t, records)
+		assert.Len(t, *filteredRecords, 2)
+		assert.Equal(t, records, *filteredRecords)
+	})
+}
+
+func TestConvertRecordTypeSetToDomainRecords(t *testing.T) {
+	var recordsRaw []interface{}
+
+	recordsRaw = append(recordsRaw, map[string]interface{}{
+		"hostname": "www",
+		"type":     namecheap.RecordTypeA,
+		"address":  "11.11.11.11",
+		"mx_pref":  10,
+		"ttl":      1800,
+	})
+
+	recordsRaw = append(recordsRaw, map[string]interface{}{
+		"hostname": "blog",
+		"type":     namecheap.RecordTypeA,
+		"address":  "22.22.22.22",
+		"mx_pref":  10,
+		"ttl":      600,
+	})
+
+	expectedRecords := []namecheap.DomainsDNSHostRecord{
+		{
+			HostName:   namecheap.String("www"),
+			RecordType: namecheap.String(namecheap.RecordTypeA),
+			Address:    namecheap.String("11.11.11.11"),
+			MXPref:     namecheap.UInt8(10),
+			TTL:        namecheap.Int(1800),
+		},
+		{
+			HostName:   namecheap.String("blog"),
+			RecordType: namecheap.String(namecheap.RecordTypeA),
+			Address:    namecheap.String("22.22.22.22"),
+			MXPref:     namecheap.UInt8(10),
+			TTL:        namecheap.Int(600),
+		},
+	}
+
+	convertedRecords := convertRecordTypeSetToDomainRecords(&recordsRaw)
+
+	assert.NotNil(t, convertedRecords)
+	assert.Len(t, *convertedRecords, 2)
+	assert.Equal(t, expectedRecords, *convertedRecords)
 }
 
 func createRecordByTypeAndAddress(recordType string, address string) namecheap.DomainsDNSHostRecord {

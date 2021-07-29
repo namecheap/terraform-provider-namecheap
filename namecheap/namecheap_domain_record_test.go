@@ -177,8 +177,8 @@ func equalDomainRecord(sRec *namecheap.DomainsDNSHostRecordDetailed, dRec *namec
 		*sRec.MXPref == *dRec.MXPref
 }
 
-func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
-	t.Run("create_records_on_empty", func(t *testing.T) {
+func TestAccNamecheapDomainRecords(t *testing.T) {
+	t.Run("records_on_empty_merge", func(t *testing.T) {
 		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -202,6 +202,46 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 								hostname = "sub1"
 								type = "A"
 								address = "11.11.11.11"
+								ttl = 300
+							}
+
+							record {
+								hostname = "sub2"
+								type = "A"
+								address = "22.22.22.22"
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 2),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.11.11"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(300),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub2"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("22.22.22.22"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							record {
+								hostname = "sub11"
+								type = "A"
+								address = "111.111.111.111"
+								ttl = 1800
 							}
 						}
 					`, *testAccDomain),
@@ -209,11 +249,11 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 						testAccDomainRecordsAPIFetch(&domainRecordsResp),
 						testAccDomainRecordsLength(&domainRecordsResp, 1),
 						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
-							Name:    namecheap.String("sub1"),
+							Name:    namecheap.String("sub11"),
 							Type:    namecheap.String("A"),
-							Address: namecheap.String("11.11.11.11"),
+							Address: namecheap.String("111.111.111.111"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -221,7 +261,7 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("create_records_if_exists", func(t *testing.T) {
+	t.Run("records_with_exist_merge", func(t *testing.T) {
 		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -285,7 +325,7 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("create_duplicate_records_conflict", func(t *testing.T) {
+	t.Run("create_duplicate_records_conflict_merge", func(t *testing.T) {
 		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -354,7 +394,7 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("resources_with_mx_records_parallel", func(t *testing.T) {
+	t.Run("resources_with_mx_records_parallel_merge", func(t *testing.T) {
 		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -462,7 +502,7 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("resources_with_mxe_record_parallel", func(t *testing.T) {
+	t.Run("resources_with_mxe_record_parallel_merge", func(t *testing.T) {
 		var domainRecordsResponse namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -570,7 +610,100 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("create_ns_on_empty", func(t *testing.T) {
+	t.Run("records_overwrite", func(t *testing.T) {
+		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				setDomainRecords(t, namecheap.String(namecheap.EmailTypeNone), &[]namecheap.DomainsDNSHostRecord{
+					{
+						HostName:   namecheap.String("remove"),
+						RecordType: namecheap.String(namecheap.RecordTypeA),
+						Address:    namecheap.String("22.22.22.22"),
+						TTL:        namecheap.Int(1799),
+					},
+				})
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&domainRecordsResp),
+				testAccDomainRecordsLength(&domainRecordsResp, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "OVERWRITE"
+							email_type = "FWD"
+
+							record {
+								hostname = "sub1"
+								type = "A"
+								address = "11.11.11.11"
+								ttl = 300
+							}
+
+							record {
+								hostname = "sub2"
+								type = "A"
+								address = "22.22.22.22"
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 2),
+						testAccDomainRecordsEmailType(&domainRecordsResp, namecheap.EmailTypeForward),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("11.11.11.11"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(300),
+						}),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub2"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("22.22.22.22"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1799),
+						}),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "OVERWRITE"
+
+							record {
+								hostname = "sub11"
+								type = "A"
+								address = "111.111.111.111"
+								ttl = 1800
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 1),
+						testAccDomainRecordsEmailType(&domainRecordsResp, namecheap.EmailTypeNone),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub11"),
+							Type:    namecheap.String("A"),
+							Address: namecheap.String("111.111.111.111"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(1800),
+						}),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("ns_on_empty_merge", func(t *testing.T) {
 		var domainRecordsResp namecheap.DomainsDNSGetListCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -606,7 +739,7 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("create_ns_on_conflict", func(t *testing.T) {
+	t.Run("ns_on_conflict_merge", func(t *testing.T) {
 		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -665,7 +798,7 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 		})
 	})
 
-	t.Run("create_ns_parallel", func(t *testing.T) {
+	t.Run("ns_parallel_merge", func(t *testing.T) {
 		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -707,6 +840,61 @@ func TestAccNamecheapDomainRecords_CreateMerge(t *testing.T) {
 						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
 						testAccDomainNameserversContain(&domainNameserversResponse, "dns1.namecheaphosting.com"),
 						testAccDomainNameserversContain(&domainNameserversResponse, "dns2.namecheaphosting.com"),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("ns_overwrite", func(t *testing.T) {
+		var domainNSResponse namecheap.DomainsDNSGetListCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainNameserversAPIFetch(&domainNSResponse),
+				testAccDomainNameserversDefault(&domainNSResponse),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "OVERWRITE"
+
+							nameservers = [
+								"dns1.namecheaphosting.com",
+								"dns2.namecheaphosting.com",
+							]
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainNameserversAPIFetch(&domainNSResponse),
+						testAccDomainNameserversLength(&domainNSResponse, 2),
+						testAccDomainNameserversContain(&domainNSResponse, "dns1.namecheaphosting.com"),
+						testAccDomainNameserversContain(&domainNSResponse, "dns2.namecheaphosting.com"),
+					),
+				},
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "OVERWRITE"
+
+							nameservers = [
+								"ns-380.awsdns-47.com",
+								"ns-1076.awsdns-06.org",
+							]
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainNameserversAPIFetch(&domainNSResponse),
+						testAccDomainNameserversLength(&domainNSResponse, 2),
+						testAccDomainNameserversContain(&domainNSResponse, "ns-380.awsdns-47.com"),
+						testAccDomainNameserversContain(&domainNSResponse, "ns-1076.awsdns-06.org"),
 					),
 				},
 			},
