@@ -121,6 +121,11 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 		nameservers = nameserversRaw.(*schema.Set).List()
 	}
 
+	if mode == ncModeMerge {
+		ncMutexKV.Lock(domain)
+		defer ncMutexKV.Unlock(domain)
+	}
+
 	if mode == ncModeMerge && records != nil {
 		diags := createRecordsMerge(domain, emailType, records, client)
 		if diags.HasError() {
@@ -175,6 +180,11 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 
 	if nameserversRaw, ok := data.GetOk("nameservers"); ok {
 		nameservers = nameserversRaw.(*schema.Set).List()
+	}
+
+	if mode == ncModeMerge {
+		ncMutexKV.Lock(domain)
+		defer ncMutexKV.Unlock(domain)
 	}
 
 	// We must read nameservers status before hosts.
@@ -262,6 +272,11 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
 		emailTypeString := emailTypeRaw.(string)
 		emailType = &emailTypeString
+	}
+
+	if mode == ncModeMerge {
+		ncMutexKV.Lock(domain)
+		defer ncMutexKV.Unlock(domain)
 	}
 
 	nsResponse, err := client.DomainsDNS.GetList(domain)
@@ -365,6 +380,11 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 
 	recordsLen := len(records)
 	nameserversLen := len(nameservers)
+
+	if mode == ncModeMerge {
+		ncMutexKV.Lock(domain)
+		defer ncMutexKV.Unlock(domain)
+	}
 
 	if mode == ncModeMerge && recordsLen != 0 {
 		return deleteRecordsMerge(domain, records, client)

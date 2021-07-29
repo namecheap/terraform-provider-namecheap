@@ -269,6 +269,10 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 		newDomainRecords = append(newDomainRecords, *record)
 	}
 
+	if emailType == nil {
+		emailType = resolveEmailType(&newDomainRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
+	}
+
 	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    namecheap.String(domain),
 		Records:   &newDomainRecords,
@@ -421,6 +425,10 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 
 	newRecordList = append(newRecordList, *currentRecordsMapped...)
 
+	if emailType == nil {
+		emailType = resolveEmailType(&newRecordList, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
+	}
+
 	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &newRecordList,
@@ -475,10 +483,12 @@ func deleteRecordsMerge(domain string, previousRecords []interface{}, client *na
 		}
 	}
 
+	resolvedEmailType := resolveEmailType(&remainedRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
+
 	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &remainedRecords,
-		EmailType: nil,
+		EmailType: resolvedEmailType,
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -623,4 +633,32 @@ func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetail
 // This function mostly serves to print error details for user
 func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {
 	return fmt.Sprintf("{hostname = %s, type = %s, address = %s}", *record.HostName, *record.RecordType, *record.Address)
+}
+
+// resolveEmailType resolves an emailType for the case when no emailType provided by terraform configuration,
+// but we have an old emailType value extracted from read response
+// The main purpose is to prevent set up MX/MXE email type when after manipulation no MX/MXE records available
+// This function resolves a bug when we have removed MX/MXE record without reset of emailType, then trying to remove non-MX* record
+func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *string) *string {
+	if *emailType != namecheap.EmailTypeMXE && *emailType != namecheap.EmailTypeMX {
+		return emailType
+	}
+
+	foundMX := false
+	foundMXE := false
+
+	for _, record := range *records {
+		if *record.RecordType == namecheap.RecordTypeMX {
+			foundMX = true
+		} else if *record.RecordType == namecheap.RecordTypeMXE {
+			foundMXE = true
+		}
+	}
+
+	if *emailType == namecheap.EmailTypeMX && !foundMX ||
+		*emailType == namecheap.EmailTypeMXE && !foundMXE {
+		return namecheap.String(namecheap.EmailTypeNone)
+	}
+
+	return emailType
 }

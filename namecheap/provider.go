@@ -5,6 +5,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
+	"github.com/namecheap/terraform-provider-namecheap/namecheap/internal/mutexkv"
 )
 
 func Provider() *schema.Provider {
@@ -70,3 +71,5 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 
 	return client, diag.Diagnostics{}
 }
+
+var ncMutexKV = mutexkv.NewMutexKV()
