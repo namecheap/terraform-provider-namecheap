@@ -46,7 +46,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 - `domain` - (Required) Purchased available domain name on your account
 - `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`
-- `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX. Conflicts with `nameservers`
+- `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`
 - `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record`
   records. Conflicts with `nameservers`
 - `nameservers` - (Optional) List of nameservers. Conflicts with `email_type` and `record`

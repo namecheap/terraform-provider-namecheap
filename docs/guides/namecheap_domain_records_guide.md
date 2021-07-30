@@ -37,6 +37,34 @@ The same workflow works for both: `record` items and `nameservers`.
 ~> Upon creating a new resource with the records or nameservers that already exist, the provider will throw a duplicate
 error.
 
+The `MERGE` mode allows you to control records related to the same domain as a different resources.
+
+```terraform
+resource "namecheap_domain_records" "blog-my-domain-com" {
+  domain = "my-domain.com"
+  mode = "MERGE"
+  
+  record {
+    hostname = "blog"
+    type = "A"
+    address = "11.22.33.44"
+  }
+}
+
+resource "namecheap_domain_records" "admin-my-domain-com" {
+  domain = "my-domain.com"
+  mode = "MERGE"
+
+  record {
+    hostname = "admin"
+    type = "A"
+    address = "11.22.33.55"
+  }
+}
+```
+
+~> Be careful to use multiple resources with the same domain on different terraform instances to prevent racing.
+
 ### `OVERWRITE`
 
 Unlike [MERGE](#merge), `OVERWRITE` always removes existing records and force overwrites with provided in terraform
@@ -98,7 +126,7 @@ resource "namecheap_domain_records" "my-domain-com" {
   email_type = "MXE"
 
   record {
-    hostname = "kit-kitty.live"
+    hostname = "my-domain.com"
     type = "MXE"
     address = "12.13.14.15"
   }
