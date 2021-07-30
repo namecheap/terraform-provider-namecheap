@@ -39,3 +39,9 @@ Run acceptance tests:
 ```shell
 $ make testacc
 ```
+
+## Release
+
+We'll publish a new tagged release once significant changes accumulated. A new version will be available on the registry
+within a few minutes after tagging release. If you're expecting to get a new release with mandatory fixes for you, feel
+free to contact us.
