@@ -15,12 +15,14 @@ access for your account and whitelisted your static IP address where the terrafo
 
 ## Example Usage
 
+Terraform 0.13 and later:
+
 ```tf
 terraform {
   required_providers {
     namecheap = {
       source = "namecheap/namecheap"
-      version = "2.0.0"
+      version = ">= 2.0.0"
     }
   }
 }
