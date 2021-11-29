@@ -175,7 +175,7 @@ github.com/mitchellh/go-wordwrap
 github.com/mitchellh/mapstructure
 # github.com/mitchellh/reflectwalk v1.0.2
 github.com/mitchellh/reflectwalk
-# github.com/namecheap/go-namecheap-sdk/v2 v2.0.2
+# github.com/namecheap/go-namecheap-sdk/v2 v2.1.0
 ## explicit
 github.com/namecheap/go-namecheap-sdk/v2/namecheap
 github.com/namecheap/go-namecheap-sdk/v2/namecheap/internal/syncretry

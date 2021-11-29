@@ -56,7 +56,28 @@ func (dds *DomainsDNSService) GetList(domain string) (*DomainsDNSGetListCommandR
 	}
 	if response.Errors != nil && len(*response.Errors) > 0 {
 		apiErr := (*response.Errors)[0]
-		return nil, fmt.Errorf("%s (%s)", *apiErr.Message, *apiErr.Number)
+
+		if *apiErr.Number != "2019166" {
+			return nil, fmt.Errorf("%s (%s)", *apiErr.Message, *apiErr.Number)
+		}
+
+		var domainInfo *DomainsGetInfoCommandResponse
+		domainInfo, err = dds.client.Domains.GetInfo(domain)
+		if err != nil {
+			return nil, err
+		}
+
+		IsUsingFreeDNS := *domainInfo.DomainDNSGetListResult.DnsDetails.ProviderType == "FreeDNS"
+
+		return &DomainsDNSGetListCommandResponse{
+			DomainDNSGetListResult: &DomainDNSGetListResult{
+				Domain:         domainInfo.DomainDNSGetListResult.DomainName,
+				IsUsingOurDNS:  domainInfo.DomainDNSGetListResult.DnsDetails.IsUsingOurDNS,
+				IsPremiumDNS:   domainInfo.DomainDNSGetListResult.PremiumDnsSubscription.IsActive,
+				IsUsingFreeDNS: &IsUsingFreeDNS,
+				Nameservers:    domainInfo.DomainDNSGetListResult.DnsDetails.Nameservers,
+			},
+		}, nil
 	}
 
 	return response.CommandResponse, nil
