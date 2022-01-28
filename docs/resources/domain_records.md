@@ -15,7 +15,6 @@ each argument and usage examples.
 ```terraform
 resource "namecheap_domain_records" "my-domain-com" {
   domain = "my-domain.com"
-  mode = "OVERWRITE"
   email_type = "NONE"
 
   record {
@@ -33,7 +32,7 @@ resource "namecheap_domain_records" "my-domain-com" {
 
 resource "namecheap_domain_records" "my-domain2-com" {
   domain = "my-domain2.com"
-  mode = "OVERWRITE"
+  mode = "OVERWRITE" // Warning: this will remove all manually set records
 
   nameservers = [
     "ns1.some-domain.com",
@@ -45,7 +44,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 ## Argument Reference
 
 - `domain` - (Required) Purchased available domain name on your account
-- `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`
+- `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE` - removes all manually set records & sets only ones that were specified in TF config
 - `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`
 - `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record`
   records. Conflicts with `nameservers`
