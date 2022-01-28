@@ -62,3 +62,11 @@ resource "namecheap_domain_records" "my-domain2-com" {
 - `ttl` - (Optional) Time to live for all record types. Possible values: any value between 60 to 60000
 
 ~> It is strongly recommended to set `address`, `hostname`, `nameservers` in lower case to prevent undefined behavior!  
+
+## Import
+
+Domain records can be imported using by domain name, e.g.,
+
+```terraform
+terraform import namecheap_domain_records.main example.com
+```

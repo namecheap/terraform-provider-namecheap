@@ -14,7 +14,7 @@ import (
 const (
 	ncModeMerge     = "MERGE"
 	ncModeOverwrite = "OVERWRITE"
-	ncModeImport 		= "IMPORT"
+	ncModeImport    = "IMPORT"
 )
 
 func resourceNamecheapDomainRecords() *schema.Resource {
@@ -30,7 +30,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				data.Set("mode", ncModeImport)
 
 				return []*schema.ResourceData{data}, nil
-				},
+			},
 		},
 
 		Schema: map[string]*schema.Schema{
