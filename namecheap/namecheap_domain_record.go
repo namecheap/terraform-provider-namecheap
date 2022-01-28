@@ -25,9 +25,13 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 		DeleteContext: resourceRecordDelete,
 
 		Importer: &schema.ResourceImporter{
-			State: func(data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-				data.Set("domain", data.Id())
-				data.Set("mode", ncModeImport)
+			StateContext: func(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+				if err := data.Set("domain", data.Id()); err != nil {
+					return nil, err
+				}
+				if err := data.Set("mode", ncModeImport); err != nil {
+					return nil, err
+				}
 
 				return []*schema.ResourceData{data}, nil
 			},
