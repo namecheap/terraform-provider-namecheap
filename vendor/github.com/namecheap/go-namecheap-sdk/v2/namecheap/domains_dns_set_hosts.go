@@ -37,7 +37,7 @@ var AllowedRecordTypeValues = []string{RecordTypeA, RecordTypeAAAA, RecordTypeAl
 var AllowedEmailTypeValues = []string{EmailTypeNone, EmailTypeMXE, EmailTypeMX, EmailTypeForward, EmailTypePrivate, EmailTypeGmail}
 
 var allowedTagValues = []string{"issue", "issuewild", "iodef"}
-var validURLProtocolPrefix = regexp.MustCompile("[a-z]+://")
+var validURLProtocolPrefix = regexp.MustCompile("[a-z]+:(?://)?")
 
 type DomainsDNSHostRecord struct {
 	// Sub-domain/hostname to create the record for

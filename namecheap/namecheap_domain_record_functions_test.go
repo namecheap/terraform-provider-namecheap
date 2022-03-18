@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestFixCAAIodefAddressValue(t *testing.T) {
+func TestFixCAAAddressValue(t *testing.T) {
 	cases := []struct {
 		Input  string
 		Output string
@@ -16,11 +16,17 @@ func TestFixCAAIodefAddressValue(t *testing.T) {
 		{"0 iodef http://domain.com", `0 iodef "http://domain.com"`},
 		{"  0 iodef http://domain.com  ", `0 iodef "http://domain.com"`},
 		{`0 iodef "http://domain.com"`, `0 iodef "http://domain.com"`},
+		{"0 iodef mailto:admin@domain.com", `0 iodef "mailto:admin@domain.com"`},
+		{`0 iodef "mailto:admin@domain.com"`, `0 iodef "mailto:admin@domain.com"`},
+		{"0 issue domain.com", `0 issue "domain.com"`},
+		{`0 issue "domain.com"`, `0 issue "domain.com"`},
+		{"0 issuewild domain.com", `0 issuewild "domain.com"`},
+		{`0 issuewild "domain.com"`, `0 issuewild "domain.com"`},
 	}
 
 	for i, caseItem := range cases {
 		t.Run("test_"+strconv.Itoa(i+1), func(t *testing.T) {
-			fixedValue, _ := fixCAAIodefAddressValue(&caseItem.Input)
+			fixedValue, _ := fixCAAAddressValue(&caseItem.Input)
 			assert.Equal(t, caseItem.Output, *fixedValue)
 		})
 	}
@@ -29,7 +35,7 @@ func TestFixCAAIodefAddressValue(t *testing.T) {
 
 	for i, errorCaseItem := range errorCases {
 		t.Run("test_error_"+strconv.Itoa(i+1), func(t *testing.T) {
-			_, err := fixCAAIodefAddressValue(&errorCaseItem)
+			_, err := fixCAAAddressValue(&errorCaseItem)
 			assert.NotNil(t, err)
 			assert.Errorf(t, err, `Invalid value "`+errorCaseItem+`"`)
 		})
