@@ -566,7 +566,7 @@ func convertInterfacesToString(stringsRaw []interface{}) []string {
 	return stringList
 }
 
-func fixCAAIodefAddressValue(address *string) (*string, error) {
+func fixCAAAddressValue(address *string) (*string, error) {
 	addressValues := strings.Split(strings.TrimSpace(*address), " ")
 	var addressValuesFixed []string
 
@@ -582,11 +582,11 @@ func fixCAAIodefAddressValue(address *string) (*string, error) {
 	}
 
 	hasPrefixQuote := strings.HasPrefix(addressValuesFixed[2], `"`)
-	hasSuffixQuite := strings.HasSuffix(addressValuesFixed[2], `"`)
+	hasSuffixQuote := strings.HasSuffix(addressValuesFixed[2], `"`)
 
-	if !hasPrefixQuote && !hasSuffixQuite {
+	if !hasPrefixQuote && !hasSuffixQuote {
 		addressValuesFixed[2] = fmt.Sprintf(`"%s"`, addressValuesFixed[2])
-	} else if !hasPrefixQuote || !hasSuffixQuite {
+	} else if !hasPrefixQuote || !hasSuffixQuote {
 		return nil, fmt.Errorf(`Invalid value "%s"`, *address)
 	}
 
@@ -604,7 +604,7 @@ func fixAddressEndWithDot(address *string) *string {
 // getFixedAddressOfRecord check the record type and return the fixed address with either dot suffix or quotes around domain name
 // The following addresses should be returned:
 // - for CNAME, ALIAS, NS, MX records, if the address has been provided without dot suffix, then it will be added
-// - for CAA records with iodef key word, if no quotes wrapping the domain, then the quotes will be added
+// - for CAA records, if no quotes wrapping the domain, then the quotes will be added
 // - for other cases the method will just return the address equal to input one
 func getFixedAddressOfRecord(record *namecheap.DomainsDNSHostRecord) (*string, error) {
 	if *record.RecordType == namecheap.RecordTypeCNAME ||
@@ -614,8 +614,8 @@ func getFixedAddressOfRecord(record *namecheap.DomainsDNSHostRecord) (*string, e
 		return fixAddressEndWithDot(record.Address), nil
 	}
 
-	if *record.RecordType == namecheap.RecordTypeCAA && strings.Contains(*record.Address, "iodef") {
-		return fixCAAIodefAddressValue(record.Address)
+	if *record.RecordType == namecheap.RecordTypeCAA {
+		return fixCAAAddressValue(record.Address)
 	}
 
 	return record.Address, nil

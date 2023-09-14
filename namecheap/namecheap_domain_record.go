@@ -90,7 +90,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 						"ttl": {
 							Type:        schema.TypeInt,
 							Optional:    true,
-							Default:     1799,
+							Default:     1800,
 							Description: fmt.Sprintf("Time to live for all record types. Possible values: any value between %d to %d", namecheap.MinTTL, namecheap.MaxTTL),
 						},
 					},
