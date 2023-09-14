@@ -49,7 +49,7 @@ jobs:
         uses: namecheap/ec2-github-runner@main
         with:
           mode: start
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           ec2-image-owner: 699717368611
           ec2-image-filters: >
             [
@@ -119,6 +119,6 @@ jobs:
         uses: namecheap/ec2-github-runner@main
         with:
           mode: stop
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
