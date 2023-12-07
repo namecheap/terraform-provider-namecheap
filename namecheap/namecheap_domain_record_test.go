@@ -227,7 +227,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("22.22.22.22"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -272,7 +272,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 						HostName:   namecheap.String("sub1"),
 						RecordType: namecheap.String(namecheap.RecordTypeA),
 						Address:    namecheap.String("22.22.22.22"),
-						TTL:        namecheap.Int(1799),
+						TTL:        namecheap.Int(1800),
 					},
 				})
 			},
@@ -285,7 +285,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 					Type:    namecheap.String(namecheap.RecordTypeA),
 					Address: namecheap.String("22.22.22.22"),
 					MXPref:  namecheap.Int(10),
-					TTL:     namecheap.Int(1799),
+					TTL:     namecheap.Int(1800),
 				}),
 			),
 			Steps: []resource.TestStep{
@@ -310,14 +310,14 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String(namecheap.RecordTypeA),
 							Address: namecheap.String("22.22.22.22"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    namecheap.String("sub2"),
 							Type:    namecheap.String(namecheap.RecordTypeA),
 							Address: namecheap.String("33.33.33.33"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -360,7 +360,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("22.22.22.22"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -442,14 +442,14 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("11.11.11.11"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    namecheap.String("@"),
 							Type:    namecheap.String("MX"),
 							Address: namecheap.String("mail.domain.com."),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -487,14 +487,14 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("11.11.111.111"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    namecheap.String("@"),
 							Type:    namecheap.String("MX"),
 							Address: namecheap.String("mail.domain-new.com."),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -550,14 +550,14 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("11.11.11.11"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    testAccDomain,
 							Type:    namecheap.String("MXE"),
 							Address: namecheap.String("22.33.44.55"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -595,14 +595,14 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("11.11.111.111"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 						testAccDomainRecordsContain(&domainRecordsResponse, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    testAccDomain,
 							Type:    namecheap.String("MXE"),
 							Address: namecheap.String("33.44.55.66"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -621,7 +621,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 						HostName:   namecheap.String("remove"),
 						RecordType: namecheap.String(namecheap.RecordTypeA),
 						Address:    namecheap.String("22.22.22.22"),
-						TTL:        namecheap.Int(1799),
+						TTL:        namecheap.Int(1800),
 					},
 				})
 			},
@@ -668,7 +668,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							Type:    namecheap.String("A"),
 							Address: namecheap.String("22.22.22.22"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1799),
+							TTL:     namecheap.Int(1800),
 						}),
 					),
 				},
@@ -759,7 +759,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							mode = "MERGE"
 
 							nameservers = [
-								"ns-380.awsdns-47.com",
+								"ns-1467.awsdns-55.org",
 								"ns-1076.awsdns-06.org",
 							]
 						}
@@ -767,7 +767,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 					Check: resource.ComposeTestCheckFunc(
 						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
 						testAccDomainNameserversLength(&domainNameserversResponse, 2),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1467.awsdns-55.org"),
 						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
 					),
 				},
@@ -778,7 +778,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							mode = "MERGE"
 
 							nameservers = [
-								"ns-380.awsdns-47.com",
+								"ns-1467.awsdns-55.org",
 								"ns-1076.awsdns-06.org",
 							]
 						}
@@ -788,7 +788,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							mode = "MERGE"
 
 							nameservers = [
-								"ns-380.awsdns-47.com",
+								"ns-1467.awsdns-55.org",
 							]
 						}
 					`, *testAccDomain),
@@ -818,7 +818,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							mode = "MERGE"
 
 							nameservers = [
-								"ns-380.awsdns-47.com",
+								"ns-1467.awsdns-55.org",
 								"ns-1076.awsdns-06.org",
 							]
 						}
@@ -836,7 +836,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 					Check: resource.ComposeTestCheckFunc(
 						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
 						testAccDomainNameserversLength(&domainNameserversResponse, 4),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-380.awsdns-47.com"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1467.awsdns-55.org"),
 						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
 						testAccDomainNameserversContain(&domainNameserversResponse, "dns1.namecheaphosting.com"),
 						testAccDomainNameserversContain(&domainNameserversResponse, "dns2.namecheaphosting.com"),
@@ -885,7 +885,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 							mode = "OVERWRITE"
 
 							nameservers = [
-								"ns-380.awsdns-47.com",
+								"ns-1467.awsdns-55.org",
 								"ns-1076.awsdns-06.org",
 							]
 						}
@@ -893,7 +893,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 					Check: resource.ComposeTestCheckFunc(
 						testAccDomainNameserversAPIFetch(&domainNSResponse),
 						testAccDomainNameserversLength(&domainNSResponse, 2),
-						testAccDomainNameserversContain(&domainNSResponse, "ns-380.awsdns-47.com"),
+						testAccDomainNameserversContain(&domainNSResponse, "ns-1467.awsdns-55.org"),
 						testAccDomainNameserversContain(&domainNSResponse, "ns-1076.awsdns-06.org"),
 					),
 				},
