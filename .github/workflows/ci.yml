@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.16
+          go-version: 1.21
 
       - name: Check
         run: make check
@@ -76,10 +76,10 @@ jobs:
 
       - name: Set up Go
         run: |
-          curl https://dl.google.com/go/go1.16.6.linux-amd64.tar.gz -o go1.16.6.linux-amd64.tar.gz
+          curl https://dl.google.com/go/go1.21.5.linux-amd64.tar.gz -o go1.21.5.linux-amd64.tar.gz
           rm -rf .go-instance
           mkdir .go-instance
-          tar -C .go-instance -xzf go1.16.6.linux-amd64.tar.gz
+          tar -C .go-instance -xzf go1.21.5.linux-amd64.tar.gz
           echo "#!/bin/bash" >> go-env.sh
           echo "" >> go-env.sh
           echo "export PATH=$PATH:$(pwd)/.go-instance/go/bin" >> go-env.sh
@@ -95,11 +95,11 @@ jobs:
           source go-env.sh
           make testacc
         env:
-          NAMECHEAP_USER_NAME: NCStaffvladlenf
-          NAMECHEAP_API_USER: NCStaffvladlenf
-          NAMECHEAP_TEST_DOMAIN: terraform-provider-name.cheap
-          NAMECHEAP_USE_SANDBOX: false
-          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY_NCSTAFFVLADLENF }}
+          NAMECHEAP_USER_NAME: saTerraformProvider
+          NAMECHEAP_API_USER: saTerraformProvider
+          NAMECHEAP_TEST_DOMAIN: terraform-provider-test.net
+          NAMECHEAP_USE_SANDBOX: true
+          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
 
   stop-runner:
     name: Stop self-hosted EC2 runner
