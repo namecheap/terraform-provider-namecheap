@@ -190,7 +190,7 @@ func validateDomainsDNSSetHostsArgs(args *DomainsDNSSetHostsArgs) error {
 					return fmt.Errorf(`Records[%d].Address "%s" must contain a protocol prefix for %s record`, i, *record.Address, *record.RecordType)
 				}
 			} else if *record.RecordType == "CAA" {
-				if strings.Contains(*record.Address, "iodef") && (!validURLProtocolPrefix.MatchString(*record.Address) || !strings.HasPrefix(*record.Address, "mailto:")) {
+				if strings.Contains(*record.Address, "iodef") && (!validURLProtocolPrefix.MatchString(*record.Address) && !strings.HasPrefix(*record.Address, "mailto:")) {
 					return fmt.Errorf(`Records[%d].Address "%s" must contain a protocol prefix for %s iodef record`, i, *record.Address, *record.RecordType)
 				}
 			}
