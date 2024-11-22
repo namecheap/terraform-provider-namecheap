@@ -73,7 +73,7 @@ jobs:
     needs: start-runner
     concurrency: acceptance_test # allow to run the only one instance of the current acceptance_test job
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Set up Go
         run: |
