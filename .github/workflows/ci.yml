@@ -54,7 +54,7 @@ jobs:
           ec2-image-owner: 699717368611
           ec2-image-filters: >
             [
-              { "Name": "name", "Values": ["nc-amzn2-ami-hvm-x86_64-gp2-master-*"] }
+              { "Name": "name", "Values": ["nc-al2023-ami-hvm-x86_64-master.*"] }
             ]
           ec2-instance-type: t3.nano
           subnet-id: subnet-01c4ff5a
