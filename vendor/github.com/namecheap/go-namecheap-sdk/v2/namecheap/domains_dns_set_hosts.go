@@ -37,6 +37,7 @@ var AllowedRecordTypeValues = []string{RecordTypeA, RecordTypeAAAA, RecordTypeAl
 var AllowedEmailTypeValues = []string{EmailTypeNone, EmailTypeMXE, EmailTypeMX, EmailTypeForward, EmailTypePrivate, EmailTypeGmail}
 
 var allowedTagValues = []string{"issue", "issuewild", "iodef"}
+var validMailProtocolPrefix = regexp.MustCompile("mailto:.*@.*")
 var validURLProtocolPrefix = regexp.MustCompile("[a-z]+://")
 
 type DomainsDNSHostRecord struct {
@@ -190,7 +191,7 @@ func validateDomainsDNSSetHostsArgs(args *DomainsDNSSetHostsArgs) error {
 					return fmt.Errorf(`Records[%d].Address "%s" must contain a protocol prefix for %s record`, i, *record.Address, *record.RecordType)
 				}
 			} else if *record.RecordType == "CAA" {
-				if strings.Contains(*record.Address, "iodef") && !validURLProtocolPrefix.MatchString(*record.Address) {
+				if strings.Contains(*record.Address, "iodef") && !validMailProtocolPrefix.MatchString(*record.Address) && !validURLProtocolPrefix.MatchString(*record.Address) {
 					return fmt.Errorf(`Records[%d].Address "%s" must contain a protocol prefix for %s iodef record`, i, *record.Address, *record.RecordType)
 				}
 			}
