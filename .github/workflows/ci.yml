@@ -47,16 +47,16 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@main
+        uses: namecheap/ec2-github-runner@feat/al2023-support
         with:
           mode: start
           github-token: ${{ secrets.GH_TOKEN }}
           ec2-image-owner: 699717368611
           ec2-image-filters: >
             [
-              { "Name": "name", "Values": ["nc-amzn2-ami-hvm-x86_64-gp2-master-*"] }
+              { "Name": "name", "Values": ["nc-al2023-ami-hvm-x86_64-master-*"] }
             ]
-          ec2-instance-type: t3.nano
+          ec2-instance-type: t3.small
           subnet-id: subnet-01c4ff5a
           security-group-id: sg-106ec76d
           eip-allocation-id: eipalloc-1796f61b
