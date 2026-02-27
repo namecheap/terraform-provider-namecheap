@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(go mod tidy)",
+      "Bash(go mod verify)",
+      "Bash(make build)",
+      "Bash(make format)",
+      "Bash(make check)",
+      "Bash(make test)",
+      "Bash(make lint)",
+      "Bash(make docs)",
+      "Bash(make docs-validate)",
+      "Bash(make vendor)",
+      "Bash(golangci-lint *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr checks *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git status)",
+      "Bash(git show *)",
+      "WebFetch(domain:developer.hashicorp.com)",
+      "WebFetch(domain:pkg.go.dev)",
+      "WebFetch(domain:registry.terraform.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(*.env)",
+      "Read(**/.env)",
+      "Read(.claude/settings.local.json)",
+      "Read(*.tfstate)",
+      "Read(*.tfstate.backup)",
+      "Read(**/*.tfstate)",
+      "Read(*.tfvars)",
+      "Read(**/*.tfvars)",
+      "Read(*.tfvars.json)",
+      "Read(**/*.tfvars.json)",
+      "Read(~/.terraform.d/credentials.tfrc.json)",
+      "Read(~/.terraformrc)",
+      "Read(~/.ssh/*)",
+      "Read(~/.gnupg/*)",
+      "Read(~/.netrc)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.aws/config)"
+    ]
+  },
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "go vet ./... 2>&1 | head -30"
+          }
+        ]
+      }
+    ]
+  }
+}
