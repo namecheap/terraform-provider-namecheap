@@ -14,7 +14,6 @@
       "Bash(make lint)",
       "Bash(make docs)",
       "Bash(make docs-validate)",
-      "Bash(make vendor)",
       "Bash(golangci-lint *)",
       "Bash(gh pr list *)",
       "Bash(gh pr diff *)",
