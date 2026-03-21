@@ -8,12 +8,33 @@ import (
 	"strings"
 )
 
+func validateGetListResponse(response *namecheap.DomainsDNSGetListCommandResponse) error {
+	if response == nil || response.DomainDNSGetListResult == nil {
+		return fmt.Errorf("unexpected nil response from Namecheap API (domain may not exist or may have been removed from the account)")
+	}
+	if response.DomainDNSGetListResult.IsUsingOurDNS == nil {
+		return fmt.Errorf("unexpected nil IsUsingOurDNS in API response (domain may be in an unsupported state)")
+	}
+	return nil
+}
+
+func validateGetHostsResponse(response *namecheap.DomainsDNSGetHostsCommandResponse) error {
+	if response == nil || response.DomainDNSGetHostsResult == nil {
+		return fmt.Errorf("unexpected nil response from Namecheap API (domain may not exist or may have been removed from the account)")
+	}
+	return nil
+}
+
 // createNameserversMerge has the following behaviour:
 // - if nameservers have been set manually, then this method merge the provided ones with manually set
 // - else this is overwriting existent ones
 func createNameserversMerge(domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err := validateGetListResponse(nsResponse); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -75,6 +96,10 @@ func readNameserversMerge(domain string, currentNameservers []string, client *na
 		return nil, diag.FromErr(err)
 	}
 
+	if err := validateGetListResponse(nsResponse); err != nil {
+		return nil, diag.FromErr(err)
+	}
+
 	var foundNameservers []string
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && nsResponse.DomainDNSGetListResult.Nameservers != nil {
@@ -98,6 +123,10 @@ func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]strin
 		return nil, diag.FromErr(err)
 	}
 
+	if err := validateGetListResponse(nsResponse); err != nil {
+		return nil, diag.FromErr(err)
+	}
+
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS || nsResponse.DomainDNSGetListResult.Nameservers == nil {
 		return &[]string{}, nil
 	} else {
@@ -110,6 +139,10 @@ func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]strin
 func updateNameserversMerge(domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err := validateGetListResponse(nsResponse); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -159,6 +192,10 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 func deleteNameserversMerge(domain string, previousNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err := validateGetListResponse(nsResponse); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -221,6 +258,10 @@ func deleteNameserversOverwrite(domain string, client *namecheap.Client) diag.Di
 func createRecordsMerge(domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -318,6 +359,10 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 		return nil, nil, diag.FromErr(err)
 	}
 
+	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
+		return nil, nil, diag.FromErr(err)
+	}
+
 	currentRecordsConverted := convertRecordTypeSetToDomainRecords(&currentRecords)
 
 	var foundRecords []map[string]interface{}
@@ -349,6 +394,10 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 func readRecordsOverwrite(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
+		return nil, nil, diag.FromErr(err)
+	}
+
+	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
 		return nil, nil, diag.FromErr(err)
 	}
 
@@ -387,6 +436,10 @@ func readRecordsOverwrite(domain string, currentRecords []interface{}, client *n
 func updateRecordsMerge(domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -448,6 +501,10 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 func deleteRecordsMerge(domain string, previousRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
 	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -647,6 +704,10 @@ func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {
 // The main purpose is to prevent set up MX/MXE email type when after manipulation no MX/MXE records available
 // This function resolves a bug when we have removed MX/MXE record without reset of emailType, then trying to remove non-MX* record
 func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *string) *string {
+	if emailType == nil {
+		return namecheap.String(namecheap.EmailTypeNone)
+	}
+
 	if *emailType != namecheap.EmailTypeMXE && *emailType != namecheap.EmailTypeMX {
 		return emailType
 	}

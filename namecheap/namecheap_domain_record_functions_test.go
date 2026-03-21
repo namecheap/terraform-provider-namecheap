@@ -196,6 +196,72 @@ func TestResolveEmailType(t *testing.T) {
 	}
 }
 
+func TestResolveEmailType_NilEmailType(t *testing.T) {
+	records := []namecheap.DomainsDNSHostRecord{
+		createRecordByTypeAndAddress(namecheap.RecordTypeA, "1.2.3.4"),
+	}
+	result := resolveEmailType(&records, nil)
+	assert.Equal(t, namecheap.EmailTypeNone, *result)
+}
+
+func TestValidateGetListResponse(t *testing.T) {
+	t.Run("nil_response", func(t *testing.T) {
+		err := validateGetListResponse(nil)
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "unexpected nil response")
+	})
+
+	t.Run("nil_result", func(t *testing.T) {
+		err := validateGetListResponse(&namecheap.DomainsDNSGetListCommandResponse{
+			DomainDNSGetListResult: nil,
+		})
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "unexpected nil response")
+	})
+
+	t.Run("nil_is_using_our_dns", func(t *testing.T) {
+		err := validateGetListResponse(&namecheap.DomainsDNSGetListCommandResponse{
+			DomainDNSGetListResult: &namecheap.DomainDNSGetListResult{
+				IsUsingOurDNS: nil,
+			},
+		})
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "nil IsUsingOurDNS")
+	})
+
+	t.Run("valid_response", func(t *testing.T) {
+		err := validateGetListResponse(&namecheap.DomainsDNSGetListCommandResponse{
+			DomainDNSGetListResult: &namecheap.DomainDNSGetListResult{
+				IsUsingOurDNS: namecheap.Bool(true),
+			},
+		})
+		assert.Nil(t, err)
+	})
+}
+
+func TestValidateGetHostsResponse(t *testing.T) {
+	t.Run("nil_response", func(t *testing.T) {
+		err := validateGetHostsResponse(nil)
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "unexpected nil response")
+	})
+
+	t.Run("nil_result", func(t *testing.T) {
+		err := validateGetHostsResponse(&namecheap.DomainsDNSGetHostsCommandResponse{
+			DomainDNSGetHostsResult: nil,
+		})
+		assert.NotNil(t, err)
+		assert.Contains(t, err.Error(), "unexpected nil response")
+	})
+
+	t.Run("valid_response", func(t *testing.T) {
+		err := validateGetHostsResponse(&namecheap.DomainsDNSGetHostsCommandResponse{
+			DomainDNSGetHostsResult: &namecheap.DomainDNSGetHostsResult{},
+		})
+		assert.Nil(t, err)
+	})
+}
+
 func TestFilterDefaultParkingRecords(t *testing.T) {
 	t.Run("should_filter", func(t *testing.T) {
 		domain := "domain.com"
