@@ -73,7 +73,7 @@ jobs:
     needs: start-runner
     concurrency: acceptance_test # allow to run the only one instance of the current acceptance_test job
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4 # pinned to v4 (node20) — self-hosted EC2 runner doesn't support node24 yet
 
       - name: Set up Go
         run: |
