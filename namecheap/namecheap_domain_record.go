@@ -206,6 +206,10 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		return diag.FromErr(err)
 	}
 
+	if nsResponse == nil || nsResponse.DomainDNSGetListResult == nil || nsResponse.DomainDNSGetListResult.IsUsingOurDNS == nil {
+		return diag.Errorf("Unable to read DNS state for domain %s: the domain may not exist or may have been removed from the account", domain)
+	}
+
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
 		if mode == ncModeMerge {
 			realNameservers, diags := readNameserversMerge(domain, convertInterfacesToString(nameservers), client)
@@ -295,6 +299,10 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	nsResponse, err := client.DomainsDNS.GetList(domain)
 	if err != nil {
 		return diag.FromErr(err)
+	}
+
+	if nsResponse == nil || nsResponse.DomainDNSGetListResult == nil || nsResponse.DomainDNSGetListResult.IsUsingOurDNS == nil {
+		return diag.Errorf("Unable to read DNS state for domain %s: the domain may not exist or may have been removed from the account", domain)
 	}
 
 	// If the previous state contains nameservers, but the new one does not contain,
