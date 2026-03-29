@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: 1.23.12
+          go-version: 1.24.13
 
       - name: Check
         run: make check
@@ -25,7 +25,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.3.1
+          version: v2.8.0
           skip-cache: true
 
       - name: Test
@@ -77,10 +77,10 @@ jobs:
 
       - name: Set up Go
         run: |
-          curl https://dl.google.com/go/go1.23.12.linux-amd64.tar.gz -o go1.23.12.linux-amd64.tar.gz
+          curl https://dl.google.com/go/go1.24.13.linux-amd64.tar.gz -o go1.24.13.linux-amd64.tar.gz
           rm -rf .go-instance
           mkdir .go-instance
-          tar -C .go-instance -xzf go1.23.12.linux-amd64.tar.gz
+          tar -C .go-instance -xzf go1.24.13.linux-amd64.tar.gz
           echo "#!/bin/bash" >> go-env.sh
           echo "" >> go-env.sh
           echo "export PATH=$PATH:$(pwd)/.go-instance/go/bin" >> go-env.sh
