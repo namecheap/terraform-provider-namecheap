@@ -24,16 +24,16 @@ type DomainsNSUpdateResult struct {
 	IsSuccess  *bool   `xml:"IsSuccess,attr"`
 }
 
-func (s *DomainsNSService) Update(SLD string, TLD string, Nameserver string, OldIP string, IP string) (*NameserversCreateCommandResponse, error) {
+func (s *DomainsNSService) Update(sld, tld, nameserver, oldIP, ip string) (*NameserversCreateCommandResponse, error) {
 	var response NameserversUpdateResponse
 
 	params := map[string]string{
 		"Command":    "namecheap.domains.ns.update",
-		"SLD":        SLD,
-		"TLD":        TLD,
-		"Nameserver": Nameserver,
-		"OldIP":      OldIP,
-		"IP":         IP,
+		"SLD":        sld,
+		"TLD":        tld,
+		"Nameserver": nameserver,
+		"OldIP":      oldIP,
+		"IP":         ip,
 	}
 
 	_, err := s.client.DoXML(params, &response)

@@ -25,15 +25,15 @@ type DomainsNSCreateResult struct {
 	IsSuccess  *bool   `xml:"IsSuccess,attr"`
 }
 
-func (s *DomainsNSService) Create(SLD string, TLD string, Nameserver string, IPAddress string) (*NameserversCreateCommandResponse, error) {
+func (s *DomainsNSService) Create(sld, tld, nameserver, ipAddress string) (*NameserversCreateCommandResponse, error) {
 	var response NameserversCreateResponse
 
 	params := map[string]string{
 		"Command":    "namecheap.domains.ns.create",
-		"SLD":        SLD,
-		"TLD":        TLD,
-		"Nameserver": Nameserver,
-		"IP":         IPAddress,
+		"SLD":        sld,
+		"TLD":        tld,
+		"Nameserver": nameserver,
+		"IP":         ipAddress,
 	}
 
 	_, err := s.client.DoXML(params, &response)

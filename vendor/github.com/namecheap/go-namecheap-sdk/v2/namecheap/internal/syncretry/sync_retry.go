@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-var RetryError = errors.New("retry error")
-var RetryAttemptsError = errors.New("retry attempts error")
+var ErrRetry = errors.New("retry error")
+var ErrRetryAttempts = errors.New("retry attempts error")
 
 type Options struct {
 	Delays []int
@@ -31,7 +31,7 @@ func (sq *SyncRetry) Do(f func() error) error {
 		return nil
 	}
 
-	if !errors.Is(err, RetryError) {
+	if !errors.Is(err, ErrRetry) {
 		return err
 	}
 
@@ -45,12 +45,11 @@ func (sq *SyncRetry) Do(f func() error) error {
 			return nil
 		}
 
-		if errors.Is(err, RetryError) {
+		if errors.Is(err, ErrRetry) {
 			continue
-		} else {
-			return err
 		}
+		return err
 	}
 
-	return RetryAttemptsError
+	return ErrRetryAttempts
 }

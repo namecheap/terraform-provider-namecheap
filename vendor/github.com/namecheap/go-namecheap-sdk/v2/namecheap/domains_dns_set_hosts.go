@@ -136,6 +136,7 @@ func (dds DomainsDNSService) SetHosts(args *DomainsDNSSetHostsArgs) (*DomainsDNS
 	return response.CommandResponse, nil
 }
 
+// nolint: gocyclo
 func validateDomainsDNSSetHostsArgs(args *DomainsDNSSetHostsArgs) error {
 	if args.EmailType != nil && !isValidEmailType(*args.EmailType) {
 		return fmt.Errorf("invalid EmailType value: %s", *args.EmailType)
@@ -169,7 +170,8 @@ func validateDomainsDNSSetHostsArgs(args *DomainsDNSSetHostsArgs) error {
 				return fmt.Errorf("invalid Records[%d].TTL value: %d", i, *record.TTL)
 			}
 
-			if *record.RecordType == "MX" {
+			switch *record.RecordType {
+			case "MX":
 				if record.MXPref == nil {
 					return fmt.Errorf("Records[%d].MXPref is nil but required for MX record type", i)
 				}
@@ -179,22 +181,26 @@ func validateDomainsDNSSetHostsArgs(args *DomainsDNSSetHostsArgs) error {
 					return fmt.Errorf("Records[%d].RecordType MX is not allowed for EmailType=%s", i, *args.EmailType)
 				}
 				mxRecordsCount++
-			} else if *record.RecordType == "MXE" {
+
+			case "MXE":
 				if args.EmailType == nil {
 					return fmt.Errorf("Records[%d].RecordType MXE is not allowed for EmailType=nil", i)
 				} else if *args.EmailType != "MXE" {
 					return fmt.Errorf("Records[%d].RecordType MXE is not allowed for EmailType=%s", i, *args.EmailType)
 				}
 				mxeRecordsCount++
-			} else if *record.RecordType == "URL" || *record.RecordType == "URL301" || *record.RecordType == "FRAME" {
+
+			case "URL", "URL301", "FRAME":
 				if !validURLProtocolPrefix.MatchString(*record.Address) {
 					return fmt.Errorf(`Records[%d].Address "%s" must contain a protocol prefix for %s record`, i, *record.Address, *record.RecordType)
 				}
-			} else if *record.RecordType == "CAA" {
+
+			case "CAA":
 				if strings.Contains(*record.Address, "iodef") && !validMailProtocolPrefix.MatchString(*record.Address) && !validURLProtocolPrefix.MatchString(*record.Address) {
 					return fmt.Errorf(`Records[%d].Address "%s" must contain a protocol prefix for %s iodef record`, i, *record.Address, *record.RecordType)
 				}
 			}
+
 		}
 	}
 

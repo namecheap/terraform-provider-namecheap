@@ -24,14 +24,14 @@ type DomainsNSDeleteResult struct {
 	IsSuccess  *bool   `xml:"IsSuccess,attr"`
 }
 
-func (s *DomainsNSService) Delete(SLD string, TLD string, Nameserver string) (*NameserversCreateCommandResponse, error) {
+func (s *DomainsNSService) Delete(sld, tld, nameserver string) (*NameserversCreateCommandResponse, error) {
 	var response NameserversDeleteResponse
 
 	params := map[string]string{
 		"Command":    "namecheap.domains.ns.delete",
-		"SLD":        SLD,
-		"TLD":        TLD,
-		"Nameserver": Nameserver,
+		"SLD":        sld,
+		"TLD":        tld,
+		"Nameserver": nameserver,
 	}
 
 	_, err := s.client.DoXML(params, &response)
