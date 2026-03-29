@@ -6,6 +6,9 @@ on:
       - '**'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
 
   check:
@@ -56,7 +59,7 @@ jobs:
             [
               { "Name": "name", "Values": ["nc-al2023-ami-hvm-x86_64-master-*"] }
             ]
-          ec2-instance-type: t3.small
+          ec2-instance-type: t3.medium
           subnet-id: subnet-01c4ff5a
           security-group-id: sg-106ec76d
           eip-allocation-id: eipalloc-1796f61b
