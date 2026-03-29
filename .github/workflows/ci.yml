@@ -6,9 +6,6 @@ on:
       - '**'
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
 
   check:
@@ -20,15 +17,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: 1.22.12
+          go-version: 1.23.12
 
       - name: Check
         run: make check
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.63.4
+          version: v2.3.1
           skip-cache: true
 
       - name: Test
@@ -80,10 +77,10 @@ jobs:
 
       - name: Set up Go
         run: |
-          curl https://dl.google.com/go/go1.22.12.linux-amd64.tar.gz -o go1.22.12.linux-amd64.tar.gz
+          curl https://dl.google.com/go/go1.23.12.linux-amd64.tar.gz -o go1.23.12.linux-amd64.tar.gz
           rm -rf .go-instance
           mkdir .go-instance
-          tar -C .go-instance -xzf go1.22.12.linux-amd64.tar.gz
+          tar -C .go-instance -xzf go1.23.12.linux-amd64.tar.gz
           echo "#!/bin/bash" >> go-env.sh
           echo "" >> go-env.sh
           echo "export PATH=$PATH:$(pwd)/.go-instance/go/bin" >> go-env.sh

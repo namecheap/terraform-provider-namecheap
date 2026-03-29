@@ -635,7 +635,7 @@ func fixCAAAddressValue(address *string) (*string, error) {
 	}
 
 	if len(addressValuesFixed) != 3 {
-		return nil, fmt.Errorf(`Invalid value "%s"`, *address)
+		return nil, fmt.Errorf(`invalid value "%s"`, *address)
 	}
 
 	hasPrefixQuote := strings.HasPrefix(addressValuesFixed[2], `"`)
@@ -644,7 +644,7 @@ func fixCAAAddressValue(address *string) (*string, error) {
 	if !hasPrefixQuote && !hasSuffixQuote {
 		addressValuesFixed[2] = fmt.Sprintf(`"%s"`, addressValuesFixed[2])
 	} else if !hasPrefixQuote || !hasSuffixQuote {
-		return nil, fmt.Errorf(`Invalid value "%s"`, *address)
+		return nil, fmt.Errorf(`invalid value "%s"`, *address)
 	}
 
 	addressNew := strings.Join(addressValuesFixed, " ")
@@ -716,9 +716,10 @@ func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *stri
 	foundMXE := false
 
 	for _, record := range *records {
-		if *record.RecordType == namecheap.RecordTypeMX {
+		switch *record.RecordType {
+		case namecheap.RecordTypeMX:
 			foundMX = true
-		} else if *record.RecordType == namecheap.RecordTypeMXE {
+		case namecheap.RecordTypeMXE:
 			foundMXE = true
 		}
 	}

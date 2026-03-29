@@ -27,14 +27,14 @@ type DomainNSInfoResult struct {
 	} `xml:"NameserverStatuses"`
 }
 
-func (s *DomainsNSService) GetInfo(SLD string, TLD string, Nameserver string) (*NameserversGetInfoCommandResponse, error) {
+func (s *DomainsNSService) GetInfo(sld, tld, nameserver string) (*NameserversGetInfoCommandResponse, error) {
 	var response NameserversGetInfoResponse
 
 	params := map[string]string{
 		"Command":    "namecheap.domains.ns.getInfo",
-		"SLD":        SLD,
-		"TLD":        TLD,
-		"Nameserver": Nameserver,
+		"SLD":        sld,
+		"TLD":        tld,
+		"Nameserver": nameserver,
 	}
 
 	_, err := s.client.DoXML(params, &response)

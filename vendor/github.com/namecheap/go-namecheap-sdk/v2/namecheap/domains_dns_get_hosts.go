@@ -26,7 +26,7 @@ type DomainDNSGetHostsResult struct {
 }
 
 type DomainsDNSHostRecordDetailed struct {
-	HostId             *int    `xml:"HostId,attr"`
+	HostId             *int    `xml:"HostId,attr"` // nolint: stylecheck,revive
 	Name               *string `xml:"Name,attr"`
 	Type               *string `xml:"Type,attr"`
 	Address            *string `xml:"Address,attr"`

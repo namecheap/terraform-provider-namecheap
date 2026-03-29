@@ -17,15 +17,15 @@ import (
 )
 
 const (
-	namecheapProductionApiUrl = "https://api.namecheap.com/xml.response"
-	namecheapSandboxApiUrl    = "https://api.sandbox.namecheap.com/xml.response"
+	namecheapProductionAPIURL = "https://api.namecheap.com/xml.response"
+	namecheapSandboxAPIURL    = "https://api.sandbox.namecheap.com/xml.response"
 )
 
 type ClientOptions struct {
 	UserName   string
-	ApiUser    string
-	ApiKey     string
-	ClientIp   string
+	ApiUser    string // nolint: stylecheck,revive
+	ApiKey     string // nolint: stylecheck,revive
+	ClientIp   string // nolint: stylecheck,revive
 	UseSandbox bool
 }
 
@@ -55,9 +55,9 @@ func NewClient(options *ClientOptions) *Client {
 	}
 
 	if options.UseSandbox {
-		client.BaseURL = namecheapSandboxApiUrl
+		client.BaseURL = namecheapSandboxAPIURL
 	} else {
-		client.BaseURL = namecheapProductionApiUrl
+		client.BaseURL = namecheapProductionAPIURL
 	}
 
 	client.common.client = client
@@ -73,7 +73,7 @@ func (c *Client) NewRequest(body map[string]string) (*http.Request, error) {
 	u, err := url.Parse(c.BaseURL)
 
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing base URL: %s", err)
+		return nil, fmt.Errorf("error parsing base URL: %s", err)
 	}
 
 	body["Username"] = c.ClientOptions.UserName
@@ -87,7 +87,7 @@ func (c *Client) NewRequest(body map[string]string) (*http.Request, error) {
 	req, err := http.NewRequest("POST", u.String(), bytes.NewBufferString(rBody))
 
 	if err != nil {
-		return nil, fmt.Errorf("Error creating request: %s", err)
+		return nil, fmt.Errorf("error creating request: %s", err)
 	}
 
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
@@ -110,7 +110,7 @@ func (c *Client) DoXML(body map[string]string, obj interface{}) (*http.Response,
 		}
 
 		if response.StatusCode == 405 {
-			return syncretry.RetryError
+			return syncretry.ErrRetry
 		}
 
 		requestResponse = response
@@ -120,7 +120,7 @@ func (c *Client) DoXML(body map[string]string, obj interface{}) (*http.Response,
 		return err
 	})
 
-	if err != nil && errors.Is(err, syncretry.RetryAttemptsError) {
+	if err != nil && errors.Is(err, syncretry.ErrRetryAttempts) {
 		return nil, fmt.Errorf("API retry limit exceeded")
 	}
 
@@ -148,11 +148,7 @@ func encodeBody(body map[string]string) string {
 
 // ParseDomain is a wrapper around publicsuffix.Parse to throw the correct error
 func ParseDomain(domain string) (*publicsuffix.DomainName, error) {
-	const regDomainString = `^([\-a-zA-Z0-9]+\.+){1,}[a-zA-Z0-9]+$`
-	regDomain, err := regexp.Compile(regDomainString)
-	if err != nil {
-		return nil, err
-	}
+	regDomain := regexp.MustCompile(`^([\-a-zA-Z0-9]+\.+){1,}[a-zA-Z0-9]+$`)
 
 	if !regDomain.MatchString(domain) {
 		return nil, fmt.Errorf("invalid domain: incorrect format")

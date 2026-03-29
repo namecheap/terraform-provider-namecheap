@@ -21,15 +21,15 @@ type DomainsGetInfoCommandResponse struct {
 type DomainsGetInfoResult struct {
 	DomainName             *string                 `xml:"DomainName,attr"`
 	IsPremium              *bool                   `xml:"IsPremium,attr"`
-	PremiumDnsSubscription *PremiumDnsSubscription `xml:"PremiumDnsSubscription"`
-	DnsDetails             *DnsDetails             `xml:"DnsDetails"`
+	PremiumDnsSubscription *PremiumDnsSubscription `xml:"PremiumDnsSubscription"` // nolint: stylecheck,revive
+	DnsDetails             *DnsDetails             `xml:"DnsDetails"`             // nolint: stylecheck,revive
 }
 
-type PremiumDnsSubscription struct {
+type PremiumDnsSubscription struct { // nolint: stylecheck,revive
 	IsActive *bool `xml:"IsActive"`
 }
 
-type DnsDetails struct {
+type DnsDetails struct { // nolint: stylecheck,revive
 	ProviderType  *string   `xml:"ProviderType,attr"`
 	IsUsingOurDNS *bool     `xml:"IsUsingOurDNS,attr"`
 	Nameservers   *[]string `xml:"Nameserver"`

@@ -128,12 +128,12 @@ func TestCreateRecordsMerge_EmptyRemote(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", nil))
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 		case "namecheap.domains.dns.setHosts":
 			assert.Equal(t, "www", r.FormValue("HostName1"))
 			assert.Equal(t, "A", r.FormValue("RecordType1"))
 			assert.Equal(t, "1.2.3.4", r.FormValue("Address1"))
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		default:
 			t.Fatalf("unexpected command: %s", command)
 		}
@@ -163,12 +163,12 @@ func TestCreateRecordsMerge_WithExistingRecords(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
 			// Should contain both existing and new records
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		default:
 			t.Fatalf("unexpected command: %s", command)
 		}
@@ -198,7 +198,7 @@ func TestCreateRecordsMerge_DuplicateRecord(t *testing.T) {
 		switch command {
 		case "namecheap.domains.dns.getHosts":
 			// Remote already has this record
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 			}))
 		default:
@@ -233,7 +233,7 @@ func TestCreateRecordsMerge_FiltersParkingRecords(t *testing.T) {
 		switch command {
 		case "namecheap.domains.dns.getHosts":
 			// Return parking records + a real record
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "CNAME", Address: "parkingpage.namecheap.com.", MXPref: 10, TTL: 1800},
 				{Name: "@", Type: "URL", Address: "http://www.test.com/?from=@", MXPref: 10, TTL: 1800},
 				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
@@ -246,7 +246,7 @@ func TestCreateRecordsMerge_FiltersParkingRecords(t *testing.T) {
 				}
 				setHostsRecordCount++
 			}
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -275,10 +275,10 @@ func TestCreateRecordsMerge_WithEmailType(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", nil))
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 		case "namecheap.domains.dns.setHosts":
 			assert.Equal(t, "MX", r.FormValue("EmailType"))
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -301,7 +301,7 @@ func TestCreateRecordsMerge_WithEmailType(t *testing.T) {
 
 func TestCreateRecordsMerge_GetHostsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, apiErrorXML("123456", "API error"))
+		_, _ = fmt.Fprint(w, apiErrorXML("123456", "API error"))
 	}))
 	defer server.Close()
 
@@ -329,7 +329,7 @@ func TestCreateRecordsOverwrite_Simple(t *testing.T) {
 		assert.Equal(t, "NONE", r.FormValue("EmailType"))
 		assert.Equal(t, "www", r.FormValue("HostName1"))
 		assert.Equal(t, "A", r.FormValue("RecordType1"))
-		fmt.Fprint(w, setHostsSuccessXML())
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
 	}))
 	defer server.Close()
 
@@ -352,7 +352,7 @@ func TestCreateRecordsOverwrite_WithEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		assert.Equal(t, "MX", r.FormValue("EmailType"))
-		fmt.Fprint(w, setHostsSuccessXML())
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
 	}))
 	defer server.Close()
 
@@ -374,7 +374,7 @@ func TestCreateRecordsOverwrite_WithEmailType(t *testing.T) {
 
 func TestCreateRecordsOverwrite_EmptyRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, setHostsSuccessXML())
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
 	}))
 	defer server.Close()
 
@@ -389,7 +389,7 @@ func TestCreateRecordsOverwrite_EmptyRecords(t *testing.T) {
 
 func TestReadRecordsMerge_FindsMatchingRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 			{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 			{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 600},
 			{Name: "blog", Type: "CNAME", Address: "example.com.", MXPref: 10, TTL: 1800},
@@ -419,7 +419,7 @@ func TestReadRecordsMerge_FindsMatchingRecords(t *testing.T) {
 
 func TestReadRecordsMerge_NoMatchingRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 			{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 600},
 		}))
 	}))
@@ -444,7 +444,7 @@ func TestReadRecordsMerge_NoMatchingRecords(t *testing.T) {
 
 func TestReadRecordsMerge_CNAMEWithDotFix(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 			{Name: "blog", Type: "CNAME", Address: "example.com.", MXPref: 10, TTL: 1800},
 		}))
 	}))
@@ -472,7 +472,7 @@ func TestReadRecordsMerge_CNAMEWithDotFix(t *testing.T) {
 
 func TestReadRecordsMerge_EmptyRemote(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getHostsXML("NONE", nil))
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 	}))
 	defer server.Close()
 
@@ -497,7 +497,7 @@ func TestReadRecordsMerge_EmptyRemote(t *testing.T) {
 
 func TestReadRecordsOverwrite_ReturnsAllRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 			{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 			{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 600},
 		}))
@@ -524,7 +524,7 @@ func TestReadRecordsOverwrite_ReturnsAllRecords(t *testing.T) {
 
 func TestReadRecordsOverwrite_EmptyRemote(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getHostsXML("NONE", nil))
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 	}))
 	defer server.Close()
 
@@ -545,7 +545,7 @@ func TestUpdateRecordsMerge_ReplacesOldWithNew(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 600},
 			}))
@@ -557,7 +557,7 @@ func TestUpdateRecordsMerge_ReplacesOldWithNew(t *testing.T) {
 				}
 				setHostsRecords = append(setHostsRecords, hn)
 			}
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -597,12 +597,12 @@ func TestUpdateRecordsMerge_WithEmailType(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
 				{Name: "@", Type: "MX", Address: "mail.old.com.", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
 			assert.Equal(t, "MX", r.FormValue("EmailType"))
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -640,9 +640,9 @@ func TestUpdateRecordsMerge_EmptyRemoteRecords(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", nil))
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 		case "namecheap.domains.dns.setHosts":
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -674,7 +674,7 @@ func TestDeleteRecordsMerge_RemovesOnlySpecifiedRecords(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 600},
 			}))
@@ -686,7 +686,7 @@ func TestDeleteRecordsMerge_RemovesOnlySpecifiedRecords(t *testing.T) {
 				setHostsRecordCount++
 			}
 			assert.Equal(t, "api", r.FormValue("HostName1"))
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -715,7 +715,7 @@ func TestDeleteRecordsMerge_RemovesAllManagedRecords(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
@@ -725,7 +725,7 @@ func TestDeleteRecordsMerge_RemovesAllManagedRecords(t *testing.T) {
 				}
 				setHostsRecordCount++
 			}
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -754,13 +754,13 @@ func TestDeleteRecordsMerge_EmailTypeResolvedToNone(t *testing.T) {
 		switch command {
 		case "namecheap.domains.dns.getHosts":
 			// Remote has MX record with MX email type
-			fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
 				{Name: "@", Type: "MX", Address: "mail.test.com.", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
 			// After removing MX record, email type should be resolved to NONE
 			assert.Equal(t, "NONE", r.FormValue("EmailType"))
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -789,7 +789,7 @@ func TestDeleteRecordsOverwrite_ClearsAll(t *testing.T) {
 		assert.Equal(t, "NONE", r.FormValue("EmailType"))
 		// No records should be sent
 		assert.Empty(t, r.FormValue("HostName1"))
-		fmt.Fprint(w, setHostsSuccessXML())
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
 	}))
 	defer server.Close()
 
@@ -807,11 +807,11 @@ func TestCreateNameserversMerge_OnDefaultDNS(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(true, nil))
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
 		case "namecheap.domains.dns.setCustom":
 			assert.Contains(t, r.FormValue("Nameservers"), "ns1.example.com")
 			assert.Contains(t, r.FormValue("Nameservers"), "ns2.example.com")
-			fmt.Fprint(w, setCustomSuccessXML())
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
 		default:
 			t.Fatalf("unexpected command: %s", command)
 		}
@@ -832,14 +832,14 @@ func TestCreateNameserversMerge_MergesWithExisting(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.existing.com", "ns2.existing.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.existing.com", "ns2.existing.com"}))
 		case "namecheap.domains.dns.setCustom":
 			ns := r.FormValue("Nameservers")
 			assert.Contains(t, ns, "ns1.existing.com")
 			assert.Contains(t, ns, "ns2.existing.com")
 			assert.Contains(t, ns, "ns3.new.com")
 			assert.Contains(t, ns, "ns4.new.com")
-			fmt.Fprint(w, setCustomSuccessXML())
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -858,7 +858,7 @@ func TestCreateNameserversMerge_DuplicateDetection(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com"}))
 		default:
 			t.Fatalf("should not call setCustom on duplicate: %s", command)
 		}
@@ -881,7 +881,7 @@ func TestCreateNameserversMerge_DuplicateCaseInsensitive(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}))
 		}
 	}))
 	defer server.Close()
@@ -899,7 +899,7 @@ func TestCreateNameserversOverwrite_Simple(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		assert.Equal(t, "namecheap.domains.dns.setCustom", r.FormValue("Command"))
-		fmt.Fprint(w, setCustomSuccessXML())
+		_, _ = fmt.Fprint(w, setCustomSuccessXML())
 	}))
 	defer server.Close()
 
@@ -912,7 +912,7 @@ func TestCreateNameserversOverwrite_Simple(t *testing.T) {
 
 func TestReadNameserversMerge_FindsMatching(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com", "ns3.other.com"}))
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com", "ns3.other.com"}))
 	}))
 	defer server.Close()
 
@@ -924,7 +924,7 @@ func TestReadNameserversMerge_FindsMatching(t *testing.T) {
 
 func TestReadNameserversMerge_CaseInsensitiveMatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getListXML(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}))
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}))
 	}))
 	defer server.Close()
 
@@ -936,7 +936,7 @@ func TestReadNameserversMerge_CaseInsensitiveMatch(t *testing.T) {
 
 func TestReadNameserversMerge_UsingOurDNS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getListXML(true, nil))
+		_, _ = fmt.Fprint(w, getListXML(true, nil))
 	}))
 	defer server.Close()
 
@@ -948,7 +948,7 @@ func TestReadNameserversMerge_UsingOurDNS(t *testing.T) {
 
 func TestReadNameserversMerge_NoMatchFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getListXML(false, []string{"ns1.other.com", "ns2.other.com"}))
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.other.com", "ns2.other.com"}))
 	}))
 	defer server.Close()
 
@@ -962,7 +962,7 @@ func TestReadNameserversMerge_NoMatchFound(t *testing.T) {
 
 func TestReadNameserversOverwrite_ReturnsAll(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com"}))
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com"}))
 	}))
 	defer server.Close()
 
@@ -974,7 +974,7 @@ func TestReadNameserversOverwrite_ReturnsAll(t *testing.T) {
 
 func TestReadNameserversOverwrite_UsingOurDNS(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, getListXML(true, nil))
+		_, _ = fmt.Fprint(w, getListXML(true, nil))
 	}))
 	defer server.Close()
 
@@ -993,7 +993,7 @@ func TestUpdateNameserversMerge_ReplacesOldWithNew(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.old.com", "ns3.manual.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.old.com", "ns3.manual.com"}))
 		case "namecheap.domains.dns.setCustom":
 			ns := r.FormValue("Nameservers")
 			assert.Contains(t, ns, "ns3.manual.com")
@@ -1001,7 +1001,7 @@ func TestUpdateNameserversMerge_ReplacesOldWithNew(t *testing.T) {
 			assert.Contains(t, ns, "ns2.new.com")
 			assert.NotContains(t, ns, "ns1.old.com")
 			assert.NotContains(t, ns, "ns2.old.com")
-			fmt.Fprint(w, setCustomSuccessXML())
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -1021,7 +1021,7 @@ func TestUpdateNameserversMerge_OnlyOneRemains_Error(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.manual.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.manual.com"}))
 		}
 	}))
 	defer server.Close()
@@ -1044,10 +1044,10 @@ func TestUpdateNameserversMerge_ZeroRemains_SetsDefault(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.old.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.old.com"}))
 		case "namecheap.domains.dns.setDefault":
 			setDefaultCalled = true
-			fmt.Fprint(w, setDefaultSuccessXML())
+			_, _ = fmt.Fprint(w, setDefaultSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -1068,9 +1068,9 @@ func TestUpdateNameserversMerge_UsingOurDNS(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(true, nil))
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
 		case "namecheap.domains.dns.setCustom":
-			fmt.Fprint(w, setCustomSuccessXML())
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -1092,14 +1092,14 @@ func TestDeleteNameserversMerge_RemovesManaged(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.managed.com", "ns3.manual.com", "ns4.manual.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.managed.com", "ns3.manual.com", "ns4.manual.com"}))
 		case "namecheap.domains.dns.setCustom":
 			ns := r.FormValue("Nameservers")
 			assert.Contains(t, ns, "ns3.manual.com")
 			assert.Contains(t, ns, "ns4.manual.com")
 			assert.NotContains(t, ns, "ns1.managed.com")
 			assert.NotContains(t, ns, "ns2.managed.com")
-			fmt.Fprint(w, setCustomSuccessXML())
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -1116,7 +1116,7 @@ func TestDeleteNameserversMerge_OneRemains_Error(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.manual.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.manual.com"}))
 		}
 	}))
 	defer server.Close()
@@ -1135,10 +1135,10 @@ func TestDeleteNameserversMerge_AllRemoved_SetsDefault(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.managed.com"}))
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.managed.com"}))
 		case "namecheap.domains.dns.setDefault":
 			setDefaultCalled = true
-			fmt.Fprint(w, setDefaultSuccessXML())
+			_, _ = fmt.Fprint(w, setDefaultSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -1156,7 +1156,7 @@ func TestDeleteNameserversMerge_UsingOurDNS_Noop(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getList":
-			fmt.Fprint(w, getListXML(true, nil))
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
 		default:
 			t.Fatalf("unexpected command when using our DNS: %s", command)
 		}
@@ -1176,7 +1176,7 @@ func TestDeleteNameserversOverwrite_SetsDefault(t *testing.T) {
 		_ = r.ParseForm()
 		assert.Equal(t, "namecheap.domains.dns.setDefault", r.FormValue("Command"))
 		setDefaultCalled = true
-		fmt.Fprint(w, setDefaultSuccessXML())
+		_, _ = fmt.Fprint(w, setDefaultSuccessXML())
 	}))
 	defer server.Close()
 
@@ -1197,10 +1197,10 @@ func TestCreateRecordsMerge_SetHostsAPIError(t *testing.T) {
 
 		switch command {
 		case "namecheap.domains.dns.getHosts":
-			fmt.Fprint(w, getHostsXML("NONE", nil))
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 		case "namecheap.domains.dns.setHosts":
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `<?xml version="1.0" encoding="utf-8"?>
+			_, _ = fmt.Fprint(w, `<?xml version="1.0" encoding="utf-8"?>
 <ApiResponse Status="ERROR" xmlns="http://api.namecheap.com/xml.response">
   <Errors><Error Number="99999">Set hosts failed</Error></Errors>
 </ApiResponse>`)
@@ -1227,7 +1227,7 @@ func TestCreateNameserversMerge_GetListAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Return invalid response to cause error
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
+		_, _ = fmt.Fprint(w, "internal error")
 	}))
 	defer server.Close()
 
@@ -1239,7 +1239,7 @@ func TestCreateNameserversMerge_GetListAPIError(t *testing.T) {
 func TestReadNameserversMerge_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
+		_, _ = fmt.Fprint(w, "internal error")
 	}))
 	defer server.Close()
 
@@ -1252,7 +1252,7 @@ func TestReadNameserversMerge_APIError(t *testing.T) {
 func TestReadRecordsMerge_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
+		_, _ = fmt.Fprint(w, "internal error")
 	}))
 	defer server.Close()
 
@@ -1265,7 +1265,7 @@ func TestReadRecordsMerge_APIError(t *testing.T) {
 func TestDeleteRecordsMerge_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
+		_, _ = fmt.Fprint(w, "internal error")
 	}))
 	defer server.Close()
 
@@ -1277,7 +1277,7 @@ func TestDeleteRecordsMerge_APIError(t *testing.T) {
 func TestUpdateRecordsMerge_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "internal error")
+		_, _ = fmt.Fprint(w, "internal error")
 	}))
 	defer server.Close()
 
@@ -1296,11 +1296,11 @@ func TestCreateRecordsMerge_CNAMEDotFixNoDuplicate(t *testing.T) {
 		switch command {
 		case "namecheap.domains.dns.getHosts":
 			// Remote has record with dot suffix
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "CNAME", Address: "old.example.com.", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
@@ -1329,7 +1329,7 @@ func TestCreateRecordsMerge_CNAMEDotFixDetectsDuplicate(t *testing.T) {
 		switch command {
 		case "namecheap.domains.dns.getHosts":
 			// Remote has record with dot suffix
-			fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "CNAME", Address: "target.example.com.", MXPref: 10, TTL: 1800},
 			}))
 		}
@@ -1361,13 +1361,13 @@ func TestCreateRecordsMerge_ResolvesEmailTypeWhenNil(t *testing.T) {
 		switch command {
 		case "namecheap.domains.dns.getHosts":
 			// Remote has MX email type
-			fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
 				{Name: "@", Type: "MX", Address: "mail.test.com.", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
 			// Email type should be preserved since MX records still exist
 			assert.Equal(t, "MX", r.FormValue("EmailType"))
-			fmt.Fprint(w, setHostsSuccessXML())
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
