@@ -1,5 +1,8 @@
 # Namecheap Terraform Provider
 
+[![CI](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/ci.yml/badge.svg)](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/namecheap/terraform-provider-namecheap/graph/badge.svg)](https://codecov.io/gh/namecheap/terraform-provider-namecheap)
+
 A Terraform Provider for Namecheap domain DNS configuration.
 
 - [Namecheap Provider Documentation](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs)
