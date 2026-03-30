@@ -33,6 +33,20 @@ func init() {
 	testAccDomain = &testDomain
 }
 
+func TestProviderSchemaValid(t *testing.T) {
+	assert.NoError(t, Provider().InternalValidate())
+}
+
+func TestProviderCredentialFieldsAreOptional(t *testing.T) {
+	p := Provider()
+	for _, field := range []string{"user_name", "api_user", "api_key"} {
+		s, ok := p.Schema[field]
+		assert.True(t, ok, "field %s should exist", field)
+		assert.True(t, s.Optional, "field %s should be Optional", field)
+		assert.False(t, s.Required, "field %s should not be Required", field)
+	}
+}
+
 func TestAccProviderImpl(t *testing.T) {
 	skipTestIfNoTFAccFlag(t)
 	assert.NotNil(t, testAccNamecheapProvider)

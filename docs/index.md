@@ -43,9 +43,9 @@ resource "namecheap_domain_records" "domain-com" {
 
 ## Argument Reference
 
-- `user_name` (`NAMECHEAP_USER_NAME`) - (Required) A registered user name for Namecheap.
-- `api_user` (`NAMECHEAP_API_USER`) - (Required) A registered api user for Namecheap
-- `api_key` (`NAMECHEAP_API_KEY`) - (Required) The Namecheap API key
+- `user_name` (`NAMECHEAP_USER_NAME`) - (Optional) A registered user name for Namecheap. Can be set via the environment variable.
+- `api_user` (`NAMECHEAP_API_USER`) - (Optional) A registered api user for Namecheap. Can be set via the environment variable.
+- `api_key` (`NAMECHEAP_API_KEY`) - (Optional) The Namecheap API key. Can be set via the environment variable.
 - `client_ip` (`NAMECHEAP_CLIENT_IP`) - (Optional) Client IP address
 - `use_sandbox` (`NAMECHEAP_USE_SANDBOX`) - (Optional) Use sandbox API endpoints. If `true`, all API requests will be
   made through `sandbox.namecheap.com` endpoint. You can [sign up](https://www.sandbox.namecheap.com/myaccount/signup/)
