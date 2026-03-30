@@ -10,7 +10,7 @@ check:
 	go vet ./...
 
 test:
-	go test -v ./namecheap/... -count=1 -cover
+	go test -v ./namecheap/... -count=1 -covermode=atomic -coverprofile=coverage.out
 
 # Please set the following ENV variables for this test:
 # NAMECHEAP_USER_NAME, NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_TEST_DOMAIN, NAMECHEAP_USE_SANDBOX (optional, default is false)
