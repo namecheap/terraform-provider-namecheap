@@ -14,6 +14,10 @@ make test           # Unit tests with coverage
 
 Run a single test: `go test -v ./namecheap/... -run TestFunctionName -count=1`
 
+## Commits
+
+Always include `Signed-off-by` in every commit message. Use `git commit -s` to add it automatically.
+
 ## Architecture
 
 Terraform provider (terraform-plugin-sdk/v2) managing Namecheap domain DNS via go-namecheap-sdk/v2. Single resource: `namecheap_domain_records`. All logic in `namecheap/` package (package name: `namecheap_provider`).

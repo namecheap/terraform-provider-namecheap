@@ -40,6 +40,14 @@ Run acceptance tests:
 $ make testacc
 ```
 
+## Commits
+
+Always include `Signed-off-by: Author Name <authoremail@example.com>` in every commit message. You can also do this automatically by using the `-s` flag:
+
+```shell
+$ git commit -s -m "your commit message"
+```
+
 ## Release
 
 We'll publish a new tagged release once significant changes accumulated. A new version will be available on the registry
