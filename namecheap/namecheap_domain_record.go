@@ -255,9 +255,10 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		if nameservers != nil {
 			_ = data.Set("nameservers", []string{})
 		}
-		if mode == ncModeImport {
-			_ = data.Set("mode", ncModeMerge)
-		}
+	}
+
+	if mode == ncModeImport {
+		_ = data.Set("mode", ncModeMerge)
 	}
 
 	return nil

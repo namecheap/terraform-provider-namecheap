@@ -1387,3 +1387,57 @@ func TestCreateRecordsMerge_ResolvesEmailTypeWhenNil(t *testing.T) {
 	diags := createRecordsMerge("test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 }
+
+// ===== resourceRecordRead import mode tests =====
+
+func TestReadImportMode_NamecheapDNS_ConvertsModeToMerge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "@", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	resource := resourceNamecheapDomainRecords()
+	data := resource.TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeImport)
+
+	diags := resourceRecordRead(nil, data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+}
+
+func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	resource := resourceNamecheapDomainRecords()
+	data := resource.TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeImport)
+
+	diags := resourceRecordRead(nil, data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+}
