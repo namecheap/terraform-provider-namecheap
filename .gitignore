@@ -35,6 +35,7 @@ website/vendor
 !command/test-fixtures/**/.terraform/
 
 terraform-provider-namecheap
+coverage.out
 
 # Agents settings
 .claude/settings.local.json

@@ -34,6 +34,12 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          fail_ci_if_error: false
+
   start-runner:
     name: Start self-hosted EC2 runner
     needs: check
