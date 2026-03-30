@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1413,7 +1414,7 @@ func TestReadImportMode_NamecheapDNS_ConvertsModeToMerge(t *testing.T) {
 	_ = data.Set("domain", "test.com")
 	_ = data.Set("mode", ncModeImport)
 
-	diags := resourceRecordRead(nil, data, client)
+	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
 }
@@ -1437,7 +1438,7 @@ func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
 	_ = data.Set("domain", "test.com")
 	_ = data.Set("mode", ncModeImport)
 
-	diags := resourceRecordRead(nil, data, client)
+	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
 }
