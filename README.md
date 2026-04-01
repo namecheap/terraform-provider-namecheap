@@ -1,6 +1,9 @@
 # Namecheap Terraform Provider
 
 [![CI](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/ci.yml/badge.svg)](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/ci.yml)
+[![Terraform Registry](https://img.shields.io/badge/terraform-registry-blueviolet)](https://registry.terraform.io/providers/namecheap/namecheap/latest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/namecheap/terraform-provider-namecheap)](https://github.com/namecheap/terraform-provider-namecheap/blob/master/go.mod)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![codecov](https://codecov.io/gh/namecheap/terraform-provider-namecheap/graph/badge.svg)](https://codecov.io/gh/namecheap/terraform-provider-namecheap)
 
 A Terraform Provider for Namecheap domain DNS configuration.
