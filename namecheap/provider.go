@@ -15,6 +15,7 @@ func Provider() *schema.Provider {
 			"user_name": {
 				Type:        schema.TypeString,
 				Optional:    true,
+				Sensitive:   true,
 				Description: "A registered user name for namecheap",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_USER_NAME", nil),
 			},
@@ -22,6 +23,7 @@ func Provider() *schema.Provider {
 			"api_user": {
 				Type:        schema.TypeString,
 				Optional:    true,
+				Sensitive:   true,
 				Description: "A registered api user for namecheap",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_API_USER", nil),
 			},
@@ -29,6 +31,7 @@ func Provider() *schema.Provider {
 			"api_key": {
 				Type:        schema.TypeString,
 				Optional:    true,
+				Sensitive:   true,
 				Description: "The namecheap API key",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_API_KEY", nil),
 			},
