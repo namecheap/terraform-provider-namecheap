@@ -52,10 +52,15 @@ func TestProviderCredentialFieldsAreOptional(t *testing.T) {
 
 func TestProviderCredentialFieldsAreSensitive(t *testing.T) {
 	p := Provider()
-	for _, field := range []string{"user_name", "api_user", "api_key"} {
+	for _, field := range []string{"api_user", "api_key"} {
 		s, ok := p.Schema[field]
 		assert.True(t, ok, "field %s should exist", field)
 		assert.True(t, s.Sensitive, "field %s should be Sensitive", field)
+	}
+	for _, field := range []string{"user_name", "client_ip", "use_sandbox"} {
+		s, ok := p.Schema[field]
+		assert.True(t, ok, "field %s should exist", field)
+		assert.False(t, s.Sensitive, "field %s should not be Sensitive", field)
 	}
 }
 
@@ -93,6 +98,23 @@ func TestProviderConfigureMissingCredentials(t *testing.T) {
 	assert.Contains(t, diags[0].Detail, "user_name")
 	assert.Contains(t, diags[0].Detail, "api_user")
 	assert.Contains(t, diags[0].Detail, "api_key")
+}
+
+func TestProviderConfigureFromInlineConfig(t *testing.T) {
+	for _, k := range []string{"NAMECHEAP_USER_NAME", "NAMECHEAP_API_USER", "NAMECHEAP_API_KEY"} {
+		t.Setenv(k, "")
+	}
+
+	rawProvider := Provider()
+	raw := map[string]interface{}{
+		"user_name":   "inline-user",
+		"api_user":    "inline-api-user",
+		"api_key":     "inline-api-key",
+		"client_ip":   "0.0.0.0",
+		"use_sandbox": false,
+	}
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors when credentials are set inline, got: %v", diags)
 }
 
 func TestProviderConfigurePartialCredentials(t *testing.T) {

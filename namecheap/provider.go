@@ -3,6 +3,8 @@ package namecheap_provider
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
@@ -15,7 +17,6 @@ func Provider() *schema.Provider {
 			"user_name": {
 				Type:        schema.TypeString,
 				Optional:    true,
-				Sensitive:   true,
 				Description: "A registered user name for namecheap",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_USER_NAME", nil),
 			},
@@ -80,7 +81,7 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 			diag.Diagnostic{
 				Severity: diag.Error,
 				Summary:  "Missing required provider configuration",
-				Detail:   fmt.Sprintf("The following provider attributes must be set either in the configuration or via environment variables: %s", fmt.Sprintf("%v", missing)),
+				Detail:   fmt.Sprintf("The following provider attributes must be set either in the configuration or via environment variables: %s", strings.Join(missing, ", ")),
 			},
 		}
 	}
