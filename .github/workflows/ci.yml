@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# Only one EC2 runner can be active at a time because all runs share
+# the same whitelisted Elastic IP. Queued runs wait for the current one
+# to finish (cancel-in-progress: false).
+concurrency:
+  group: ec2-acceptance-test
+  cancel-in-progress: false
+
 jobs:
 
   check:
@@ -38,6 +45,7 @@ jobs:
         uses: codecov/codecov-action@v6
         with:
           files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
   start-runner:
@@ -80,7 +88,6 @@ jobs:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: start-runner
-    concurrency: acceptance_test # allow to run the only one instance of the current acceptance_test job
     steps:
       - uses: actions/checkout@v4 # pinned to v4 (node20) — self-hosted EC2 runner doesn't support node24 yet
 
