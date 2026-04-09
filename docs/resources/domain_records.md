@@ -32,7 +32,7 @@ resource "namecheap_domain_records" "my-domain-com" {
 
 resource "namecheap_domain_records" "my-domain2-com" {
   domain = "my-domain2.com"
-  mode = "OVERWRITE" // Warning: this will remove all manually set records
+  mode = "OVERWRITE" // WARNING: this will DELETE all records not defined in this block
 
   nameservers = [
     "ns1.some-domain.com",
@@ -44,7 +44,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 ## Argument Reference
 
 - `domain` - (Required) Purchased available domain name on your account
-- `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE` - removes all manually set records & sets only ones that were specified in TF config
+- `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`. **Warning: `OVERWRITE` mode replaces the entire DNS zone — all existing records not present in the Terraform configuration will be permanently deleted, including records created manually, by other tools, or by other Terraform resources.** Use `MERGE` mode if you only want to manage a subset of records.
 - `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`
 - `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record`
   records. Conflicts with `nameservers`

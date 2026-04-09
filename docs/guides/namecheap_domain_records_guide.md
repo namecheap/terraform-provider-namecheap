@@ -67,12 +67,16 @@ resource "namecheap_domain_records" "admin-my-domain-com" {
 
 ### `OVERWRITE`
 
+~> **Destructive operation:** `OVERWRITE` mode replaces the **entire DNS zone** for the domain. All existing records not present in the Terraform configuration will be **permanently deleted** — including records created manually through the Namecheap dashboard, by other tools, or by other Terraform resources. This cannot be undone. If you are unsure, use [`MERGE`](#merge) mode instead.
+
 Unlike [MERGE](#merge), `OVERWRITE` always removes existing records and force overwrites with provided in terraform
 file.
 
 Upon resource removing, all records will be destroyed. Upon removing the resource with `nameservers` the
 default [Namecheap BasicDNS](https://www.namecheap.com/support/knowledgebase/article.aspx/923/10/what-is-your-basicdns/)
-nameservers will be set
+nameservers will be set.
+
+~> **Before using `OVERWRITE` mode**, verify that your Terraform configuration contains **all** DNS records you want to keep for the domain. Any records missing from the config will be deleted on the next `terraform apply`.
 
 ## Email type
 

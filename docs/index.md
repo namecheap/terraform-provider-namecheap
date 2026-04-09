@@ -52,3 +52,5 @@ resource "namecheap_domain_records" "domain-com" {
   a free sandbox account
 
 -> You can set up arguments via environment variables `NAMECHEAP_*`
+
+~> **Important:** The `namecheap_domain_records` resource supports two modes: `MERGE` (default) and `OVERWRITE`. Be careful with `OVERWRITE` mode — it replaces the entire DNS zone and **permanently deletes** all records not in the Terraform configuration. See the [domain records guide](guides/namecheap_domain_records_guide.md#overwrite) for details.
