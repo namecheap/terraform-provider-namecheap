@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
@@ -1441,4 +1442,935 @@ func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+}
+
+// ===== createNameserversOverwrite error path tests =====
+
+func TestCreateNameserversOverwrite_SetCustomAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "SetCustom failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := createNameserversOverwrite("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== readNameserversOverwrite error path tests =====
+
+func TestReadNameserversOverwrite_GetListAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, "internal error")
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, diags := readNameserversOverwrite("test.com", client)
+	assert.True(t, diags.HasError())
+	assert.Nil(t, result)
+}
+
+func TestReadNameserversOverwrite_NilNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return custom DNS (IsUsingOurDNS=false) but with no nameserver elements
+		_, _ = fmt.Fprint(w, getListXML(false, nil))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, diags := readNameserversOverwrite("test.com", client)
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, result)
+	// With nil nameservers and IsUsingOurDNS=false, should return empty list
+	assert.Empty(t, *result)
+}
+
+// ===== deleteNameserversOverwrite error path tests =====
+
+func TestDeleteNameserversOverwrite_SetDefaultAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "SetDefault failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteNameserversOverwrite("test.com", client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== deleteRecordsOverwrite error path tests =====
+
+func TestDeleteRecordsOverwrite_SetHostsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "SetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteRecordsOverwrite("test.com", client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== deleteNameserversMerge error path tests =====
+
+func TestDeleteNameserversMerge_GetListAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, "internal error")
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestDeleteNameserversMerge_NilNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			// Custom DNS but no nameservers in response
+			_, _ = fmt.Fprint(w, getListXML(false, nil))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	assert.True(t, diags.HasError())
+	assert.Contains(t, diags[0].Summary, "Invalid nameservers response")
+}
+
+func TestDeleteNameserversMerge_SetCustomAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.managed.com", "ns3.manual.com", "ns4.manual.com"}))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetCustom failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteNameserversMerge("test.com", []string{"ns1.managed.com", "ns2.managed.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestDeleteNameserversMerge_SetDefaultAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.managed.com", "ns2.managed.com"}))
+		case "namecheap.domains.dns.setDefault":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetDefault failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteNameserversMerge("test.com", []string{"ns1.managed.com", "ns2.managed.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== updateNameserversMerge error path tests =====
+
+func TestUpdateNameserversMerge_GetListAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, "internal error")
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := updateNameserversMerge("test.com", []string{"ns1.old.com"}, []string{"ns1.new.com", "ns2.new.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestUpdateNameserversMerge_SetDefaultAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.old.com"}))
+		case "namecheap.domains.dns.setDefault":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetDefault failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	prev := []string{"ns1.old.com", "ns2.old.com"}
+	current := []string{}
+
+	diags := updateNameserversMerge("test.com", prev, current, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestUpdateNameserversMerge_SetCustomAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.old.com", "ns2.old.com", "ns3.manual.com"}))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetCustom failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	prev := []string{"ns1.old.com", "ns2.old.com"}
+	current := []string{"ns1.new.com", "ns2.new.com"}
+
+	diags := updateNameserversMerge("test.com", prev, current, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== readRecordsOverwrite error path tests =====
+
+func TestReadRecordsOverwrite_GetHostsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprint(w, "internal error")
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, _, diags := readRecordsOverwrite("test.com", []interface{}{}, client)
+	assert.True(t, diags.HasError())
+	assert.Nil(t, result)
+}
+
+// ===== createNameserversMerge error path tests =====
+
+func TestCreateNameserversMerge_SetCustomAPIError_OnDefaultDNS(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetCustom failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := createNameserversMerge("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestCreateNameserversMerge_SetCustomAPIError_OnCustomDNS(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.existing.com", "ns2.existing.com"}))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetCustom failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := createNameserversMerge("test.com", []string{"ns3.new.com", "ns4.new.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== createRecordsOverwrite error path tests =====
+
+func TestCreateRecordsOverwrite_SetHostsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "SetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	records := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := createRecordsOverwrite("test.com", nil, records, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== deleteRecordsMerge error path tests =====
+
+func TestDeleteRecordsMerge_SetHostsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 600},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetHosts failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	records := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := deleteRecordsMerge("test.com", records, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== updateRecordsMerge error path tests =====
+
+func TestUpdateRecordsMerge_SetHostsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetHosts failed"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	oldRecords := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+	newRecords := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "9.10.11.12",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := updateRecordsMerge("test.com", nil, oldRecords, newRecords, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== readRecordsMerge error path tests =====
+
+func TestReadRecordsMerge_GetHostsAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	currentRecords := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	result, _, diags := readRecordsMerge("test.com", currentRecords, client)
+	assert.True(t, diags.HasError())
+	assert.Nil(t, result)
+}
+
+// ===== readRecordsOverwrite validation tests =====
+
+func TestReadRecordsOverwrite_CNAMEDotFix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			{Name: "blog", Type: "CNAME", Address: "example.com.", MXPref: 10, TTL: 1800},
+		}))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	// User specifies without dot - should match and preserve user's address
+	currentRecords := []interface{}{
+		map[string]interface{}{
+			"hostname": "blog",
+			"type":     "CNAME",
+			"address":  "example.com",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	foundRecords, _, diags := readRecordsOverwrite("test.com", currentRecords, client)
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, foundRecords)
+	assert.Len(t, *foundRecords, 1)
+	assert.Equal(t, "example.com", (*foundRecords)[0]["address"])
+}
+
+// ===== readNameserversMerge validation tests =====
+
+func TestReadNameserversMerge_GetListAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetList failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, diags := readNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	assert.True(t, diags.HasError())
+	assert.Nil(t, result)
+}
+
+// ===== createNameserversMerge with nil nameservers in response =====
+
+func TestCreateNameserversMerge_NilNameserversInResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		command := r.FormValue("Command")
+
+		switch command {
+		case "namecheap.domains.dns.getList":
+			// Custom DNS but no nameserver elements
+			_, _ = fmt.Fprint(w, getListXML(false, nil))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := createNameserversMerge("test.com", []string{"ns1.new.com", "ns2.new.com"}, client)
+	assert.False(t, diags.HasError())
+}
+
+// ===== updateRecordsMerge validation tests =====
+
+func TestUpdateRecordsMerge_GetHostsAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := updateRecordsMerge("test.com", nil, []interface{}{}, []interface{}{}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== deleteRecordsMerge validation tests =====
+
+func TestDeleteRecordsMerge_GetHostsAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteRecordsMerge("test.com", []interface{}{}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== createRecordsMerge validation tests =====
+
+func TestCreateRecordsMerge_GetHostsAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	records := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := createRecordsMerge("test.com", nil, records, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== createNameserversMerge GetList API error (XML-level) =====
+
+func TestCreateNameserversMerge_GetListAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetList failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := createNameserversMerge("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== deleteNameserversMerge GetList API error (XML-level) =====
+
+func TestDeleteNameserversMerge_GetListAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetList failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := deleteNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== updateNameserversMerge GetList API error (XML-level) =====
+
+func TestUpdateNameserversMerge_GetListAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetList failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	diags := updateNameserversMerge("test.com", []string{"ns1.old.com"}, []string{"ns1.new.com", "ns2.new.com"}, client)
+	assert.True(t, diags.HasError())
+}
+
+// ===== readNameserversOverwrite GetList API error (XML-level) =====
+
+func TestReadNameserversOverwrite_GetListAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetList failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, diags := readNameserversOverwrite("test.com", client)
+	assert.True(t, diags.HasError())
+	assert.Nil(t, result)
+}
+
+// ===== readRecordsOverwrite validation (XML-level error) =====
+
+func TestReadRecordsOverwrite_GetHostsAPIErrorXML(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "GetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	result, _, diags := readRecordsOverwrite("test.com", []interface{}{}, client)
+	assert.True(t, diags.HasError())
+	assert.Nil(t, result)
+}
+
+// ===== resourceRecordCreate tests =====
+
+func TestResourceRecordCreate_MergeWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "test.com", data.Id())
+}
+
+func TestResourceRecordCreate_OverwriteWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "test.com", data.Id())
+}
+
+func TestResourceRecordCreate_MergeWithNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "test.com", data.Id())
+}
+
+func TestResourceRecordCreate_OverwriteWithNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, setCustomSuccessXML())
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "test.com", data.Id())
+}
+
+func TestResourceRecordCreate_MergeRecordsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "API failure"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestResourceRecordCreate_OverwriteRecordsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "API failure"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestResourceRecordCreate_WithEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		assert.Equal(t, "MX", r.FormValue("EmailType"))
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("email_type", "MX")
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.test.com.", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordCreate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+// ===== resourceRecordDelete tests =====
+
+func TestResourceRecordDelete_MergeWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordDelete(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordDelete_OverwriteWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordDelete(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordDelete_MergeWithNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com", "ns3.example.com"}))
+		case "namecheap.domains.dns.setCustom":
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("nameservers", []interface{}{"ns1.example.com"})
+
+	diags := resourceRecordDelete(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordDelete_OverwriteWithNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, setDefaultSuccessXML())
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
+
+	diags := resourceRecordDelete(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordDelete_NoRecordsNoNameservers(t *testing.T) {
+	client := newTestClient("http://unused")
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+
+	diags := resourceRecordDelete(context.TODO(), data, client)
+	assert.Nil(t, diags)
+}
+
+// ===== resourceRecordRead additional tests =====
+
+func TestResourceRecordRead_MergeWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordRead_OverwriteWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordRead_MergeWithCustomNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordRead_OverwriteWithCustomNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordRead_GetListAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestResourceRecordRead_UsingOurDNSClearsNameservers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("nameservers", []interface{}{"ns1.old.com", "ns2.old.com"})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	ns := data.Get("nameservers").(*schema.Set)
+	assert.Equal(t, 0, ns.Len())
 }
