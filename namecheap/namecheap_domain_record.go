@@ -39,31 +39,11 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"domain": {
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				Description: "Purchased available domain name on your account",
-				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
-					v := val.(string)
-					if v == "" {
-						errs = append(errs, fmt.Errorf("%q must not be empty", key))
-						return
-					}
-					parsed, err := namecheap.ParseDomain(v)
-					if err != nil {
-						errs = append(errs, fmt.Errorf("%q is not a valid domain: %s", key, err))
-						return
-					}
-					if parsed.TRD != "" {
-						errs = append(errs, fmt.Errorf(
-							"%q contains a subdomain (%q). The Namecheap API does not support managing "+
-								"FreeDNS subdomain zones directly. Use the root domain with hostname records "+
-								"instead (e.g., domain = %q with hostname = %q)",
-							key, v, parsed.SLD+"."+parsed.TLD, parsed.TRD,
-						))
-					}
-					return
-				},
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				Description:  "Purchased available domain name on your account",
+				ValidateFunc: validateDomainIsNotSubdomain,
 			},
 			"email_type": {
 				ConflictsWith: []string{"nameservers"},
@@ -127,6 +107,28 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 			},
 		},
 	}
+}
+
+func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, errs []error) {
+	v := val.(string)
+	if v == "" {
+		errs = append(errs, fmt.Errorf("%q must not be empty", key))
+		return
+	}
+	parsed, err := namecheap.ParseDomain(v)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("%q is not a valid domain: %s", key, err))
+		return
+	}
+	if parsed.TRD != "" {
+		errs = append(errs, fmt.Errorf(
+			"%q contains a subdomain (%q). The Namecheap API does not support managing "+
+				"FreeDNS subdomain zones directly. Use the root domain with hostname records "+
+				"instead (e.g., domain = %q with hostname = %q)",
+			key, v, parsed.SLD+"."+parsed.TLD, parsed.TRD,
+		))
+	}
+	return
 }
 
 func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
