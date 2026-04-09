@@ -40,13 +40,36 @@ Run acceptance tests:
 $ make testacc
 ```
 
-## Commits
+## Commits and DCO
 
-Always include `Signed-off-by: Author Name <authoremail@example.com>` in every commit message. You can also do this automatically by using the `-s` flag:
+This project enforces the [Developer Certificate of Origin](https://developercertificate.org/) (DCO) on all pull
+requests. The DCO bot will block merging if any commit is missing a sign-off.
+
+Every commit message **must** include a `Signed-off-by` line matching the commit author's name and email:
+
+```
+Signed-off-by: Author Name <authoremail@example.com>
+```
+
+Use the `-s` flag to add it automatically:
 
 ```shell
 $ git commit -s -m "your commit message"
 ```
+
+If you forgot to sign off, you can fix all commits on your branch at once:
+
+```shell
+$ git rebase HEAD~N --signoff   # replace N with the number of commits
+$ git push --force-with-lease
+```
+
+## Pull Requests
+
+- Ensure all CI checks pass: unit tests, acceptance tests, CodeQL analysis, and DCO.
+- Include both unit tests and [Terraform acceptance tests](https://developer.hashicorp.com/terraform/plugin/sdkv2/testing/acceptance-tests)
+  where applicable. Acceptance tests should use `resource.Test()` with `TestStep`.
+- Keep PRs focused — one logical change per PR.
 
 ## Release
 
