@@ -21,6 +21,7 @@ Before going forward, you must set up the following environment variables:
 NAMECHEAP_USER_NAME=user_name
 NAMECHEAP_API_USER=user_name
 NAMECHEAP_API_KEY=api_key
+NAMECHEAP_CLIENT_IP=your.whitelisted.ip
 NAMECHEAP_TEST_DOMAIN=my-domain.com
 NAMECHEAP_USE_SANDBOX=true # optional
 ```
