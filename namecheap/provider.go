@@ -17,6 +17,7 @@ func Provider() *schema.Provider {
 			"user_name": {
 				Type:        schema.TypeString,
 				Optional:    true,
+				Sensitive:   true,
 				Description: "A registered user name for namecheap",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_USER_NAME", nil),
 			},

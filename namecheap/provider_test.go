@@ -2,10 +2,13 @@ package namecheap_provider
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
@@ -36,6 +39,25 @@ func init() {
 	testAccDomain = &testDomain
 }
 
+func testAccPreCheck(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("NAMECHEAP_USER_NAME") == "" {
+		t.Skip("NAMECHEAP_USER_NAME must be set for acceptance testing")
+	}
+	if os.Getenv("NAMECHEAP_API_USER") == "" {
+		t.Skip("NAMECHEAP_API_USER must be set for acceptance testing")
+	}
+	if os.Getenv("NAMECHEAP_API_KEY") == "" {
+		t.Skip("NAMECHEAP_API_KEY must be set for acceptance testing")
+	}
+	if os.Getenv("NAMECHEAP_TEST_DOMAIN") == "" {
+		t.Skip("NAMECHEAP_TEST_DOMAIN must be set for acceptance testing")
+	}
+}
+
+// Unit tests
+
 func TestProviderSchemaValid(t *testing.T) {
 	assert.NoError(t, Provider().InternalValidate())
 }
@@ -52,12 +74,12 @@ func TestProviderCredentialFieldsAreOptional(t *testing.T) {
 
 func TestProviderCredentialFieldsAreSensitive(t *testing.T) {
 	p := Provider()
-	for _, field := range []string{"api_user", "api_key"} {
+	for _, field := range []string{"user_name", "api_user", "api_key"} {
 		s, ok := p.Schema[field]
 		assert.True(t, ok, "field %s should exist", field)
 		assert.True(t, s.Sensitive, "field %s should be Sensitive", field)
 	}
-	for _, field := range []string{"user_name", "client_ip", "use_sandbox"} {
+	for _, field := range []string{"client_ip", "use_sandbox"} {
 		s, ok := p.Schema[field]
 		assert.True(t, ok, "field %s should exist", field)
 		assert.False(t, s.Sensitive, "field %s should not be Sensitive", field)
@@ -134,24 +156,61 @@ func TestProviderConfigurePartialCredentials(t *testing.T) {
 	assert.Contains(t, diags[0].Detail, "api_key")
 }
 
+// Acceptance tests
+
 func TestAccProviderImpl(t *testing.T) {
 	skipTestIfNoTFAccFlag(t)
 	assert.NotNil(t, testAccNamecheapProvider)
 }
 
-func TestAccSDKImpl(t *testing.T) {
-	skipTestIfNoTFAccFlag(t)
-	assert.NotNil(t, namecheapSDKClient)
+func TestAccProviderConfigureFromEnvVars(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+					resource "namecheap_domain_records" "test" {
+						domain = "%s"
+						mode   = "MERGE"
+					}
+				`, *testAccDomain),
+			},
+		},
+	})
 }
 
-func TestAccDomainImpl(t *testing.T) {
-	skipTestIfNoTFAccFlag(t)
-	assert.NotNil(t, testAccDomain)
-	assert.NotEmpty(t, *testAccDomain)
+func TestAccProviderMissingCredentials(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		ProviderFactories: map[string]func() (*schema.Provider, error){
+			"namecheap": func() (*schema.Provider, error) {
+				return Provider(), nil
+			},
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: `
+					provider "namecheap" {
+						user_name = ""
+						api_user  = ""
+						api_key   = ""
+					}
+
+					resource "namecheap_domain_records" "test" {
+						domain = "example.com"
+						mode   = "MERGE"
+					}
+				`,
+				ExpectError: regexp.MustCompile(`Missing required provider configuration`),
+			},
+		},
+	})
 }
 
 func TestAccDomainAvailability(t *testing.T) {
 	skipTestIfNoTFAccFlag(t)
+	testAccPreCheck(t)
+
 	resp, err := namecheapSDKClient.Domains.GetList(&namecheap.DomainsGetListArgs{
 		SearchTerm: namecheap.String(*testAccDomain),
 	})
