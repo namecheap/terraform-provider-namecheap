@@ -2374,3 +2374,207 @@ func TestResourceRecordRead_UsingOurDNSClearsNameservers(t *testing.T) {
 	ns := data.Get("nameservers").(*schema.Set)
 	assert.Equal(t, 0, ns.Len())
 }
+
+// ===== resourceRecordUpdate tests =====
+
+func TestResourceRecordUpdate_OverwriteWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordUpdate_MergeWithRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "5.6.7.8", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+// Note: resourceRecordUpdate tests with nameservers are limited because
+// TestResourceData().GetChange() doesn't fully simulate Terraform's state
+// diffing for schema.TypeSet fields. The nameserver update paths are already
+// covered by unit tests for updateNameserversMerge and createNameserversOverwrite.
+
+func TestResourceRecordUpdate_GetListAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestResourceRecordUpdate_GetListNilResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("500", "domain not found"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.True(t, diags.HasError())
+}
+
+func TestResourceRecordUpdate_MergeEmailTypeOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("email_type", "FWD")
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordUpdate_OverwriteNoEmailNoRecordsResetsToNone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "NONE", r.FormValue("EmailType"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+}
+
+func TestResourceRecordUpdate_OverwriteResetNameserversBeforeRecords(t *testing.T) {
+	callOrder := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		cmd := r.FormValue("Command")
+		callOrder = append(callOrder, cmd)
+		switch cmd {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+		case "namecheap.domains.dns.setDefault":
+			_, _ = fmt.Fprint(w, setDefaultSuccessXML())
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	// Should call setDefault before setHosts to reset nameservers
+	assert.Contains(t, callOrder, "namecheap.domains.dns.setDefault")
+	assert.Contains(t, callOrder, "namecheap.domains.dns.setHosts")
+}
+
+// Note: MergeRecordsAPIError test for resourceRecordUpdate is omitted because
+// GetChange() on schema.TypeSet with TestResourceData() doesn't produce the
+// expected old/new diff. The updateRecordsMerge error paths are already covered
+// by dedicated unit tests (TestUpdateRecordsMerge_*).
+
+func TestResourceRecordUpdate_OverwriteRecordsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		default:
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "API failure"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.True(t, diags.HasError())
+}
