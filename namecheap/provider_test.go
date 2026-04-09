@@ -156,6 +156,26 @@ func TestProviderConfigurePartialCredentials(t *testing.T) {
 	assert.Contains(t, diags[0].Detail, "api_key")
 }
 
+func TestProviderConfigureWhitespaceOnlyCredentials(t *testing.T) {
+	for _, k := range []string{"NAMECHEAP_USER_NAME", "NAMECHEAP_API_USER", "NAMECHEAP_API_KEY"} {
+		t.Setenv(k, "")
+	}
+
+	rawProvider := Provider()
+	raw := map[string]interface{}{
+		"user_name":   "  ",
+		"api_user":    "\t",
+		"api_key":     " \n ",
+		"client_ip":   "0.0.0.0",
+		"use_sandbox": false,
+	}
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.True(t, diags.HasError(), "expected error when credentials are whitespace-only")
+	assert.Contains(t, diags[0].Detail, "user_name")
+	assert.Contains(t, diags[0].Detail, "api_user")
+	assert.Contains(t, diags[0].Detail, "api_key")
+}
+
 // Acceptance tests
 
 func TestAccProviderImpl(t *testing.T) {

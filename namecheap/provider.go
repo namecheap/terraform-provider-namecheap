@@ -2,7 +2,6 @@ package namecheap_provider
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -61,9 +60,9 @@ func Provider() *schema.Provider {
 }
 
 func configureContext(ctx context.Context, data *schema.ResourceData) (interface{}, diag.Diagnostics) {
-	userName := data.Get("user_name").(string)
-	apiUser := data.Get("api_user").(string)
-	apiKey := data.Get("api_key").(string)
+	userName := strings.TrimSpace(data.Get("user_name").(string))
+	apiUser := strings.TrimSpace(data.Get("api_user").(string))
+	apiKey := strings.TrimSpace(data.Get("api_key").(string))
 	clientIp := data.Get("client_ip").(string)
 	useSandbox := data.Get("use_sandbox").(bool)
 
@@ -82,7 +81,7 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 			diag.Diagnostic{
 				Severity: diag.Error,
 				Summary:  "Missing required provider configuration",
-				Detail:   fmt.Sprintf("The following provider attributes must be set either in the configuration or via environment variables: %s", strings.Join(missing, ", ")),
+				Detail:   "The following provider attributes must be set either in the configuration or via environment variables: " + strings.Join(missing, ", "),
 			},
 		}
 	}
