@@ -1,7 +1,7 @@
 # Namecheap Terraform Provider
 
 [![CI](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/ci.yml/badge.svg)](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/github-code-scanning%2Fcodeql/badge.svg)](https://github.com/namecheap/terraform-provider-namecheap/actions/workflows/github-code-scanning%2Fcodeql)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/namecheap/terraform-provider-namecheap/github-code-scanning%2Fcodeql?label=CodeQL)](https://github.com/namecheap/terraform-provider-namecheap/security/code-scanning)
 [![Release](https://img.shields.io/github/v/release/namecheap/terraform-provider-namecheap)](https://github.com/namecheap/terraform-provider-namecheap/releases)
 [![Terraform Registry](https://img.shields.io/badge/terraform-registry-blueviolet)](https://registry.terraform.io/providers/namecheap/namecheap/latest)
 [![Go version](https://img.shields.io/github/go-mod/go-version/namecheap/terraform-provider-namecheap)](https://github.com/namecheap/terraform-provider-namecheap/blob/master/go.mod)
