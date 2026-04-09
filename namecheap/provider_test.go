@@ -53,17 +53,17 @@ func init() {
 func testAccPreCheck(t *testing.T) {
 	t.Helper()
 
-	if os.Getenv("NAMECHEAP_USER_NAME") == "" {
-		t.Skip("NAMECHEAP_USER_NAME must be set for acceptance testing")
+	requiredEnvVars := []string{
+		"NAMECHEAP_USER_NAME",
+		"NAMECHEAP_API_USER",
+		"NAMECHEAP_API_KEY",
+		"NAMECHEAP_TEST_DOMAIN",
 	}
-	if os.Getenv("NAMECHEAP_API_USER") == "" {
-		t.Skip("NAMECHEAP_API_USER must be set for acceptance testing")
-	}
-	if os.Getenv("NAMECHEAP_API_KEY") == "" {
-		t.Skip("NAMECHEAP_API_KEY must be set for acceptance testing")
-	}
-	if os.Getenv("NAMECHEAP_TEST_DOMAIN") == "" {
-		t.Skip("NAMECHEAP_TEST_DOMAIN must be set for acceptance testing")
+
+	for _, envVar := range requiredEnvVars {
+		if os.Getenv(envVar) == "" {
+			t.Skipf("%s must be set for acceptance testing", envVar)
+		}
 	}
 }
 
