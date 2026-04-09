@@ -24,6 +24,13 @@ var testAccDomain *string
 // provider configuration tests that do not require a real whitelisted client IP.
 const testPlaceholderClientIP = "0.0.0.0"
 
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func init() {
 	testAccNamecheapProvider = Provider()
 	testAccProviderFactories = map[string]func() (*schema.Provider, error){
@@ -35,7 +42,7 @@ func init() {
 		UserName:   os.Getenv("NAMECHEAP_USER_NAME"),
 		ApiUser:    os.Getenv("NAMECHEAP_API_USER"),
 		ApiKey:     os.Getenv("NAMECHEAP_API_KEY"),
-		ClientIp:   os.Getenv("NAMECHEAP_CLIENT_IP"),
+		ClientIp:   getEnvOrDefault("NAMECHEAP_CLIENT_IP", testPlaceholderClientIP),
 		UseSandbox: strings.EqualFold(os.Getenv("NAMECHEAP_USE_SANDBOX"), "true"),
 	})
 
@@ -54,9 +61,6 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if os.Getenv("NAMECHEAP_API_KEY") == "" {
 		t.Skip("NAMECHEAP_API_KEY must be set for acceptance testing")
-	}
-	if os.Getenv("NAMECHEAP_CLIENT_IP") == "" {
-		t.Skip("NAMECHEAP_CLIENT_IP must be set for acceptance testing")
 	}
 	if os.Getenv("NAMECHEAP_TEST_DOMAIN") == "" {
 		t.Skip("NAMECHEAP_TEST_DOMAIN must be set for acceptance testing")
