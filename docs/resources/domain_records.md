@@ -64,7 +64,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 ## Import
 
-Domain records can be imported using by domain name, e.g.,
+Domain records can be imported by domain name, e.g.,
 
 ```terraform
 terraform import namecheap_domain_records.main example.com
