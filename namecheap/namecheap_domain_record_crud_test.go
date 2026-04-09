@@ -109,46 +109,6 @@ type hostEntry struct {
 	TTL     int
 }
 
-// newErrorServer creates a test server that always returns the given response body.
-func newErrorServer(response string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, response)
-	}))
-}
-
-// newCommandServer creates a test server that routes by Namecheap API command name.
-func newCommandServer(t *testing.T, routes map[string]string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		cmd := r.FormValue("Command")
-		if resp, ok := routes[cmd]; ok {
-			_, _ = fmt.Fprint(w, resp)
-		} else {
-			t.Fatalf("unexpected command: %s", cmd)
-		}
-	}))
-}
-
-// defaultTestRecord returns a standard A record map used across tests.
-func defaultTestRecord() map[string]interface{} {
-	return map[string]interface{}{
-		"hostname": "www",
-		"type":     "A",
-		"address":  "1.2.3.4",
-		"mx_pref":  10,
-		"ttl":      1800,
-	}
-}
-
-// newTestData creates a TestResourceData with domain and mode pre-set.
-func newTestData(domain, mode string) *schema.ResourceData {
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId(domain)
-	_ = data.Set("domain", domain)
-	_ = data.Set("mode", mode)
-	return data
-}
-
 // apiErrorXML generates an API error response
 func apiErrorXML(code string, message string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
