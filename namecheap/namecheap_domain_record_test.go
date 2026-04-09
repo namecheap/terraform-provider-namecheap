@@ -901,3 +901,68 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 		})
 	})
 }
+
+func TestAccDomainValidation(t *testing.T) {
+	t.Run("reject_subdomain", func(t *testing.T) {
+		resource.Test(t, resource.TestCase{
+			ProviderFactories: testAccProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: `
+						resource "namecheap_domain_records" "test" {
+							domain = "sub.example.com"
+							mode   = "MERGE"
+
+							record {
+								hostname = "@"
+								type     = "A"
+								address  = "1.2.3.4"
+							}
+						}
+					`,
+					ExpectError: regexp.MustCompile(`contains a subdomain`),
+				},
+			},
+		})
+	})
+
+	t.Run("accept_root_domain", func(t *testing.T) {
+		skipTestIfNoTFAccFlag(t)
+		testAccPreCheck(t)
+
+		var response namecheap.DomainsDNSGetHostsCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainRecords(t)
+			},
+			ProviderFactories: testAccProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "test" {
+							domain = "%s"
+							mode   = "MERGE"
+
+							record {
+								hostname = "validationtest"
+								type     = "A"
+								address  = "1.2.3.4"
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&response),
+						testAccDomainRecordsContain(&response, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("validationtest"),
+							Type:    namecheap.String(namecheap.RecordTypeA),
+							Address: namecheap.String("1.2.3.4"),
+							TTL:     namecheap.Int(1800),
+							MXPref:  namecheap.Int(10),
+						}),
+					),
+				},
+			},
+		})
+	})
+}

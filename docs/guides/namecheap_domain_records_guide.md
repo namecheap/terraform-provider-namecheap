@@ -17,6 +17,21 @@ Follow [restrictions](#restrictions) section to read more about our API and Prov
 
 Domain is required. Before using, you must buy the domain and be sure it is available on your Namecheap's Dashboard.
 
+~> **Important:** The `domain` field must be a registered root domain (e.g., `example.com`), **not** a subdomain like `sub.example.com`. The Namecheap API operates on registered domains only — passing a subdomain would silently apply records to the root domain instead. To manage subdomain records, use the root domain and set the subdomain as the `hostname`:
+
+```terraform
+resource "namecheap_domain_records" "my-domain-com" {
+  domain = "example.com"   # root domain, not "sub.example.com"
+  mode   = "MERGE"
+
+  record {
+    hostname = "sub"       # creates records for sub.example.com
+    type     = "A"
+    address  = "1.2.3.4"
+  }
+}
+```
+
 ## Mode
 
 The resource can work with two modes: `OVERWRITE` and `MERGE` (default).
@@ -295,3 +310,5 @@ non-cached information.
 Unfortunately, you're not able to create the following record types: `SRV`, `A + Dynamic DNS Record` due to our API
 restrictions. For this case you can use `MERGE` mode - set up `SRV` or `Dynamic DNS Record` manually and control other
 records via terraform.
+
+~> **FreeDNS subdomain zones are not supported.** The Namecheap API does not support managing FreeDNS subdomain zones (e.g., `sub.example.com`) independently. The `domain` field must be a registered root domain. To create records for subdomains, use the `hostname` field within the `record` block (e.g., `hostname = "sub"`).

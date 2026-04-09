@@ -352,6 +352,52 @@ func TestConvertRecordTypeSetToDomainRecords(t *testing.T) {
 	assert.Equal(t, expectedRecords, *convertedRecords)
 }
 
+func TestDomainValidateFunc(t *testing.T) {
+	resource := resourceNamecheapDomainRecords()
+	validateFunc := resource.Schema["domain"].ValidateFunc
+
+	t.Run("valid_root_domain", func(t *testing.T) {
+		warns, errs := validateFunc("example.com", "domain")
+		assert.Empty(t, warns)
+		assert.Empty(t, errs)
+	})
+
+	t.Run("valid_cctld_domain", func(t *testing.T) {
+		warns, errs := validateFunc("example.co.uk", "domain")
+		assert.Empty(t, warns)
+		assert.Empty(t, errs)
+	})
+
+	t.Run("reject_subdomain", func(t *testing.T) {
+		warns, errs := validateFunc("sub.example.com", "domain")
+		assert.Empty(t, warns)
+		assert.Len(t, errs, 1)
+		assert.Contains(t, errs[0].Error(), "contains a subdomain")
+		assert.Contains(t, errs[0].Error(), "example.com")
+	})
+
+	t.Run("reject_deep_subdomain", func(t *testing.T) {
+		warns, errs := validateFunc("deep.sub.example.com", "domain")
+		assert.Empty(t, warns)
+		assert.Len(t, errs, 1)
+		assert.Contains(t, errs[0].Error(), "contains a subdomain")
+	})
+
+	t.Run("reject_empty", func(t *testing.T) {
+		warns, errs := validateFunc("", "domain")
+		assert.Empty(t, warns)
+		assert.Len(t, errs, 1)
+		assert.Contains(t, errs[0].Error(), "must not be empty")
+	})
+
+	t.Run("reject_invalid_format", func(t *testing.T) {
+		warns, errs := validateFunc("not a domain", "domain")
+		assert.Empty(t, warns)
+		assert.Len(t, errs, 1)
+		assert.Contains(t, errs[0].Error(), "not a valid domain")
+	})
+}
+
 func createRecordByTypeAndAddress(recordType string, address string) namecheap.DomainsDNSHostRecord {
 	return namecheap.DomainsDNSHostRecord{
 		HostName:   namecheap.String("hostname"),
