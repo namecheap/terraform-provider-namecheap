@@ -20,6 +20,10 @@ var testAccProviderFactories map[string]func() (*schema.Provider, error)
 var namecheapSDKClient *namecheap.Client
 var testAccDomain *string
 
+// testPlaceholderClientIP is intentionally a non-routable placeholder used in
+// provider configuration tests that do not require a real whitelisted client IP.
+const testPlaceholderClientIP = "0.0.0.0"
+
 func init() {
 	testAccNamecheapProvider = Provider()
 	testAccProviderFactories = map[string]func() (*schema.Provider, error){
@@ -31,7 +35,7 @@ func init() {
 		UserName:   os.Getenv("NAMECHEAP_USER_NAME"),
 		ApiUser:    os.Getenv("NAMECHEAP_API_USER"),
 		ApiKey:     os.Getenv("NAMECHEAP_API_KEY"),
-		ClientIp:   "0.0.0.0",
+		ClientIp:   os.Getenv("NAMECHEAP_CLIENT_IP"),
 		UseSandbox: strings.EqualFold(os.Getenv("NAMECHEAP_USE_SANDBOX"), "true"),
 	})
 
@@ -50,6 +54,9 @@ func testAccPreCheck(t *testing.T) {
 	}
 	if os.Getenv("NAMECHEAP_API_KEY") == "" {
 		t.Skip("NAMECHEAP_API_KEY must be set for acceptance testing")
+	}
+	if os.Getenv("NAMECHEAP_CLIENT_IP") == "" {
+		t.Skip("NAMECHEAP_CLIENT_IP must be set for acceptance testing")
 	}
 	if os.Getenv("NAMECHEAP_TEST_DOMAIN") == "" {
 		t.Skip("NAMECHEAP_TEST_DOMAIN must be set for acceptance testing")
@@ -98,7 +105,7 @@ func TestProviderConfigureFromEnvVars(t *testing.T) {
 
 	rawProvider := Provider()
 	raw := map[string]interface{}{
-		"client_ip":   "0.0.0.0",
+		"client_ip":   testPlaceholderClientIP,
 		"use_sandbox": false,
 	}
 	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
@@ -112,7 +119,7 @@ func TestProviderConfigureMissingCredentials(t *testing.T) {
 
 	rawProvider := Provider()
 	raw := map[string]interface{}{
-		"client_ip":   "0.0.0.0",
+		"client_ip":   testPlaceholderClientIP,
 		"use_sandbox": false,
 	}
 	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
@@ -132,7 +139,7 @@ func TestProviderConfigureFromInlineConfig(t *testing.T) {
 		"user_name":   "inline-user",
 		"api_user":    "inline-api-user",
 		"api_key":     "inline-api-key",
-		"client_ip":   "0.0.0.0",
+		"client_ip":   testPlaceholderClientIP,
 		"use_sandbox": false,
 	}
 	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
@@ -146,7 +153,7 @@ func TestProviderConfigurePartialCredentials(t *testing.T) {
 
 	rawProvider := Provider()
 	raw := map[string]interface{}{
-		"client_ip":   "0.0.0.0",
+		"client_ip":   testPlaceholderClientIP,
 		"use_sandbox": false,
 	}
 	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
@@ -166,7 +173,7 @@ func TestProviderConfigureWhitespaceOnlyCredentials(t *testing.T) {
 		"user_name":   "  ",
 		"api_user":    "\t",
 		"api_key":     " \n ",
-		"client_ip":   "0.0.0.0",
+		"client_ip":   testPlaceholderClientIP,
 		"use_sandbox": false,
 	}
 	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))

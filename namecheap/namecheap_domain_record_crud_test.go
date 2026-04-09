@@ -1034,7 +1034,7 @@ func TestUpdateNameserversMerge_OnlyOneRemains_Error(t *testing.T) {
 
 	diags := updateNameserversMerge("test.com", prev, current, client)
 	assert.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Summary, "one remained nameserver")
+	assert.Contains(t, diags[0].Summary, "one remaining nameserver")
 }
 
 func TestUpdateNameserversMerge_ZeroRemains_SetsDefault(t *testing.T) {
@@ -1125,7 +1125,7 @@ func TestDeleteNameserversMerge_OneRemains_Error(t *testing.T) {
 	client := newTestClient(server.URL)
 	diags := deleteNameserversMerge("test.com", []string{"ns1.managed.com"}, client)
 	assert.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Summary, "one remained nameserver")
+	assert.Contains(t, diags[0].Summary, "one remaining nameserver")
 }
 
 func TestDeleteNameserversMerge_AllRemoved_SetsDefault(t *testing.T) {
