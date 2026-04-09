@@ -167,7 +167,7 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 	newNameservers = append(newNameservers, currentNameservers...)
 
 	if len(newNameservers) == 1 {
-		return diag.Errorf("Unable to proceed with one remained nameserver, you must have at least 2 nameservers")
+		return diag.Errorf("Unable to proceed with one remaining nameserver, you must have at least 2 nameservers")
 	}
 
 	if len(newNameservers) == 0 {
@@ -225,7 +225,7 @@ func deleteNameserversMerge(domain string, previousNameservers []string, client 
 	}
 
 	if len(remainNameservers) == 1 {
-		return diag.Errorf("Unable to proceed with one remained nameserver, you must have at least 2 nameservers")
+		return diag.Errorf("Unable to proceed with one remaining nameserver, you must have at least 2 nameservers")
 	}
 
 	if len(remainNameservers) == 0 {

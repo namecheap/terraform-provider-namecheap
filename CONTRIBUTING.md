@@ -21,6 +21,7 @@ Before going forward, you must set up the following environment variables:
 NAMECHEAP_USER_NAME=user_name
 NAMECHEAP_API_USER=user_name
 NAMECHEAP_API_KEY=api_key
+NAMECHEAP_CLIENT_IP=your.whitelisted.ip # optional, defaults to 0.0.0.0
 NAMECHEAP_TEST_DOMAIN=my-domain.com
 NAMECHEAP_USE_SANDBOX=true # optional
 ```
@@ -73,6 +74,6 @@ $ git push --force-with-lease
 
 ## Release
 
-We'll publish a new tagged release once significant changes accumulated. A new version will be available on the registry
+We'll publish a new tagged release once significant changes have accumulated. A new version will be available on the registry
 within a few minutes after tagging release. If you're expecting to get a new release with mandatory fixes for you, feel
 free to contact us.
