@@ -957,6 +957,8 @@ func TestAccDomainValidation(t *testing.T) {
 							Name:    namecheap.String("validationtest"),
 							Type:    namecheap.String(namecheap.RecordTypeA),
 							Address: namecheap.String("1.2.3.4"),
+							TTL:     namecheap.Int(1799),
+							MXPref:  namecheap.Int(10),
 						}),
 					),
 				},
