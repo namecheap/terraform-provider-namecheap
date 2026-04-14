@@ -24,7 +24,7 @@ All git commits must include a `Signed-off-by` line for the [Developer Certifica
 
 ## Git privacy
 
-Before creating git commits, verify the current `git config user.email` is a GitHub noreply address (matching `*@users.noreply.github.com`). If it is not, look up the user's GitHub ID and username via `gh api user` and set it to `<id>+<username>@users.noreply.github.com` using `git config user.email`.
+Before creating git commits, check that `git config user.email` is set. If it is not configured, suggest the contributor set one. Do not override an already-configured email.
 
 ## Pull Requests
 
