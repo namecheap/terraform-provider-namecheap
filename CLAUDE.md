@@ -22,6 +22,10 @@ All git commits must include a `Signed-off-by` line for the [Developer Certifica
 - To sign off an entire branch retroactively: `git rebase HEAD~N --signoff` (replace N with the number of commits).
 - The `Signed-off-by` identity must match the commit's author or committer name and email.
 
+## Git privacy
+
+Before creating git commits, verify the current `git config user.email` is a GitHub noreply address (matching `*@users.noreply.github.com`). If it is not, look up the user's GitHub ID and username via `gh api user` and set it to `<id>+<username>@users.noreply.github.com` using `git config user.email`.
+
 ## Pull Requests
 
 - All CI checks must pass before merge (unit tests, acceptance tests, CodeQL, DCO).
