@@ -41,6 +41,19 @@ Run acceptance tests:
 $ make testacc
 ```
 
+## Git Email Privacy
+
+To keep your personal email out of the public git history, consider using a GitHub noreply address.
+You can enable this in [GitHub Settings → Emails](https://github.com/settings/emails) by checking **"Keep my email addresses private"**. Your noreply address follows the format `<id>+<username>@users.noreply.github.com` and is shown on that page.
+
+To use it for this repo:
+
+```shell
+$ git config user.email "YOUR_ID+YOUR_USERNAME@users.noreply.github.com"
+```
+
+This is optional — use whichever email you prefer.
+
 ## Commits and DCO
 
 This project enforces the [Developer Certificate of Origin](https://developercertificate.org/) (DCO) on all pull
