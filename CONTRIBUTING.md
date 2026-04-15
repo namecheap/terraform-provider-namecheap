@@ -21,7 +21,7 @@ Before going forward, you must set up the following environment variables:
 NAMECHEAP_USER_NAME=user_name
 NAMECHEAP_API_USER=user_name
 NAMECHEAP_API_KEY=api_key
-NAMECHEAP_CLIENT_IP=your.whitelisted.ip # optional, defaults to 0.0.0.0
+NAMECHEAP_CLIENT_IP=your.whitelisted.ip # optional
 NAMECHEAP_TEST_DOMAIN=my-domain.com
 NAMECHEAP_USE_SANDBOX=true # optional
 ```
@@ -81,7 +81,7 @@ $ git push --force-with-lease
 ## Pull Requests
 
 - Ensure all CI checks pass: unit tests, acceptance tests, CodeQL analysis, and DCO.
-- Include both unit tests and [Terraform acceptance tests](https://developer.hashicorp.com/terraform/plugin/sdkv2/testing/acceptance-tests)
+- Include both unit tests and [Terraform acceptance tests](https://developer.hashicorp.com/terraform/plugin/testing/acceptance-tests)
   where applicable. Acceptance tests should use `resource.Test()` with `TestStep`.
 - Keep PRs focused — one logical change per PR.
 
