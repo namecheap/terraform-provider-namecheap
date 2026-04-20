@@ -103,6 +103,8 @@ jobs:
       - name: Set up Go
         run: |
           curl -fsSLo go1.25.9.linux-amd64.tar.gz https://dl.google.com/go/go1.25.9.linux-amd64.tar.gz
+          expected_go_sha="$(curl -fsSL https://dl.google.com/go/go1.25.9.linux-amd64.tar.gz.sha256)"
+          echo "${expected_go_sha}  go1.25.9.linux-amd64.tar.gz" | sha256sum -c -
           rm -rf .go-instance
           mkdir .go-instance
           tar -C .go-instance -xzf go1.25.9.linux-amd64.tar.gz
@@ -120,6 +122,8 @@ jobs:
       - name: Set up Terraform
         run: |
           curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_linux_amd64.zip
+          expected_tf_sha="$(curl -fsSL https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_SHA256SUMS | awk '/terraform_1.14.8_linux_amd64.zip$/ {print $1}')"
+          echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
           rm -rf .terraform-bin
           mkdir .terraform-bin
           unzip -o terraform.zip -d .terraform-bin
