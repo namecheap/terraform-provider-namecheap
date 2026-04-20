@@ -89,10 +89,11 @@ $ git push --force-with-lease
 
 Dependabot-triggered workflow runs don't have access to repository secrets — GitHub redacts `secrets.*` for `dependabot[bot]` by design, so any job that reaches AWS, the self-hosted EC2 runner, or the Namecheap sandbox credentials cannot complete. For that reason the `start-runner`, `acceptance_test`, and `stop-runner` jobs are gated with `if: ${{ github.actor != 'dependabot[bot]' }}` and will show as **skipped** (not failed) on Dependabot PRs. The `check` job still runs and must pass.
 
-Before merging a Dependabot PR, a maintainer must trigger acceptance tests manually under their own identity. Secrets resolve for maintainer-initiated runs, so the full pipeline executes:
+Before merging a Dependabot PR, a maintainer must trigger acceptance tests manually under their own identity. Secrets resolve for maintainer-initiated runs, so the full pipeline executes. Use the exact branch name shown on the PR — Dependabot prefixes branches with the ecosystem (`go_modules`, `github_actions`, etc.), and the package segment that follows varies per update:
 
 ```shell
-gh workflow run CI --ref dependabot/go_modules/<branch-name>
+# copy the branch from the PR page, e.g. dependabot/go_modules/github.com/hashicorp/go-cty-1.5.0
+gh workflow run CI --ref <dependabot-branch-from-the-PR>
 # or: Actions tab → CI → Run workflow → select the Dependabot branch
 ```
 
