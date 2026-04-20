@@ -72,7 +72,7 @@ jobs:
         # SHA-pinned (was @feat/al2023-support). The same SHA is reused by
         # the stop-runner step so both halves of the runner lifecycle run
         # identical action code.
-        uses: namecheap/ec2-github-runner@6654a7e62b1f37081a92d90036e80685f5381a87 # feat/al2023-support @ 2026-04-20
+        uses: namecheap/ec2-github-runner@a6a82df58c619623b9fd0d273b290c197b5bc675 # feat/al2023-support @ 2026-04-20 — actions/runner v2.333.1 (ships externals/node24)
         with:
           mode: start
           github-token: ${{ secrets.GH_TOKEN }}
@@ -98,7 +98,7 @@ jobs:
     needs: start-runner
     if: ${{ github.actor != 'dependabot[bot]' }}
     steps:
-      - uses: actions/checkout@v4 # pinned to v4 (node20) — self-hosted AL2023 EC2 runner doesn't support node24 yet, so actions/checkout@v5+ cannot start here
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         run: |
@@ -159,7 +159,7 @@ jobs:
       - name: Stop EC2 runner
         # SHA-pinned (was @main). Matches the start-runner step above so
         # stop logic is in lockstep with the code that started the runner.
-        uses: namecheap/ec2-github-runner@6654a7e62b1f37081a92d90036e80685f5381a87 # feat/al2023-support @ 2026-04-20
+        uses: namecheap/ec2-github-runner@a6a82df58c619623b9fd0d273b290c197b5bc675 # feat/al2023-support @ 2026-04-20 — actions/runner v2.333.1 (ships externals/node24)
         with:
           mode: stop
           github-token: ${{ secrets.GH_TOKEN }}
