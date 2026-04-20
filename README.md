@@ -73,4 +73,11 @@ resource "namecheap_domain_records" "domain2-com" {
 
 ### Contributing
 
-To contribute, please read our [contributing](CONTRIBUTING.md) docs.  
+To contribute, please read our [contributing](CONTRIBUTING.md) docs.
+
+### Compliance & security
+
+See [`SECURITY_COMPLIANCE.md`](SECURITY_COMPLIANCE.md) for the full set of
+controls (dependency pinning, vulnerability and license scanning, SBOM
+publication, supply-chain pinning) and for how to report a vulnerability.
+

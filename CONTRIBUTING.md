@@ -84,6 +84,7 @@ $ git push --force-with-lease
 - Include both unit tests and [Terraform acceptance tests](https://developer.hashicorp.com/terraform/plugin/testing/acceptance-tests)
   where applicable. Acceptance tests should use `resource.Test()` with `TestStep`.
 - Keep PRs focused — one logical change per PR.
+- Familiarize yourself with [`SECURITY_COMPLIANCE.md`](SECURITY_COMPLIANCE.md) for the compliance gates your PR will be checked against (dependency drift, vulnerability and license scans, SBOM publication, etc.).
 
 ### Dependabot PRs (maintainers)
 
