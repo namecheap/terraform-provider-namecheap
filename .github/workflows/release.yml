@@ -49,3 +49,19 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: ${{ steps.checksums.outputs.path }}
+
+      - name: Generate CycloneDX SBOM for release
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: terraform-provider-namecheap_${{ github.ref_name }}_sbom.cdx.json
+
+      - name: Attach SBOM to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            "terraform-provider-namecheap_${{ github.ref_name }}_sbom.cdx.json" \
+            --clobber
