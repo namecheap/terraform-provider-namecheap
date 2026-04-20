@@ -37,6 +37,11 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Verify vendor/ matches go.mod
+        run: |
+          go mod vendor
+          git diff --exit-code -- vendor/
+
       - name: Check
         run: make check
 
