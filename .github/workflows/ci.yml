@@ -72,16 +72,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Trivy vuln + misconfig + secret scan
+      - name: Trivy vuln + misconfig + secret + license scan
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,misconfig,secret
+          scanners: vuln,misconfig,secret,license
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
           format: table
+          # License denylist lives in trivy.yaml at repo root; the
+          # action auto-loads it before each scanner runs.
+          trivy-config: trivy.yaml
 
       - name: Generate CycloneDX SBOM
         # Runs even if the scan above found HIGH/CRITICAL — the SBOM is
