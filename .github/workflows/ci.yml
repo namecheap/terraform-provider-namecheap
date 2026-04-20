@@ -89,7 +89,7 @@ jobs:
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: start-runner
     steps:
-      - uses: actions/checkout@v6 # pinned to v4 (node20) — self-hosted EC2 runner doesn't support node24 yet
+      - uses: actions/checkout@v4 # pinned to v4 (node20) — self-hosted AL2023 EC2 runner doesn't support node24 yet, so actions/checkout@v5+ cannot start here
 
       - name: Set up Go
         run: |
