@@ -85,6 +85,19 @@ $ git push --force-with-lease
   where applicable. Acceptance tests should use `resource.Test()` with `TestStep`.
 - Keep PRs focused — one logical change per PR.
 
+### Dependabot PRs (maintainers)
+
+Dependabot-triggered workflow runs don't have access to repository secrets — GitHub redacts `secrets.*` for `dependabot[bot]` by design, so any job that reaches AWS, the self-hosted EC2 runner, or the Namecheap sandbox credentials cannot complete. For that reason the `start-runner`, `acceptance_test`, and `stop-runner` jobs are gated with `if: ${{ github.actor != 'dependabot[bot]' }}` and will show as **skipped** (not failed) on Dependabot PRs. The `check` job still runs and must pass.
+
+Before merging a Dependabot PR, a maintainer must trigger acceptance tests manually under their own identity. Secrets resolve for maintainer-initiated runs, so the full pipeline executes:
+
+```shell
+gh workflow run CI --ref dependabot/go_modules/<branch-name>
+# or: Actions tab → CI → Run workflow → select the Dependabot branch
+```
+
+Once the manual run is green, merge as usual. If the dependency touches code paths exercised only by acceptance tests, do not merge on the `check` job alone.
+
 ## Release
 
 We'll publish a new tagged release once significant changes have accumulated. A new version will be available on the registry
