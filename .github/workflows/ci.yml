@@ -93,18 +93,33 @@ jobs:
 
       - name: Set up Go
         run: |
-          curl https://dl.google.com/go/go1.25.9.linux-amd64.tar.gz -o go1.25.9.linux-amd64.tar.gz
+          curl -fsSLo go1.25.9.linux-amd64.tar.gz https://dl.google.com/go/go1.25.9.linux-amd64.tar.gz
           rm -rf .go-instance
           mkdir .go-instance
           tar -C .go-instance -xzf go1.25.9.linux-amd64.tar.gz
-          echo "#!/bin/bash" >> go-env.sh
-          echo "" >> go-env.sh
-          echo "export PATH=$PATH:$(pwd)/.go-instance/go/bin" >> go-env.sh
-          echo "export HOME=$(pwd)" >> go-env.sh
+          {
+            echo '#!/bin/bash'
+            echo
+            echo 'export PATH="$PATH:'"$(pwd)"'/.go-instance/go/bin"'
+            echo 'export HOME="'"$(pwd)"'"'
+          } > go-env.sh
           chmod +x go-env.sh
           source go-env.sh
           go version
           go env GOPATH
+
+      - name: Set up Terraform
+        run: |
+          curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_linux_amd64.zip
+          rm -rf .terraform-bin
+          mkdir .terraform-bin
+          unzip -o terraform.zip -d .terraform-bin
+          {
+            echo 'export PATH="$PATH:'"$(pwd)"'/.terraform-bin"'
+            echo 'export TF_ACC_TERRAFORM_PATH="'"$(pwd)"'/.terraform-bin/terraform"'
+          } >> go-env.sh
+          source go-env.sh
+          terraform version
 
       - name: Acceptance Test
         run: |
