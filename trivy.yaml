@@ -1,0 +1,20 @@
+# Trivy policy file — auto-loaded from repo root by `trivy fs`.
+# Applied to every CI run of the `security` job in .github/workflows/ci.yml.
+#
+# License policy: denylist the copyleft and source-available licenses we
+# cannot ship in a Terraform provider distributed via the public registry.
+# Everything else is permitted — enumerating a permissive allowlist is a
+# losing battle because new permissive licenses land each year and don't
+# need review to keep CI green.
+#
+# To request an exception, open a PR that adds a scoped `ignored-licenses:`
+# entry covering the specific package + license combination, with a
+# justification and a reviewer from outside the requesting team.
+license:
+  forbidden:
+    - GPL-2.0
+    - GPL-3.0
+    - AGPL-1.0
+    - AGPL-3.0
+    - LGPL-3.0
+    - SSPL-1.0
