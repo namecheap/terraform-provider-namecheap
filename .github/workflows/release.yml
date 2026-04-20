@@ -46,6 +46,6 @@ jobs:
         run: echo "path=$(ls dist/*_SHA256SUMS)" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-checksums: ${{ steps.checksums.outputs.path }}
