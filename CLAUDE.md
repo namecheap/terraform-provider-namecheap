@@ -40,9 +40,9 @@ When reviewing or preparing a Dependabot PR for merge:
 
 - The `check` job (unit tests, lint, Codecov) must still be green.
 - Skipped EC2 jobs are not a failure and do not need "re-running" as-is.
-- Before approving merge, trigger acceptance tests manually under a maintainer identity so secrets resolve:
+- Before approving merge, trigger acceptance tests manually under a maintainer identity so secrets resolve. Copy the exact branch name from the PR (Dependabot prefixes branches with the ecosystem — `go_modules`, `github_actions`, etc.):
   ```shell
-  gh workflow run CI --ref dependabot/go_modules/<branch-name>
+  gh workflow run CI --ref <dependabot-branch-from-the-PR>
   ```
   The resulting run is attributed to the maintainer, so `github.actor != 'dependabot[bot]'` is true and the full pipeline executes.
 
