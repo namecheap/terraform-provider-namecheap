@@ -75,7 +75,7 @@ jobs:
         # SHA-pinned (was @feat/al2023-support). The same SHA is reused by
         # the stop-runner step so both halves of the runner lifecycle run
         # identical action code.
-        uses: namecheap/ec2-github-runner@a6a82df58c619623b9fd0d273b290c197b5bc675 # feat/al2023-support @ 2026-04-20 — actions/runner v2.333.1 (ships externals/node24)
+        uses: namecheap/ec2-github-runner@945b406e4793b33a43c36b0539aa81b4a2a4af5e # feat/al2023-support @ 2026-04-20 — actions/runner v2.333.1, action.yml node24, GITHUB_OUTPUT writes
         with:
           mode: start
           github-token: ${{ secrets.GH_TOKEN }}
@@ -166,7 +166,7 @@ jobs:
       - name: Stop EC2 runner
         # SHA-pinned (was @main). Matches the start-runner step above so
         # stop logic is in lockstep with the code that started the runner.
-        uses: namecheap/ec2-github-runner@a6a82df58c619623b9fd0d273b290c197b5bc675 # feat/al2023-support @ 2026-04-20 — actions/runner v2.333.1 (ships externals/node24)
+        uses: namecheap/ec2-github-runner@945b406e4793b33a43c36b0539aa81b4a2a4af5e # feat/al2023-support @ 2026-04-20 — actions/runner v2.333.1, action.yml node24, GITHUB_OUTPUT writes
         with:
           mode: stop
           github-token: ${{ secrets.GH_TOKEN }}
