@@ -51,6 +51,11 @@ jobs:
   start-runner:
     name: Start self-hosted EC2 runner
     needs: check
+    # Dependabot-triggered runs don't have access to secrets.* (GitHub
+    # redacts them for dependabot[bot]), so start-runner and the
+    # acceptance test would fail at "Configure AWS credentials". Skip
+    # those jobs for Dependabot; the check job still runs on its PRs.
+    if: ${{ github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
@@ -91,6 +96,7 @@ jobs:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: start-runner
+    if: ${{ github.actor != 'dependabot[bot]' }}
     steps:
       - uses: actions/checkout@v4 # pinned to v4 (node20) — self-hosted EC2 runner doesn't support node24 yet
 

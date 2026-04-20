@@ -32,6 +32,20 @@ Before creating git commits, check that `git config user.email` is set. If it is
 - PRs should include both unit tests and Terraform acceptance tests where applicable.
 - Acceptance tests use `resource.Test()` with `TestStep` — see `namecheap/provider_test.go` for examples.
 
+### Dependabot PRs
+
+Workflow runs triggered by `dependabot[bot]` do **not** have access to `secrets.*` (GitHub redacts them by design). The `start-runner`, `acceptance_test`, and `stop-runner` jobs are gated with `if: ${{ github.actor != 'dependabot[bot]' }}` and appear as **skipped**, not failed, on Dependabot PRs — treat that as the expected state, not a regression.
+
+When reviewing or preparing a Dependabot PR for merge:
+
+- The `check` job (unit tests, lint, Codecov) must still be green.
+- Skipped EC2 jobs are not a failure and do not need "re-running" as-is.
+- Before approving merge, trigger acceptance tests manually under a maintainer identity so secrets resolve:
+  ```shell
+  gh workflow run CI --ref dependabot/go_modules/<branch-name>
+  ```
+  The resulting run is attributed to the maintainer, so `github.actor != 'dependabot[bot]'` is true and the full pipeline executes.
+
 ## Architecture
 
 Terraform provider (terraform-plugin-sdk/v2) managing Namecheap domain DNS via go-namecheap-sdk/v2. Single resource: `namecheap_domain_records`. All logic in `namecheap/` package (package name: `namecheap_provider`).
