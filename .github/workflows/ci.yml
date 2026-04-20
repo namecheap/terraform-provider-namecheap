@@ -51,9 +51,54 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
+  security:
+    # Trivy scan covers three concerns in one job:
+    #  - SCA: CVEs in Go dependencies declared by go.mod / go.sum.
+    #  - IaC: misconfigurations in any Terraform or YAML at the
+    #    repo root (examples/, .github/workflows/, etc.).
+    #  - Secret scan: accidental tokens or keys checked into the tree.
+    # A separate step emits a CycloneDX SBOM as a workflow artifact so
+    # downstream tooling (dependency-track, release provenance, legal
+    # audits) can consume a signed inventory without re-running scans.
+    name: Security scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Trivy vuln + misconfig + secret scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+      - name: Generate CycloneDX SBOM
+        # Runs even if the scan above found HIGH/CRITICAL — the SBOM is
+        # a static inventory and should be produced regardless of
+        # gating outcome so consumers can see what went into the tree.
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90
+
   start-runner:
     name: Start self-hosted EC2 runner
-    needs: check
+    needs: [check, security]
     # Dependabot-triggered runs don't have access to secrets.* (GitHub
     # redacts them for dependabot[bot]), so start-runner and the
     # acceptance test would fail at "Configure AWS credentials". Skip
