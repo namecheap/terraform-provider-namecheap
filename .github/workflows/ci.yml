@@ -72,13 +72,6 @@ jobs:
     # audits) can consume a signed inventory without re-running scans.
     name: Security scan (Trivy)
     runs-on: ubuntu-latest
-    # trivy-action v0.35.0 transitively uses actions/cache@v3 (Node 20).
-    # Force Node 24 for every JS action in this job so the deprecation
-    # warning goes away without waiting for aquasecurity to bump their
-    # internal actions/cache pin. Drop this once trivy-action ships an
-    # actions/cache@v5 (Node 24) internally.
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     steps:
       - uses: actions/checkout@v6
 
@@ -95,6 +88,10 @@ jobs:
           # License denylist lives in trivy.yaml at repo root; the
           # action auto-loads it before each scanner runs.
           trivy-config: trivy.yaml
+          # Disable trivy-action's internal actions/cache@v4.2.4 step
+          # (the Node-20 action GitHub warns about). DB is re-pulled on
+          # each run — a ~100 MB cost we accept to keep CI annotation-free.
+          cache: 'false'
 
       - name: Generate CycloneDX SBOM
         # Runs even if the scan above found HIGH/CRITICAL — the SBOM is
@@ -107,6 +104,7 @@ jobs:
           scan-ref: .
           format: cyclonedx
           output: sbom.cdx.json
+          cache: 'false'
 
       - name: Upload SBOM artifact
         if: ${{ !cancelled() }}
