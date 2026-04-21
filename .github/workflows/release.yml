@@ -35,7 +35,12 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
         with:
-          version: latest
+          # Pin the GoReleaser binary to an exact version so a breaking
+          # upstream minor release (has happened: v2 config schema) can't
+          # silently break a tagged release. Bump this line when the
+          # maintainer has reviewed the release notes at
+          # https://github.com/goreleaser/goreleaser/releases.
+          version: v2.15.4
           args: release --clean
         env:
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
