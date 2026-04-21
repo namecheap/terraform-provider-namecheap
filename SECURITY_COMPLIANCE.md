@@ -13,16 +13,17 @@ the bottom.
   with an exact version or pseudo-version.
 - [`go.sum`](go.sum) records a cryptographic hash for each module; re-fetches
   that don't match the hash fail the build.
-- [`vendor/`](vendor/) is committed and kept in sync with `go.mod`. Vendoring
-  is not a soft policy — CI fails if `go mod vendor` would produce a diff.
 - Go toolchain version is pinned in `go.mod` (currently `go 1.25.9`).
+- No `vendor/` tree. Module resolution goes through `GOPROXY` with `go.sum`
+  as the integrity authority; removing vendor kept the auditable chain
+  (`go.mod` → `go.sum` → GOPROXY) while shedding 29 MB of committed churn
+  and the unreviewable vendor diffs that every dep bump produced.
 
 CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job):
 
 - `go mod verify` — rehashes the module cache against `go.sum` (#163).
 - `go mod tidy` + `git diff --exit-code` — fails on `go.mod` / `go.sum` drift
   (#174).
-- `go mod vendor` + `git diff --exit-code` — fails on `vendor/` drift (#175).
 
 ## Vulnerability, misconfig, secret, and license scanning
 
@@ -73,8 +74,9 @@ before `tar -xzf` / `unzip` runs.
 
 ## Reproducibility
 
-- `go.mod` + `go.sum` + the `vendor/` tree make module resolution reproducible
-  on any Go-enabled machine without proxy access.
+- `go.mod` + `go.sum` make module resolution reproducible and integrity-
+  checked against the cryptographic hashes in `go.sum`. Re-fetches through
+  a different `GOPROXY` mirror produce identical bytes or the build fails.
 - `GoReleaser` runs with `mod_timestamp: '{{ .CommitTimestamp }}'` and
   `-trimpath` in [`.goreleaser.yml`](.goreleaser.yml) for reproducible binary
   builds.
@@ -101,7 +103,6 @@ self-hosted runner action:
 Any of the following fails the build and blocks merge:
 
 - `go.mod` or `go.sum` not tidy.
-- `vendor/` tree does not match `go.mod`.
 - HIGH/CRITICAL CVE with an available fix in any dependency.
 - Denied license in any dependency.
 - Trivy secret scan matches a credential-shaped string.
