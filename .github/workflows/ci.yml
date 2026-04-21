@@ -133,7 +133,7 @@ jobs:
         # SHA-pinned (was @feat/al2023-support). The same SHA is reused by
         # the stop-runner step so both halves of the runner lifecycle run
         # identical action code.
-        uses: namecheap/ec2-github-runner@0fdd4014da74d56d46154f73a1cfe6d6113cbedc # feat/al2023-support @ 2026-04-21 — Phase 4 (retry): non-root runner + --ephemeral + hardcoded checksum table
+        uses: namecheap/ec2-github-runner@7c6a9a782d374e1c6d834b6dee1a4be3511197bf # feat/al2023-support @ 2026-04-21 — Phase 6.b: opt-in EBS encryption
         with:
           mode: start
           github-token: ${{ secrets.GH_TOKEN }}
@@ -147,6 +147,10 @@ jobs:
           security-group-id: sg-106ec76d
           eip-allocation-id: eipalloc-1796f61b
           iam-role-name: AmazonSSMRoleForInstancesQuickSetup
+          # SSE-EBS on the runner's root volume. Uses the launch
+          # account's default aws/ebs KMS key; AMI snapshot-id is
+          # dropped so AWS re-encrypts at launch time.
+          encrypt-ebs: 'true'
           aws-resource-tags: >
             [
               { "Key": "Name", "Value": "github_runner" },
@@ -224,7 +228,7 @@ jobs:
       - name: Stop EC2 runner
         # SHA-pinned (was @main). Matches the start-runner step above so
         # stop logic is in lockstep with the code that started the runner.
-        uses: namecheap/ec2-github-runner@0fdd4014da74d56d46154f73a1cfe6d6113cbedc # feat/al2023-support @ 2026-04-21 — Phase 4 (retry): non-root runner + --ephemeral + hardcoded checksum table
+        uses: namecheap/ec2-github-runner@7c6a9a782d374e1c6d834b6dee1a4be3511197bf # feat/al2023-support @ 2026-04-21 — Phase 6.b: opt-in EBS encryption
         with:
           mode: stop
           github-token: ${{ secrets.GH_TOKEN }}
