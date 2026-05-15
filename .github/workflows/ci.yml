@@ -222,8 +222,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Stop EC2 runner
-        # SHA-pinned (was @main). Matches the start-runner step above so
-        # stop logic is in lockstep with the code that started the runner.
         uses: namecheap/ec2-github-runner@8966982af3f7a32ee64a117f181377a28622146b # main @ 2026-05-15
         with:
           mode: stop
