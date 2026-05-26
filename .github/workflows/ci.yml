@@ -122,6 +122,12 @@ jobs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
@@ -136,7 +142,7 @@ jobs:
         uses: namecheap/ec2-github-runner@7c6a9a782d374e1c6d834b6dee1a4be3511197bf # feat/al2023-support @ 2026-04-21 — Phase 6.b: opt-in EBS encryption
         with:
           mode: start
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           ec2-image-owner: 699717368611
           ec2-image-filters: >
             [
@@ -219,6 +225,12 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ always() && needs.start-runner.outputs.ec2-instance-id != '' }} # stop the runner only if it was actually started
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
@@ -231,6 +243,6 @@ jobs:
         uses: namecheap/ec2-github-runner@7c6a9a782d374e1c6d834b6dee1a4be3511197bf # feat/al2023-support @ 2026-04-21 — Phase 6.b: opt-in EBS encryption
         with:
           mode: stop
-          github-token: ${{ secrets.GH_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
