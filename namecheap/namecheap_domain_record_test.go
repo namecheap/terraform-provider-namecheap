@@ -2,17 +2,42 @@ package namecheap_provider
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
-	"regexp"
-	"testing"
 )
 
 func resetDomainNameservers(t *testing.T) {
-	_, err := namecheapSDKClient.DomainsDNS.SetDefault(*testAccDomain)
+	t.Helper()
+
+	// Skip SetDefault if domain is already on Namecheap's default nameservers.
+	listResp, err := namecheapSDKClient.DomainsDNS.GetList(*testAccDomain)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if listResp.DomainDNSGetListResult != nil &&
+		listResp.DomainDNSGetListResult.IsUsingOurDNS != nil &&
+		*listResp.DomainDNSGetListResult.IsUsingOurDNS {
+		return
+	}
+
+	// Retry SetDefault to handle transient sandbox errors (e.g. 5050900).
+	const maxAttempts = 3
+	delays := []time.Duration{5 * time.Second, 15 * time.Second}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		_, err = namecheapSDKClient.DomainsDNS.SetDefault(*testAccDomain)
+		if err == nil {
+			return
+		}
+		if !strings.Contains(err.Error(), "(5050900)") || attempt == maxAttempts-1 {
+			t.Fatal(err)
+		}
+		time.Sleep(delays[attempt])
 	}
 }
 
@@ -944,6 +969,7 @@ func TestAccDomainValidation(t *testing.T) {
 
 		resource.Test(t, resource.TestCase{
 			PreCheck: func() {
+				resetDomainNameservers(t)
 				resetDomainRecords(t)
 			},
 			ProviderFactories: testAccProviderFactories,
