@@ -15,7 +15,7 @@ test:
 # Please set the following ENV variables for this test:
 # NAMECHEAP_USER_NAME, NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_TEST_DOMAIN, NAMECHEAP_USE_SANDBOX (optional, default is false)
 testacc:
-	TF_ACC=1 go test ./namecheap -v -run=TestAcc -count=1 -timeout=30m
+	TF_ACC=1 go test ./namecheap -v -run=TestAcc -count=1 -timeout=30m -failfast
 
 build:
 	go build -o ${BINARY}
