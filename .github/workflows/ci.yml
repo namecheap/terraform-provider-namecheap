@@ -26,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: 1.25.9
+          go-version-file: go.mod
 
       - name: Verify module integrity
         run: go mod verify
@@ -42,7 +42,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
-          version: v2.8.0
+          version: v2.12.2
 
       - name: Test
         run: make test
