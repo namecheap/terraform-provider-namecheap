@@ -43,7 +43,6 @@ jobs:
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
           version: v2.8.0
-          skip-cache: true
 
       - name: Test
         run: make test
@@ -82,10 +81,8 @@ jobs:
           # License denylist lives in trivy.yaml at repo root; the
           # action auto-loads it before each scanner runs.
           trivy-config: trivy.yaml
-          # Disable trivy-action's internal actions/cache@v4.2.4 step
-          # (the Node-20 action GitHub warns about). DB is re-pulled on
-          # each run — a ~100 MB cost we accept to keep CI annotation-free.
-          cache: "false"
+          # trivy-action v0.36.0 uses actions/cache@v5 (Node 24) internally.
+          cache: "true"
 
       - name: Generate CycloneDX SBOM
         # Runs even if the scan above found HIGH/CRITICAL — the SBOM is
@@ -98,7 +95,7 @@ jobs:
           scan-ref: .
           format: cyclonedx
           output: sbom.cdx.json
-          cache: "false"
+          cache: "true"
 
       - name: Upload SBOM artifact
         if: ${{ !cancelled() }}
@@ -168,6 +165,15 @@ jobs:
     if: ${{ github.actor != 'dependabot[bot]' }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Restore Go cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/go-build
+            ${{ github.workspace }}/go/pkg/mod
+          key: go-ec2-${{ hashFiles('go.sum') }}
+          restore-keys: go-ec2-
 
       - name: Set up Go
         run: |
