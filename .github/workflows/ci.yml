@@ -177,12 +177,17 @@ jobs:
 
       - name: Set up Go
         run: |
-          curl -fsSLo go1.25.9.linux-amd64.tar.gz https://dl.google.com/go/go1.25.9.linux-amd64.tar.gz
-          expected_go_sha="$(curl -fsSL https://dl.google.com/go/go1.25.9.linux-amd64.tar.gz.sha256)"
-          echo "${expected_go_sha}  go1.25.9.linux-amd64.tar.gz" | sha256sum -c -
+          # Derive the Go version from go.mod's `go` directive so this manual
+          # install (the EC2 runner lacks setup-go tooling) can never drift
+          # from the module requirement the way the release workflow did.
+          go_version="$(awk '/^go / {print $2; exit}' go.mod)"
+          tarball="go${go_version}.linux-amd64.tar.gz"
+          curl -fsSLo "${tarball}" "https://dl.google.com/go/${tarball}"
+          expected_go_sha="$(curl -fsSL "https://dl.google.com/go/${tarball}.sha256")"
+          echo "${expected_go_sha}  ${tarball}" | sha256sum -c -
           rm -rf .go-instance
           mkdir .go-instance
-          tar -C .go-instance -xzf go1.25.9.linux-amd64.tar.gz
+          tar -C .go-instance -xzf "${tarball}"
           {
             echo '#!/bin/bash'
             echo
