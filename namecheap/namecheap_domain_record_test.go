@@ -193,7 +193,7 @@ func testAccDomainNameserversDefault(response *namecheap.DomainsDNSGetListComman
 	}
 }
 
-// equalDomainRecord compares only Name, Type, Address, TTL, MXPref fields only.
+// equalDomainRecord compares only Name, Type, Address, TTL, MXPref fields.
 func equalDomainRecord(sRec *namecheap.DomainsDNSHostRecordDetailed, dRec *namecheap.DomainsDNSHostRecordDetailed) bool {
 	if sRec == nil || dRec == nil {
 		return false
