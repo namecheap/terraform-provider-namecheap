@@ -214,8 +214,20 @@ jobs:
 
       - name: Set up Terraform
         run: |
-          curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/1.15.5/terraform_1.15.5_linux_amd64.zip
-          expected_tf_sha="$(curl -fsSL https://releases.hashicorp.com/terraform/1.15.5/terraform_1.15.5_SHA256SUMS | awk '/terraform_1.15.5_linux_amd64.zip$/ {print $1}')"
+          tf_version="1.15.5"
+          # Fail the build when a newer stable Terraform release exists so the
+          # pinned version can't silently drift. Bump tf_version to clear it.
+          # Uses HashiCorp's checkpoint API — the same source `terraform` itself
+          # queries for upgrade notifications (stable GA only, never RCs). A
+          # network hiccup (empty latest_tf) is tolerated rather than failing CI.
+          latest_tf="$(curl -fsSL https://checkpoint-api.hashicorp.com/v1/check/terraform | sed -n 's/.*"current_version":"\([^"]*\)".*/\1/p')"
+          if [ -n "${latest_tf}" ] && [ "${latest_tf}" != "${tf_version}" ] \
+            && [ "$(printf '%s\n%s\n' "${tf_version}" "${latest_tf}" | sort -V | tail -1)" = "${latest_tf}" ]; then
+            echo "::error::A newer Terraform release (${latest_tf}) exists; pinned tf_version is ${tf_version}. Bump tf_version in .github/workflows/ci.yml."
+            exit 1
+          fi
+          curl -fsSLo terraform.zip "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_amd64.zip"
+          expected_tf_sha="$(curl -fsSL "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_SHA256SUMS" | awk -v f="terraform_${tf_version}_linux_amd64.zip" '$2==f {print $1}')"
           echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
           rm -rf .terraform-bin
           mkdir .terraform-bin
