@@ -103,8 +103,14 @@ func testAccDomainRecordsLength(response *namecheap.DomainsDNSGetHostsCommandRes
 				return fmt.Errorf("Expected %d records, got %d", expectedLength, len(*response.DomainDNSGetHostsResult.Hosts))
 			}
 		} else {
-			if response.DomainDNSGetHostsResult.Hosts == nil || len(*response.DomainDNSGetHostsResult.Hosts) != expectedLength {
-				return fmt.Errorf("Expected %d records", expectedLength)
+			actualLength := 0
+
+			if response.DomainDNSGetHostsResult.Hosts != nil {
+				actualLength = len(*response.DomainDNSGetHostsResult.Hosts)
+			}
+
+			if response.DomainDNSGetHostsResult.Hosts == nil || actualLength != expectedLength {
+				return fmt.Errorf("Expected %d records, got %d", expectedLength, actualLength)
 			}
 		}
 
