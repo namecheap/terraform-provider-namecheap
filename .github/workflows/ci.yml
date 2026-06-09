@@ -25,12 +25,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Resolve Go minor from go.mod
+        id: gomod
+        # Extract just the MAJOR.MINOR (e.g. 1.26) from go.mod's `go` directive.
+        # Passing the full patch (1.26.3) to setup-go pins it exactly even with
+        # check-latest; the minor lets check-latest float to the newest patch.
+        run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
-          # Pull the latest patch of go.mod's Go minor instead of a cached
-          # older patch, so the check job tests against the newest 1.x.y.
+          # Latest patch of go.mod's Go minor (e.g. 1.26 -> 1.26.4) rather than
+          # a cached or exact-pinned patch, so the check job tests the newest.
+          go-version: ${{ steps.gomod.outputs.minor }}
           check-latest: true
 
       - name: Verify module integrity
