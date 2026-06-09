@@ -29,6 +29,9 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          # Pull the latest patch of go.mod's Go minor instead of a cached
+          # older patch, so the check job tests against the newest 1.x.y.
+          check-latest: true
 
       - name: Verify module integrity
         run: go mod verify
@@ -190,10 +193,24 @@ jobs:
 
       - name: Set up Go
         run: |
-          # Derive the Go version from go.mod's `go` directive so this manual
-          # install (the EC2 runner lacks setup-go tooling) can never drift
-          # from the module requirement the way the release workflow did.
-          go_version="$(awk '/^go / {print $2; exit}' go.mod)"
+          # Install the latest PATCH of the Go minor pinned by go.mod's `go`
+          # directive (the EC2 runner lacks setup-go tooling), mirroring
+          # check-latest: true in the check job. Patch bumps (1.26.3 -> 1.26.4)
+          # are picked up automatically. A newer Go minor is not auto-adopted
+          # and does not fail CI: we fall back to go.mod's exact version, which
+          # is also the floor the module requires.
+          go_required="$(awk '/^go / {print $2; exit}' go.mod)"
+          go_minor="$(printf '%s' "${go_required}" | cut -d. -f1,2)"
+          # go.dev/VERSION is Go's own latest-stable endpoint (text: goX.Y.Z);
+          # when go.mod's minor is current it IS the latest patch.
+          latest_go="$(curl -fsSL https://go.dev/VERSION?m=text | head -1 | sed 's/^go//')"
+          latest_minor="$(printf '%s' "${latest_go}" | cut -d. -f1,2)"
+          if [ -n "${latest_go}" ] && [ "${latest_minor}" = "${go_minor}" ]; then
+            go_version="${latest_go}"   # latest patch in go.mod's minor series
+          else
+            go_version="${go_required}" # newer minor / lookup unavailable: use go.mod's exact version
+          fi
+          echo "Using Go ${go_version} (go.mod pins ${go_minor}.x)"
           tarball="go${go_version}.linux-amd64.tar.gz"
           curl -fsSLo "${tarball}" "https://dl.google.com/go/${tarball}"
           expected_go_sha="$(curl -fsSL "https://dl.google.com/go/${tarball}.sha256")"
