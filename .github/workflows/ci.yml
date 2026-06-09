@@ -9,12 +9,14 @@ on:
 permissions:
   contents: read
 
-# Only one EC2 runner can be active at a time because all runs share
-# the same whitelisted Elastic IP. Queued runs wait for the current one
-# to finish (cancel-in-progress: false).
-concurrency:
-  group: ec2-acceptance-test
-  cancel-in-progress: false
+# This workflow intentionally has NO top-level `concurrency` group. A shared
+# group serializes the whole workflow, but GitHub keeps only the newest queued
+# run per group and cancels older pending ones — so two PRs pushed seconds apart
+# silently drop each other's CI. Instead, the cheap `check`/`security` jobs run
+# in parallel across PRs (never cancelled), and only `start-runner` serializes —
+# it waits for older runs via ahmadnassri/action-workflow-queue so the single
+# whitelisted Elastic IP is never associated by two EC2 runners at once. See the
+# queue step in start-runner below.
 
 jobs:
   check:
@@ -114,10 +116,21 @@ jobs:
     # those jobs for Dependabot; the check job still runs on its PRs.
     if: ${{ github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # action-workflow-queue lists workflow runs to wait on
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
     steps:
+      - name: Wait for older acceptance runs to release the EIP
+        # The acceptance pipeline associates one whitelisted Elastic IP to its
+        # ephemeral EC2 runner; two runners at once would fight over that IP.
+        # Queue this run (FIFO, no cancellation) behind any older in-progress CI
+        # run, which holds the IP until its stop-runner job terminates the host.
+        uses: ahmadnassri/action-workflow-queue@542658b3a8270cac81ae15d401b0d974732808ac # v1.2.0
+        with:
+          timeout: 1800000 # 30 min cap for a backlog of queued acceptance runs
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
