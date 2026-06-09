@@ -137,6 +137,10 @@ func testAccDomainRecordsContain(response *namecheap.DomainsDNSGetHostsCommandRe
 
 func testAccDomainRecordsEmailType(response *namecheap.DomainsDNSGetHostsCommandResponse, emailType string) resource.TestCheckFunc {
 	return func(state *terraform.State) error {
+		if response == nil || response.DomainDNSGetHostsResult == nil || response.DomainDNSGetHostsResult.EmailType == nil {
+			return fmt.Errorf("Expected email type %s, but response email type was empty", emailType)
+		}
+
 		if *response.DomainDNSGetHostsResult.EmailType != emailType {
 			return fmt.Errorf("Expected email type %s, but received %s", emailType, *response.DomainDNSGetHostsResult.EmailType)
 		}
@@ -171,8 +175,20 @@ func testAccDomainNameserversLength(response *namecheap.DomainsDNSGetListCommand
 
 func testAccDomainNameserversContain(response *namecheap.DomainsDNSGetListCommandResponse, nameserver string) resource.TestCheckFunc {
 	return func(state *terraform.State) error {
+		if response == nil || response.DomainDNSGetListResult == nil {
+			return fmt.Errorf("Empty response")
+		}
+
+		if response.DomainDNSGetListResult.IsUsingOurDNS == nil {
+			return fmt.Errorf("Empty IsUsingOurDNS flag")
+		}
+
 		if *response.DomainDNSGetListResult.IsUsingOurDNS {
 			return fmt.Errorf("Expected custom nameservers, but found default")
+		}
+
+		if response.DomainDNSGetListResult.Nameservers == nil {
+			return fmt.Errorf("Doesn't contain expected nameserver")
 		}
 
 		for _, currentNameserver := range *response.DomainDNSGetListResult.Nameservers {
@@ -187,7 +203,7 @@ func testAccDomainNameserversContain(response *namecheap.DomainsDNSGetListComman
 
 func testAccDomainNameserversDefault(response *namecheap.DomainsDNSGetListCommandResponse) resource.TestCheckFunc {
 	return func(state *terraform.State) error {
-		if response == nil || response.DomainDNSGetListResult == nil {
+		if response == nil || response.DomainDNSGetListResult == nil || response.DomainDNSGetListResult.IsUsingOurDNS == nil {
 			return fmt.Errorf("Empty response")
 		}
 
