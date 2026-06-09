@@ -214,18 +214,29 @@ jobs:
 
       - name: Set up Terraform
         run: |
-          tf_version="1.15.5"
-          # Fail the build when a newer stable Terraform release exists so the
-          # pinned version can't silently drift. Bump tf_version to clear it.
-          # Uses HashiCorp's checkpoint API — the same source `terraform` itself
-          # queries for upgrade notifications (stable GA only, never RCs). A
-          # network hiccup (empty latest_tf) is tolerated rather than failing CI.
+          # Pin the Terraform MINOR series, not an exact patch. CI auto-installs
+          # the latest patch in this series, so patch bumps (1.15.5 -> 1.15.6)
+          # are picked up automatically and never fail. A newer minor/major
+          # release (1.16.0, 2.0.0) fails the build instead, so a maintainer can
+          # review possible behavior changes before bumping tf_minor/tf_fallback.
+          tf_minor="1.15"
+          tf_fallback="1.15.5" # install target when the lookup is unavailable
+          # checkpoint API == the source `terraform` itself uses for upgrade
+          # notices (stable GA only, never RCs); current_version is the newest
+          # stable, so when our series is current it IS the latest patch.
           latest_tf="$(curl -fsSL https://checkpoint-api.hashicorp.com/v1/check/terraform | sed -n 's/.*"current_version":"\([^"]*\)".*/\1/p')"
-          if [ -n "${latest_tf}" ] && [ "${latest_tf}" != "${tf_version}" ] \
-            && [ "$(printf '%s\n%s\n' "${tf_version}" "${latest_tf}" | sort -V | tail -1)" = "${latest_tf}" ]; then
-            echo "::error::A newer Terraform release (${latest_tf}) exists; pinned tf_version is ${tf_version}. Bump tf_version in .github/workflows/ci.yml."
+          latest_minor="${latest_tf%.*}"
+          if [ -n "${latest_tf}" ] && [ "${latest_minor}" != "${tf_minor}" ] \
+            && [ "$(printf '%s\n%s\n' "${tf_minor}" "${latest_minor}" | sort -V | tail -1)" = "${latest_minor}" ]; then
+            echo "::error::A newer Terraform minor/major release exists (${latest_tf}, ${latest_minor}.x); pinned series is ${tf_minor}.x. Review changes and bump tf_minor/tf_fallback in .github/workflows/ci.yml."
             exit 1
           fi
+          if [ -n "${latest_tf}" ] && [ "${latest_minor}" = "${tf_minor}" ]; then
+            tf_version="${latest_tf}"   # latest patch in the pinned series
+          else
+            tf_version="${tf_fallback}" # lookup unavailable or lagging the series
+          fi
+          echo "Using Terraform ${tf_version} (pinned series ${tf_minor}.x)"
           curl -fsSLo terraform.zip "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_amd64.zip"
           expected_tf_sha="$(curl -fsSL "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_SHA256SUMS" | awk -v f="terraform_${tf_version}_linux_amd64.zip" '$2==f {print $1}')"
           echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
