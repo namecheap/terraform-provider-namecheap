@@ -97,6 +97,12 @@ self-hosted runner action:
   re-trigger the acceptance pipeline manually per the flow in
   [`CONTRIBUTING.md`](CONTRIBUTING.md#dependabot-prs-maintainers).
 - AMI comes from `DEVOPS/hardened-amazon-linux2023` (internal).
+- Only one acceptance run may hold the single whitelisted Elastic IP at a
+  time. `start-runner` serializes access with the SHA-pinned
+  `ahmadnassri/action-workflow-queue` action (MIT), which queues a newer run
+  behind older in-progress ones (FIFO, no cancellation). This replaces the
+  former shared `concurrency` group, which silently cancelled pending runs
+  when PRs were pushed close together.
 
 ## What triggers a compliance failure
 
