@@ -214,8 +214,8 @@ jobs:
 
       - name: Set up Terraform
         run: |
-          curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_linux_amd64.zip
-          expected_tf_sha="$(curl -fsSL https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_SHA256SUMS | awk '/terraform_1.14.8_linux_amd64.zip$/ {print $1}')"
+          curl -fsSLo terraform.zip https://releases.hashicorp.com/terraform/1.15.5/terraform_1.15.5_linux_amd64.zip
+          expected_tf_sha="$(curl -fsSL https://releases.hashicorp.com/terraform/1.15.5/terraform_1.15.5_SHA256SUMS | awk '/terraform_1.15.5_linux_amd64.zip$/ {print $1}')"
           echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
           rm -rf .terraform-bin
           mkdir .terraform-bin
