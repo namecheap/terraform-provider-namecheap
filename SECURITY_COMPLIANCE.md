@@ -60,6 +60,30 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   license scans so the three views (scan report, workflow artifact,
   release asset) are consistent.
 
+## PR security summary
+
+- The `security-report` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+  consolidates every scan into one Markdown report and posts it as a **sticky
+  PR comment** (one comment, updated in place per push), the run's **job
+  summary**, and the **`security-summary`** workflow artifact (90-day
+  retention) (#234).
+- The report covers: Trivy vulnerabilities (by severity), IaC misconfig, secret
+  and license findings; govulncheck reachable vs. imported-only counts; open
+  CodeQL code-scanning alerts (best-effort, via the API); and a dependency
+  overview (SBOM component count, `go.mod` direct/indirect split, license
+  breakdown).
+- It is **reporting only and never gates.** The per-scan pass/fail shown in the
+  summary is taken verbatim from the `security` and `govulncheck` gate jobs
+  (`needs.*.result`), so a green comment can never mask a red gate. The merge
+  gates remain exactly as described above.
+- Source data comes from non-gating JSON passes of the same scanners
+  (`trivy-results.json`, `govulncheck.json`) plus the existing SBOM, uploaded as
+  the `trivy-json` / `govulncheck-json` / `sbom-cyclonedx` artifacts. Secret
+  findings list the rule and location only — never the matched value.
+- The comment is posted with the default `GITHUB_TOKEN` (`pull-requests: write`,
+  scoped to the `security-report` job). Dependabot runs skip the comment (their
+  token is read-only) but still produce the job summary and artifact.
+
 ## CI / supply-chain pinning
 
 - Every third-party GitHub Action is pinned by 40-char commit SHA with a
