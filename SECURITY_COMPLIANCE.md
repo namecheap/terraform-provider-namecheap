@@ -66,7 +66,7 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   consolidates every scan into one Markdown report and posts it as a **sticky
   PR comment** (one comment, updated in place per push), the run's **job
   summary**, and the **`security-summary`** workflow artifact (90-day
-  retention) (#PR_PLACEHOLDER).
+  retention) (#234).
 - The report covers: Trivy vulnerabilities (by severity), IaC misconfig, secret
   and license findings; govulncheck reachable vs. imported-only counts; open
   CodeQL code-scanning alerts (best-effort, via the API); and a dependency
