@@ -117,9 +117,49 @@ jobs:
           path: sbom.cdx.json
           retention-days: 90
 
+  govulncheck:
+    # Go-native vulnerability gate, complementary to the Trivy SCA scan above.
+    # Trivy matches go.sum module versions against advisory version ranges;
+    # govulncheck additionally does call-graph REACHABILITY analysis against the
+    # official Go vulnerability database (https://vuln.go.dev) plus the Go
+    # standard library for the toolchain in use. It fails only when a vulnerable
+    # symbol is actually reachable from this module's code, which keeps the gate
+    # low-noise (imported-but-uncalled vulns are reported but don't block) while
+    # still catching every exploitable path — including stdlib CVEs that Trivy's
+    # dependency scan doesn't cover. The advisory DB is fetched fresh each run,
+    # so detection stays current regardless of the pinned binary version.
+    name: Security scan (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve Go minor from go.mod
+        id: gomod
+        run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          # Latest patch of go.mod's Go minor (matches the check job) so stdlib
+          # advisories already fixed in a newer patch aren't reported against us.
+          go-version: ${{ steps.gomod.outputs.minor }}
+          check-latest: true
+
+      - name: Run govulncheck
+        # Pin the binary so a govulncheck release can't silently change scan
+        # behavior. govulncheck is installed via `go install`, not declared in
+        # go.mod (keeping it out of the shipped module graph and the SBOM), so
+        # Dependabot's gomod ecosystem does NOT track it — bump this line by
+        # hand after reviewing https://github.com/golang/vuln/releases.
+        # Exit code 3 (a vuln in CALLED code) fails the job; imported-but-
+        # uncalled findings are informational and do not gate.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+          govulncheck ./...
+
   start-runner:
     name: Start self-hosted EC2 runner
-    needs: [check, security]
+    needs: [check, security, govulncheck]
     # Dependabot-triggered runs don't have access to secrets.* (GitHub
     # redacts them for dependabot[bot]), so start-runner and the
     # acceptance test would fail at "Configure AWS credentials". Skip
