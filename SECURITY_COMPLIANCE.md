@@ -38,6 +38,17 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
 - Exception workflow: open a PR adding a scoped `ignored-licenses:` entry
   (package + license combination) to `trivy.yaml`, with a justification and
   a reviewer from outside the requesting team.
+- [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) runs on
+  every push in the `govulncheck` job as a Go-native gate complementary to
+  Trivy (#233). It performs call-graph **reachability** analysis against the Go
+  vulnerability database (<https://vuln.go.dev>) and the standard library for
+  the pinned Go toolchain, and **fails the build when a vulnerable symbol is
+  reachable from this module's code** — catching exploitable paths (including
+  stdlib CVEs) that Trivy's version-range dependency scan does not cover.
+  Imported-but-uncalled vulnerabilities are reported but do not block, so the
+  gate stays low-noise. The binary is pinned (`@v1.3.0`) and bumped by hand
+  (it's not in `go.mod`, so Dependabot doesn't track it); the advisory DB is
+  fetched fresh on every run, so detection stays current regardless.
 
 ## Software Bill of Materials (SBOM)
 
@@ -110,6 +121,7 @@ Any of the following fails the build and blocks merge:
 
 - `go.mod` or `go.sum` not tidy.
 - HIGH/CRITICAL CVE with an available fix in any dependency.
+- Reachable Go vulnerability (dependency or stdlib) detected by govulncheck.
 - Denied license in any dependency.
 - Trivy secret scan matches a credential-shaped string.
 - Go or Terraform tarball SHA-256 mismatch on the self-hosted runner.
