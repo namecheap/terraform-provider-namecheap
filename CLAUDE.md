@@ -26,6 +26,19 @@ All git commits must include a `Signed-off-by` line for the [Developer Certifica
 
 Before creating git commits, check that `git config user.email` is set. If it is not configured, suggest the contributor set one. Do not override an already-configured email.
 
+## Commit Messages
+
+- Do **not** add `Co-Authored-By` trailers to commits. Keep authorship clean. (The DCO `Signed-off-by` line is still required — see DCO Sign-off above.)
+- Use [Conventional Commits](https://www.conventionalcommits.org/) for PR titles and commit subjects: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `ci:`, `perf:`, `build:`, `revert:`. The release automation ([release-please](https://github.com/googleapis/release-please)) parses these to compute version bumps and the changelog: `fix:` → patch, `feat:` → minor, `feat!:`/`BREAKING CHANGE:` → major. A non-conventional title leaves a change out of the release notes. `pr-title.yml` enforces this on PRs.
+
+## Releases
+
+Semi-automatic, maintainer-gated via release-please. Merging conventional-commit PRs to `master` updates a long-lived "Release PR"; merging that Release PR tags `vX.Y.Z` and triggers GoReleaser. Full flow and required secrets are documented in `RELEASE.md`. Don't hand-cut tags except for the emergency path described there.
+
+## Documentation Layout
+
+The `docs/` directory (`index.md`, `guides/`, `resources/`) is reserved for Terraform Registry provider documentation (tfplugindocs output) — it is published to the registry. Do **not** put internal design specs or process docs there; those belong in root-level markdown files (e.g. `RELEASE.md`), mirroring the sibling `terraform-provider-spaceship` repo.
+
 ## Pull Requests
 
 - All CI checks must pass before merge (unit tests, acceptance tests, CodeQL, DCO).

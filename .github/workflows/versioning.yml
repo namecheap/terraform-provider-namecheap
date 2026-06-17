@@ -1,0 +1,45 @@
+name: Versioning
+
+# Runs release-please after CI succeeds on master. release-please opens (and
+# keeps updating) a "Release PR" that bumps the version and regenerates
+# CHANGELOG.md from Conventional Commit history. Merging that Release PR creates
+# the vX.Y.Z tag, which triggers release.yml. See RELEASE.md for the full flow.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    # Only act on a green master (or a manual dispatch). workflow_run fires for
+    # failed CI runs too, so the conclusion guard is required.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      # A GitHub App token (not the default GITHUB_TOKEN) is mandatory here:
+      # events authored by GITHUB_TOKEN do not re-trigger other workflows, so a
+      # token-authored tag would never start release.yml. App-authored events do.
+      # Reuses the same App credentials as ci.yml; the App must grant
+      # `contents: write` and `pull-requests: write`.
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ steps.generate-token.outputs.token }}
