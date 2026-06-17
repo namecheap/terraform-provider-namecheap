@@ -83,6 +83,12 @@ jobs:
       - name: Trivy vuln + misconfig + secret + license scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Pin the Trivy binary to the latest scanner release instead of
+          # floating on the action's bundled default (v0.70.0 in v0.36.0), so
+          # scan behavior is reproducible. Dependabot's github-actions ecosystem
+          # bumps the action SHA but NOT this input — bump by hand after
+          # reviewing https://github.com/aquasecurity/trivy/releases.
+          version: v0.71.1
           scan-type: fs
           scan-ref: .
           scanners: vuln,misconfig,secret,license
@@ -103,6 +109,8 @@ jobs:
         if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          # Same pinned Trivy binary as the scan step above (keep in sync).
+          version: v0.71.1
           scan-type: fs
           scan-ref: .
           format: cyclonedx
