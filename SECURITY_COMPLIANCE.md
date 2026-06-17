@@ -101,7 +101,7 @@ self-hosted runner action:
 
 - Runner binary version is controlled via the SHA-pinned
   `namecheap/ec2-github-runner` action (currently bundles
-  `actions/runner v2.333.1`, `externals/node24`, and writes outputs to
+  `actions/runner v2.335.1`, `externals/node24`, and writes outputs to
   `$GITHUB_OUTPUT` rather than the deprecated `::set-output`).
 - Dependabot-triggered runs skip the EC2-backed jobs entirely because GitHub
   redacts `secrets.*` on `dependabot[bot]` events (#157). Maintainers
