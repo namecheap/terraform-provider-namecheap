@@ -102,6 +102,34 @@ jobs:
           # trivy-action v0.36.0 uses actions/cache@v5 (Node 24) internally.
           cache: "true"
 
+      - name: Trivy report (JSON, all severities, non-gating)
+        # Second Trivy pass that NEVER gates (exit-code 0) and drops the
+        # CRITICAL,HIGH + ignore-unfixed filters of the gating scan above, so
+        # the PR summary can show the full picture (MEDIUM/LOW and unfixed
+        # advisories included). The merge gate stays with the table scan above;
+        # this JSON is consumed only by the security-report job to render the
+        # human summary + artifact. Same pinned Trivy binary as above.
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.71.1
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret,license
+          exit-code: "0"
+          format: json
+          output: trivy-results.json
+          trivy-config: trivy.yaml
+          cache: "true"
+
+      - name: Upload Trivy JSON report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-json
+          path: trivy-results.json
+          retention-days: 90
+
       - name: Generate CycloneDX SBOM
         # Runs even if the scan above found HIGH/CRITICAL — the SBOM is
         # a static inventory and should be produced regardless of
@@ -164,6 +192,120 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           govulncheck ./...
+
+      - name: govulncheck JSON report (non-gating)
+        # Re-run in JSON purely to feed the PR security summary; never gates
+        # (|| true). The text run above stays the authoritative reachability
+        # gate. Invoked by absolute path in case GOPATH/bin isn't on PATH for
+        # this step. Runs even if the gate above failed so the summary can
+        # show exactly which vulnerabilities blocked the build.
+        if: ${{ !cancelled() }}
+        run: |
+          GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
+          "$GOVULNCHECK" -format json ./... > govulncheck.json || true
+
+      - name: Upload govulncheck JSON report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: govulncheck-json
+          path: govulncheck.json
+          retention-days: 90
+
+  security-report:
+    # Consolidates every security scan into ONE human-readable summary, posted
+    # as a sticky PR comment (the visibility ask) and also written to the run's
+    # job summary + uploaded as the `security-summary` artifact. REPORTING ONLY
+    # — it never gates. The authoritative merge gates remain the `security`
+    # (Trivy) and `govulncheck` jobs above; their pass/fail is surfaced verbatim
+    # in the summary via needs.*.result, so a green comment can never mask a red
+    # gate.
+    name: Security scan summary
+    needs: [security, govulncheck]
+    # Run even when a gate above failed — that's when the summary matters most.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout + read go.mod for the dependency overview
+      pull-requests: write # post/update the sticky summary comment
+      security-events: read # read open CodeQL alerts to enrich the summary
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download scan artifacts
+        # Pulls trivy-json, sbom-cyclonedx and govulncheck-json (uploaded by the
+        # jobs above) into one directory. merge-multiple flattens them so the
+        # files land at scan-artifacts/<file> regardless of artifact name.
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: scan-artifacts
+          merge-multiple: true
+
+      - name: Fetch open CodeQL alerts (best effort)
+        # Default-setup CodeQL runs outside this workflow; its open alerts for
+        # this ref are pulled via the API only to enrich the summary. Never
+        # fails the job — code scanning disabled, or an analysis that hasn't
+        # finished for this ref yet, just yields an empty list.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?ref=${GITHUB_REF}&state=open&per_page=100" \
+            > scan-artifacts/codeql-alerts.json 2>/dev/null || echo '[]' > scan-artifacts/codeql-alerts.json
+
+      - name: Build security summary
+        env:
+          SECURITY_RESULT: ${{ needs.security.result }}
+          GOVULNCHECK_RESULT: ${{ needs.govulncheck.result }}
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          bash scripts/security-summary.sh \
+            scan-artifacts/trivy-results.json \
+            scan-artifacts/govulncheck.json \
+            scan-artifacts/sbom.cdx.json \
+            go.mod \
+            scan-artifacts/codeql-alerts.json \
+            > security-summary.md
+          cat security-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-summary
+          path: security-summary.md
+          retention-days: 90
+
+      - name: Post or update PR comment
+        # Dependabot pushes get a read-only GITHUB_TOKEN (secrets redacted), so
+        # commenting would 403 — skip it for Dependabot; the job summary +
+        # artifact above are still produced on those runs. Every other CI run is
+        # an in-repo branch (this workflow has no pull_request / fork trigger),
+        # so the default token can comment. A sticky marker keeps it to one
+        # comment that updates in place instead of one per push.
+        if: ${{ github.actor != 'dependabot[bot]' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          marker='<!-- security-scan-summary -->'
+          pr="$(gh pr list --head "${GITHUB_REF_NAME}" --state open \
+                  --json number --jq '.[0].number // empty')"
+          if [ -z "${pr}" ]; then
+            echo "No open PR for branch ${GITHUB_REF_NAME}; summary is on the job summary + artifact only."
+            exit 0
+          fi
+          existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr}/comments?per_page=100" \
+                        --jq "map(select(.body | startswith(\"${marker}\"))) | .[0].id // empty")"
+          jq -Rs '{body: .}' security-summary.md > comment-payload.json
+          if [ -n "${existing}" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+              --input comment-payload.json >/dev/null
+            echo "Updated existing summary comment #${existing} on PR #${pr}."
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${pr}/comments" \
+              --input comment-payload.json >/dev/null
+            echo "Posted new summary comment on PR #${pr}."
+          fi
 
   start-runner:
     name: Start self-hosted EC2 runner
