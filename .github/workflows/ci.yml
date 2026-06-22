@@ -23,7 +23,7 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Resolve Go minor from go.mod
         id: gomod
@@ -78,7 +78,7 @@ jobs:
     name: Security scan (Trivy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Trivy vuln + misconfig + secret + license scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -167,7 +167,7 @@ jobs:
     name: Security scan (govulncheck)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Resolve Go minor from go.mod
         id: gomod
@@ -230,7 +230,7 @@ jobs:
       pull-requests: write # post/update the sticky summary comment
       security-events: read # read open CodeQL alerts to enrich the summary
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download scan artifacts
         # Pulls trivy-json, sbom-cyclonedx and govulncheck-json (uploaded by the
@@ -377,7 +377,7 @@ jobs:
     needs: start-runner
     if: ${{ github.actor != 'dependabot[bot]' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Restore Go cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
