@@ -3,7 +3,7 @@ module github.com/namecheap/terraform-provider-namecheap
 require (
 	github.com/hashicorp/go-cty v1.5.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
-	github.com/namecheap/go-namecheap-sdk/v2 v2.6.3
+	github.com/namecheap/go-namecheap-sdk/v2 v2.6.5-0.20260702134510-10bc3a4a45c9
 	github.com/stretchr/testify v1.11.1
 )
 
@@ -58,6 +58,7 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
