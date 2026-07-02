@@ -637,3 +637,61 @@ func TestResourceRecordUpdate_OverwriteRecordsAPIError(t *testing.T) {
 	diags := resourceRecordUpdate(context.TODO(), data, client)
 	assert.True(t, diags.HasError())
 }
+
+func TestResourceRecordRead_OverwriteWithEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "@", Type: "MX", Address: "mail.test.com", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("email_type", "MX")
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.test.com", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "MX", data.Get("email_type").(string))
+}
+
+func TestResourceRecordRead_MergeWithEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "@", Type: "MX", Address: "mail.test.com", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("email_type", "MX")
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.test.com", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "MX", data.Get("email_type").(string))
+}

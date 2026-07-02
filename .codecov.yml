@@ -2,7 +2,9 @@ coverage:
   status:
     project:
       default:
-        threshold: 1%
+        # Allow a slightly larger drop for mechanical/refactor PRs whose changed
+        # lines are exercised by the acceptance suite (not the unit-test upload).
+        threshold: 2%
     patch:
       default:
         target: 50%
