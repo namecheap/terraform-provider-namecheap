@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -28,8 +29,8 @@ func validateGetHostsResponse(response *namecheap.DomainsDNSGetHostsCommandRespo
 // createNameserversMerge has the following behaviour:
 // - if nameservers have been set manually, then this method merge the provided ones with manually set
 // - else this is overwriting existent ones
-func createNameserversMerge(domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+func createNameserversMerge(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -39,7 +40,7 @@ func createNameserversMerge(domain string, nameservers []string, client *nameche
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		_, err := client.DomainsDNS.SetCustom(domain, nameservers)
+		_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, nameservers)
 		if err != nil {
 			return diag.FromErr(err)
 		}
@@ -69,7 +70,7 @@ func createNameserversMerge(domain string, nameservers []string, client *nameche
 			newNameservers = append(newNameservers, nameserver)
 		}
 
-		_, err := client.DomainsDNS.SetCustom(domain, newNameservers)
+		_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
 		if err != nil {
 			return diag.FromErr(err)
 		}
@@ -79,8 +80,8 @@ func createNameserversMerge(domain string, nameservers []string, client *nameche
 }
 
 // createNameserversOverwrite force overwrites the nameservers
-func createNameserversOverwrite(domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
-	_, err := client.DomainsDNS.SetCustom(domain, nameservers)
+func createNameserversOverwrite(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
+	_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, nameservers)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -90,8 +91,8 @@ func createNameserversOverwrite(domain string, nameservers []string, client *nam
 
 // readNameserversMerge read real nameservers, check whether there's available the current ones, return only
 // the records from currentNameservers argument that are really exist
-func readNameserversMerge(domain string, currentNameservers []string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+func readNameserversMerge(ctx context.Context, domain string, currentNameservers []string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return nil, diag.FromErr(err)
 	}
@@ -117,8 +118,8 @@ func readNameserversMerge(domain string, currentNameservers []string, client *na
 }
 
 // readNameserversOverwrite returns remote real nameservers
-func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+func readNameserversOverwrite(ctx context.Context, domain string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return nil, diag.FromErr(err)
 	}
@@ -136,8 +137,8 @@ func readNameserversOverwrite(domain string, client *namecheap.Client) (*[]strin
 
 // readNameserversOverwrite fetches real nameservers from API, remove previousNameservers records, insert currentNameservers
 // thus, we have a merge between manually set ones via Namecheap Domain Control Panel and via terraform
-func updateNameserversMerge(domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+func updateNameserversMerge(ctx context.Context, domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -171,14 +172,14 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 	}
 
 	if len(newNameservers) == 0 {
-		_, err := client.DomainsDNS.SetDefault(domain)
+		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
 			return diag.FromErr(err)
 		}
 		return nil
 	}
 
-	_, err = client.DomainsDNS.SetCustom(domain, newNameservers)
+	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -189,8 +190,8 @@ func updateNameserversMerge(domain string, previousNameservers []string, current
 // deleteNameserversMerge deletes the only nameservers that have been set in terraform file
 // NOTE: be sure that after executing this method at least 2 nameservers should remain otherwise you will have a error
 // NOTE: if there's remained 0 nameservers, the default ones will be set
-func deleteNameserversMerge(domain string, previousNameservers []string, client *namecheap.Client) diag.Diagnostics {
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+func deleteNameserversMerge(ctx context.Context, domain string, previousNameservers []string, client *namecheap.Client) diag.Diagnostics {
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -229,14 +230,14 @@ func deleteNameserversMerge(domain string, previousNameservers []string, client 
 	}
 
 	if len(remainNameservers) == 0 {
-		_, err := client.DomainsDNS.SetDefault(domain)
+		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
 			return diag.FromErr(err)
 		}
 		return nil
 	}
 
-	_, err = client.DomainsDNS.SetCustom(domain, remainNameservers)
+	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, remainNameservers)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -245,8 +246,8 @@ func deleteNameserversMerge(domain string, previousNameservers []string, client 
 }
 
 // deleteNameserversOverwrite resets nameservers settings to default (set default Namecheap's nameservers)
-func deleteNameserversOverwrite(domain string, client *namecheap.Client) diag.Diagnostics {
-	_, err := client.DomainsDNS.SetDefault(domain)
+func deleteNameserversOverwrite(ctx context.Context, domain string, client *namecheap.Client) diag.Diagnostics {
+	_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -255,8 +256,8 @@ func deleteNameserversOverwrite(domain string, client *namecheap.Client) diag.Di
 }
 
 // createRecordsMerge merges new records with already existing ones on Namecheap
-func createRecordsMerge(domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
-	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
+func createRecordsMerge(ctx context.Context, domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
+	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -314,7 +315,7 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 		emailType = resolveEmailType(&newDomainRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
 	}
 
-	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    namecheap.String(domain),
 		Records:   &newDomainRecords,
 		EmailType: emailType,
@@ -329,7 +330,7 @@ func createRecordsMerge(domain string, emailType *string, records []interface{},
 }
 
 // createRecordsOverwrite overwrites existing records with provided new ones
-func createRecordsOverwrite(domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
+func createRecordsOverwrite(ctx context.Context, domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	domainRecords := convertRecordTypeSetToDomainRecords(&records)
 
 	emailTypeValue := namecheap.String(namecheap.EmailTypeNone)
@@ -337,7 +338,7 @@ func createRecordsOverwrite(domain string, emailType *string, records []interfac
 		emailTypeValue = emailType
 	}
 
-	_, err := client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err := client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   domainRecords,
 		EmailType: emailTypeValue,
@@ -353,8 +354,8 @@ func createRecordsOverwrite(domain string, emailType *string, records []interfac
 
 // readRecordsMerge reads all remote records, return only the currentRecords that are exist in remote records
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func readRecordsMerge(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
-	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
+func readRecordsMerge(ctx context.Context, domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
+	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
 		return nil, nil, diag.FromErr(err)
 	}
@@ -391,8 +392,8 @@ func readRecordsMerge(domain string, currentRecords []interface{}, client *namec
 
 // readRecordsOverwrite returns the records that are exist on Namecheap
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func readRecordsOverwrite(domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
-	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
+func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
+	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
 		return nil, nil, diag.FromErr(err)
 	}
@@ -433,8 +434,8 @@ func readRecordsOverwrite(domain string, currentRecords []interface{}, client *n
 
 // updateRecordsMerge fetches remote records, remove previousRecords from remote, add currentRecords and return the final list
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func updateRecordsMerge(domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
-	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
+func updateRecordsMerge(ctx context.Context, domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
+	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -482,7 +483,7 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 		emailType = resolveEmailType(&newRecordList, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
 	}
 
-	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &newRecordList,
 		EmailType: emailType,
@@ -498,8 +499,8 @@ func updateRecordsMerge(domain string, emailType *string, previousRecords []inte
 
 // deleteRecordsMerge removes only previousRecords from remote records
 // NOTE: method has address fix. Refer to internal.GetFixedAddressOfRecord
-func deleteRecordsMerge(domain string, previousRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
-	remoteRecordsResponse, err := client.DomainsDNS.GetHosts(domain)
+func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
+	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -542,7 +543,7 @@ func deleteRecordsMerge(domain string, previousRecords []interface{}, client *na
 
 	resolvedEmailType := resolveEmailType(&remainedRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
 
-	_, err = client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &remainedRecords,
 		EmailType: resolvedEmailType,
@@ -557,10 +558,10 @@ func deleteRecordsMerge(domain string, previousRecords []interface{}, client *na
 }
 
 // deleteRecordsOverwrite removes all records
-func deleteRecordsOverwrite(domain string, client *namecheap.Client) diag.Diagnostics {
+func deleteRecordsOverwrite(ctx context.Context, domain string, client *namecheap.Client) diag.Diagnostics {
 	var records []namecheap.DomainsDNSHostRecord
 
-	_, err := client.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err := client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &records,
 		EmailType: namecheap.String(namecheap.EmailTypeNone),

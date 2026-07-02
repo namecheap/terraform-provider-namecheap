@@ -242,7 +242,7 @@ func TestAccDomainAvailability(t *testing.T) {
 	skipTestIfNoTFAccFlag(t)
 	testAccPreCheck(t)
 
-	resp, err := namecheapSDKClient.Domains.GetList(&namecheap.DomainsGetListArgs{
+	resp, err := namecheapSDKClient.Domains.GetListWithContext(context.Background(), &namecheap.DomainsGetListArgs{
 		SearchTerm: namecheap.String(*testAccDomain),
 	})
 	if err != nil {

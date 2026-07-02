@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -16,7 +17,7 @@ func resetDomainNameservers(t *testing.T) {
 	t.Helper()
 
 	// Skip SetDefault if domain is already on Namecheap's default nameservers.
-	listResp, err := namecheapSDKClient.DomainsDNS.GetList(*testAccDomain)
+	listResp, err := namecheapSDKClient.DomainsDNS.GetListWithContext(context.Background(), *testAccDomain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +31,7 @@ func resetDomainNameservers(t *testing.T) {
 	const maxAttempts = 3
 	delays := []time.Duration{5 * time.Second, 15 * time.Second}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		_, err = namecheapSDKClient.DomainsDNS.SetDefault(*testAccDomain)
+		_, err = namecheapSDKClient.DomainsDNS.SetDefaultWithContext(context.Background(), *testAccDomain)
 		if err == nil {
 			return
 		}
@@ -42,7 +43,7 @@ func resetDomainNameservers(t *testing.T) {
 }
 
 func resetDomainRecords(t *testing.T) {
-	_, err := namecheapSDKClient.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err := namecheapSDKClient.DomainsDNS.SetHostsWithContext(context.Background(), &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    namecheap.String(*testAccDomain),
 		EmailType: namecheap.String("NONE"),
 	})
@@ -52,7 +53,7 @@ func resetDomainRecords(t *testing.T) {
 }
 
 func setDomainRecords(t *testing.T, emailType *string, records *[]namecheap.DomainsDNSHostRecord) {
-	_, err := namecheapSDKClient.DomainsDNS.SetHosts(&namecheap.DomainsDNSSetHostsArgs{
+	_, err := namecheapSDKClient.DomainsDNS.SetHostsWithContext(context.Background(), &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    namecheap.String(*testAccDomain),
 		Records:   records,
 		EmailType: emailType,
@@ -64,7 +65,7 @@ func setDomainRecords(t *testing.T, emailType *string, records *[]namecheap.Doma
 
 func testAccDomainRecordsAPIFetch(response *namecheap.DomainsDNSGetHostsCommandResponse) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		resp, err := namecheapSDKClient.DomainsDNS.GetHosts(*testAccDomain)
+		resp, err := namecheapSDKClient.DomainsDNS.GetHostsWithContext(context.Background(), *testAccDomain)
 		if err != nil {
 			return err
 		}
@@ -77,7 +78,7 @@ func testAccDomainRecordsAPIFetch(response *namecheap.DomainsDNSGetHostsCommandR
 
 func testAccDomainNameserversAPIFetch(response *namecheap.DomainsDNSGetListCommandResponse) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		resp, err := namecheapSDKClient.DomainsDNS.GetList(*testAccDomain)
+		resp, err := namecheapSDKClient.DomainsDNS.GetListWithContext(context.Background(), *testAccDomain)
 		if err != nil {
 			return err
 		}

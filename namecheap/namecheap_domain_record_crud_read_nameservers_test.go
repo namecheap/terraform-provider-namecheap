@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ func TestReadNameserversMerge_FindsMatching(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, []string{"ns1.example.com", "ns2.example.com"}, *result)
 }
@@ -28,7 +29,7 @@ func TestReadNameserversMerge_CaseInsensitiveMatch(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, []string{"ns1.example.com"}, *result)
 }
@@ -40,7 +41,7 @@ func TestReadNameserversMerge_UsingOurDNS(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
 	assert.False(t, diags.HasError())
 	assert.Empty(t, *result)
 }
@@ -52,7 +53,7 @@ func TestReadNameserversMerge_NoMatchFound(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
 	assert.False(t, diags.HasError())
 	assert.Empty(t, *result)
 }
@@ -64,7 +65,7 @@ func TestReadNameserversOverwrite_ReturnsAll(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite("test.com", client)
+	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, []string{"ns1.example.com", "ns2.example.com"}, *result)
 }
@@ -76,7 +77,7 @@ func TestReadNameserversOverwrite_UsingOurDNS(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite("test.com", client)
+	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
 	assert.False(t, diags.HasError())
 	assert.Empty(t, *result)
 }
@@ -89,7 +90,7 @@ func TestReadNameserversOverwrite_NilNameservers(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite("test.com", client)
+	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, result)
 	// With nil nameservers and IsUsingOurDNS=false, should return empty list
@@ -104,7 +105,7 @@ func TestReadNameserversMerge_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge("test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
 	assert.True(t, diags.HasError())
 	assert.Nil(t, result)
 }
@@ -117,7 +118,7 @@ func TestReadNameserversOverwrite_GetListAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite("test.com", client)
+	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
 	assert.True(t, diags.HasError())
 	assert.Nil(t, result)
 }

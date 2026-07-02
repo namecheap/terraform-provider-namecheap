@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +34,7 @@ func TestUpdateNameserversMerge_ReplacesOldWithNew(t *testing.T) {
 	prev := []string{"ns1.old.com", "ns2.old.com"}
 	current := []string{"ns1.new.com", "ns2.new.com"}
 
-	diags := updateNameserversMerge("test.com", prev, current, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", prev, current, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -54,7 +55,7 @@ func TestUpdateNameserversMerge_OnlyOneRemains_Error(t *testing.T) {
 	prev := []string{"ns1.old.com"}
 	current := []string{}
 
-	diags := updateNameserversMerge("test.com", prev, current, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", prev, current, client)
 	assert.True(t, diags.HasError())
 	assert.Contains(t, diags[0].Summary, "one remaining nameserver")
 }
@@ -79,7 +80,7 @@ func TestUpdateNameserversMerge_ZeroRemains_SetsDefault(t *testing.T) {
 	prev := []string{"ns1.old.com", "ns2.old.com"}
 	current := []string{}
 
-	diags := updateNameserversMerge("test.com", prev, current, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", prev, current, client)
 	assert.False(t, diags.HasError())
 	assert.True(t, setDefaultCalled)
 }
@@ -102,7 +103,7 @@ func TestUpdateNameserversMerge_UsingOurDNS(t *testing.T) {
 	prev := []string{}
 	current := []string{"ns1.new.com", "ns2.new.com"}
 
-	diags := updateNameserversMerge("test.com", prev, current, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", prev, current, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -124,7 +125,7 @@ func TestUpdateNameserversMerge_SetDefaultAPIError(t *testing.T) {
 	prev := []string{"ns1.old.com", "ns2.old.com"}
 	current := []string{}
 
-	diags := updateNameserversMerge("test.com", prev, current, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", prev, current, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -146,7 +147,7 @@ func TestUpdateNameserversMerge_SetCustomAPIError(t *testing.T) {
 	prev := []string{"ns1.old.com", "ns2.old.com"}
 	current := []string{"ns1.new.com", "ns2.new.com"}
 
-	diags := updateNameserversMerge("test.com", prev, current, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", prev, current, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -158,6 +159,6 @@ func TestUpdateNameserversMerge_GetListAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := updateNameserversMerge("test.com", []string{"ns1.old.com"}, []string{"ns1.new.com", "ns2.new.com"}, client)
+	diags := updateNameserversMerge(context.Background(), "test.com", []string{"ns1.old.com"}, []string{"ns1.new.com", "ns2.new.com"}, client)
 	assert.True(t, diags.HasError())
 }

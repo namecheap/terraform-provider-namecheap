@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +46,7 @@ func TestDeleteRecordsMerge_RemovesOnlySpecifiedRecords(t *testing.T) {
 		},
 	}
 
-	diags := deleteRecordsMerge("test.com", records, client)
+	diags := deleteRecordsMerge(context.Background(), "test.com", records, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, 1, setHostsRecordCount)
 }
@@ -84,7 +85,7 @@ func TestDeleteRecordsMerge_RemovesAllManagedRecords(t *testing.T) {
 		},
 	}
 
-	diags := deleteRecordsMerge("test.com", records, client)
+	diags := deleteRecordsMerge(context.Background(), "test.com", records, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, 0, setHostsRecordCount) // No records remain
 }
@@ -119,7 +120,7 @@ func TestDeleteRecordsMerge_EmailTypeResolvedToNone(t *testing.T) {
 		},
 	}
 
-	diags := deleteRecordsMerge("test.com", records, client)
+	diags := deleteRecordsMerge(context.Background(), "test.com", records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -135,7 +136,7 @@ func TestDeleteRecordsOverwrite_ClearsAll(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := deleteRecordsOverwrite("test.com", client)
+	diags := deleteRecordsOverwrite(context.Background(), "test.com", client)
 	assert.False(t, diags.HasError())
 }
 
@@ -167,7 +168,7 @@ func TestDeleteRecordsMerge_SetHostsAPIError(t *testing.T) {
 		},
 	}
 
-	diags := deleteRecordsMerge("test.com", records, client)
+	diags := deleteRecordsMerge(context.Background(), "test.com", records, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -179,7 +180,7 @@ func TestDeleteRecordsMerge_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := deleteRecordsMerge("test.com", []interface{}{}, client)
+	diags := deleteRecordsMerge(context.Background(), "test.com", []interface{}{}, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -190,6 +191,6 @@ func TestDeleteRecordsOverwrite_SetHostsAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := deleteRecordsOverwrite("test.com", client)
+	diags := deleteRecordsOverwrite(context.Background(), "test.com", client)
 	assert.True(t, diags.HasError())
 }
