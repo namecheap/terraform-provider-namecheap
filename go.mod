@@ -3,7 +3,7 @@ module github.com/namecheap/terraform-provider-namecheap
 require (
 	github.com/hashicorp/go-cty v1.5.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
-	github.com/namecheap/go-namecheap-sdk/v2 v2.6.5-0.20260702134510-10bc3a4a45c9
+	github.com/namecheap/go-namecheap-sdk/v2 v2.6.5-0.20260702145853-33d5fbadd96a
 	github.com/stretchr/testify v1.11.1
 )
 
