@@ -347,7 +347,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@87bca3cd546666ad891e22973412fef14865d3ab # v3.0.2 @ 2026-06-17
+        uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
         with:
           mode: start
           github-token: ${{ steps.app-token.outputs.token }}
@@ -499,7 +499,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Stop EC2 runner
-        uses: namecheap/ec2-github-runner@87bca3cd546666ad891e22973412fef14865d3ab # v3.0.2 @ 2026-06-17
+        uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
         with:
           mode: stop
           github-token: ${{ steps.app-token.outputs.token }}
