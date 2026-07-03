@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,7 @@ func TestReadRecordsMerge_FindsMatchingRecords(t *testing.T) {
 		},
 	}
 
-	foundRecords, emailType, diags := readRecordsMerge("test.com", currentRecords, client)
+	foundRecords, emailType, diags := readRecordsMerge(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 1)
@@ -58,7 +59,7 @@ func TestReadRecordsMerge_NoMatchingRecords(t *testing.T) {
 		},
 	}
 
-	foundRecords, _, diags := readRecordsMerge("test.com", currentRecords, client)
+	foundRecords, _, diags := readRecordsMerge(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 0)
@@ -84,7 +85,7 @@ func TestReadRecordsMerge_CNAMEWithDotFix(t *testing.T) {
 		},
 	}
 
-	foundRecords, _, diags := readRecordsMerge("test.com", currentRecords, client)
+	foundRecords, _, diags := readRecordsMerge(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 1)
@@ -109,7 +110,7 @@ func TestReadRecordsMerge_EmptyRemote(t *testing.T) {
 		},
 	}
 
-	foundRecords, _, diags := readRecordsMerge("test.com", currentRecords, client)
+	foundRecords, _, diags := readRecordsMerge(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 0)
@@ -135,7 +136,7 @@ func TestReadRecordsOverwrite_ReturnsAllRecords(t *testing.T) {
 		},
 	}
 
-	foundRecords, emailType, diags := readRecordsOverwrite("test.com", currentRecords, client)
+	foundRecords, emailType, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 2)
@@ -149,7 +150,7 @@ func TestReadRecordsOverwrite_EmptyRemote(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	foundRecords, _, diags := readRecordsOverwrite("test.com", []interface{}{}, client)
+	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 0)
@@ -175,7 +176,7 @@ func TestReadRecordsOverwrite_CNAMEDotFix(t *testing.T) {
 		},
 	}
 
-	foundRecords, _, diags := readRecordsOverwrite("test.com", currentRecords, client)
+	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 1)
@@ -190,7 +191,7 @@ func TestReadRecordsOverwrite_GetHostsAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, _, diags := readRecordsOverwrite("test.com", []interface{}{}, client)
+	result, _, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
 	assert.Nil(t, result)
 	assert.True(t, diags.HasError())
 }
@@ -203,7 +204,7 @@ func TestReadRecordsMerge_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, _, diags := readRecordsMerge("test.com", []interface{}{}, client)
+	result, _, diags := readRecordsMerge(context.Background(), "test.com", []interface{}{}, client)
 	assert.Nil(t, result)
 	assert.True(t, diags.HasError())
 }

@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,7 @@ func TestCreateNameserversMerge_OnDefaultDNS(t *testing.T) {
 	client := newTestClient(server.URL)
 	nameservers := []string{"ns1.example.com", "ns2.example.com"}
 
-	diags := createNameserversMerge("test.com", nameservers, client)
+	diags := createNameserversMerge(context.Background(), "test.com", nameservers, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -56,7 +57,7 @@ func TestCreateNameserversMerge_MergesWithExisting(t *testing.T) {
 	client := newTestClient(server.URL)
 	nameservers := []string{"ns3.new.com", "ns4.new.com"}
 
-	diags := createNameserversMerge("test.com", nameservers, client)
+	diags := createNameserversMerge(context.Background(), "test.com", nameservers, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -77,7 +78,7 @@ func TestCreateNameserversMerge_DuplicateDetection(t *testing.T) {
 	client := newTestClient(server.URL)
 	nameservers := []string{"ns1.example.com", "ns3.example.com"}
 
-	diags := createNameserversMerge("test.com", nameservers, client)
+	diags := createNameserversMerge(context.Background(), "test.com", nameservers, client)
 	assert.True(t, diags.HasError())
 	assert.Contains(t, diags[0].Detail, "ns1.example.com")
 	assert.Contains(t, diags[0].Detail, "already exist")
@@ -98,7 +99,7 @@ func TestCreateNameserversMerge_DuplicateCaseInsensitive(t *testing.T) {
 	client := newTestClient(server.URL)
 	nameservers := []string{"ns1.example.com", "ns3.example.com"}
 
-	diags := createNameserversMerge("test.com", nameservers, client)
+	diags := createNameserversMerge(context.Background(), "test.com", nameservers, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -111,7 +112,7 @@ func TestCreateNameserversOverwrite_Simple(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := createNameserversOverwrite("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	diags := createNameserversOverwrite(context.Background(), "test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -130,7 +131,7 @@ func TestCreateNameserversMerge_SetCustomAPIError_OnDefaultDNS(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := createNameserversMerge("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	diags := createNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -149,7 +150,7 @@ func TestCreateNameserversMerge_SetCustomAPIError_OnCustomDNS(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := createNameserversMerge("test.com", []string{"ns3.new.com", "ns4.new.com"}, client)
+	diags := createNameserversMerge(context.Background(), "test.com", []string{"ns3.new.com", "ns4.new.com"}, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -169,7 +170,7 @@ func TestCreateNameserversMerge_NilNameserversInResponse(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := createNameserversMerge("test.com", []string{"ns1.new.com", "ns2.new.com"}, client)
+	diags := createNameserversMerge(context.Background(), "test.com", []string{"ns1.new.com", "ns2.new.com"}, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -181,7 +182,7 @@ func TestCreateNameserversMerge_GetListAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := createNameserversMerge("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	diags := createNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -192,6 +193,6 @@ func TestCreateNameserversOverwrite_SetCustomAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := createNameserversOverwrite("test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+	diags := createNameserversOverwrite(context.Background(), "test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
 	assert.True(t, diags.HasError())
 }

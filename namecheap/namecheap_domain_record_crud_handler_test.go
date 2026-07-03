@@ -637,3 +637,98 @@ func TestResourceRecordUpdate_OverwriteRecordsAPIError(t *testing.T) {
 	diags := resourceRecordUpdate(context.TODO(), data, client)
 	assert.True(t, diags.HasError())
 }
+
+func TestResourceRecordRead_OverwriteWithEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "@", Type: "MX", Address: "mail.test.com", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	// Pre-seed a value that differs from the remote response ("MX") so the
+	// assertion below only passes if the read actually writes the remote
+	// value back into state.
+	_ = data.Set("email_type", "FWD")
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.test.com", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "MX", data.Get("email_type").(string))
+}
+
+func TestResourceRecordRead_MergeWithEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "@", Type: "MX", Address: "mail.test.com", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	// Pre-seed a value that differs from the remote response ("MX") so the
+	// assertion below only passes if the read actually writes the remote
+	// value back into state.
+	_ = data.Set("email_type", "FWD")
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.test.com", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "MX", data.Get("email_type").(string))
+}
+
+func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "@", Type: "MX", Address: "mail.test.com", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	// Mimic `terraform import`: only domain and mode are populated by the
+	// importer; email_type is absent from state.
+	_ = data.Set("mode", ncModeImport)
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	// Pins current behavior: email_type is refreshed from the remote response
+	// only when it is already present in state, so the import path leaves it
+	// unset even though the API reports "MX".
+	assert.Equal(t, "", data.Get("email_type").(string))
+	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
+}

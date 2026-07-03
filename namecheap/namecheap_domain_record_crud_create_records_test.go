@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,7 @@ func TestCreateRecordsMerge_EmptyRemote(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, 2, callCount) // getHosts + setHosts
 }
@@ -77,7 +78,7 @@ func TestCreateRecordsMerge_WithExistingRecords(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -110,7 +111,7 @@ func TestCreateRecordsMerge_DuplicateRecord(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.True(t, diags.HasError())
 	assert.Contains(t, diags[0].Summary, "Duplicate record")
 }
@@ -153,7 +154,7 @@ func TestCreateRecordsMerge_FiltersParkingRecords(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 	// Should have: api (existing, not parking) + blog (new) = 2 records
 	assert.Equal(t, 2, setHostsRecordCount)
@@ -186,7 +187,7 @@ func TestCreateRecordsMerge_WithEmailType(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", &emailType, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", &emailType, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -207,7 +208,7 @@ func TestCreateRecordsMerge_GetHostsAPIError(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -233,7 +234,7 @@ func TestCreateRecordsOverwrite_Simple(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsOverwrite("test.com", nil, records, client)
+	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -257,7 +258,7 @@ func TestCreateRecordsOverwrite_WithEmailType(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsOverwrite("test.com", &emailType, records, client)
+	diags := createRecordsOverwrite(context.Background(), "test.com", &emailType, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -270,7 +271,7 @@ func TestCreateRecordsOverwrite_EmptyRecords(t *testing.T) {
 	client := newTestClient(server.URL)
 	records := []interface{}{}
 
-	diags := createRecordsOverwrite("test.com", nil, records, client)
+	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -305,7 +306,7 @@ func TestCreateRecordsMerge_SetHostsAPIError(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -338,7 +339,7 @@ func TestCreateRecordsMerge_CNAMEDotFixNoDuplicate(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -369,7 +370,7 @@ func TestCreateRecordsMerge_CNAMEDotFixDetectsDuplicate(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.True(t, diags.HasError())
 	assert.Contains(t, diags[0].Summary, "Duplicate record")
 }
@@ -405,7 +406,7 @@ func TestCreateRecordsMerge_ResolvesEmailTypeWhenNil(t *testing.T) {
 	}
 
 	// emailType is nil - should be resolved from remote
-	diags := createRecordsMerge("test.com", nil, records, client)
+	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -426,6 +427,6 @@ func TestCreateRecordsOverwrite_SetHostsAPIError(t *testing.T) {
 		},
 	}
 
-	diags := createRecordsOverwrite("test.com", nil, records, client)
+	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
 	assert.True(t, diags.HasError())
 }

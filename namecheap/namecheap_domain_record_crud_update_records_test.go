@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func TestUpdateRecordsMerge_ReplacesOldWithNew(t *testing.T) {
 		},
 	}
 
-	diags := updateRecordsMerge("test.com", nil, oldRecords, newRecords, client)
+	diags := updateRecordsMerge(context.Background(), "test.com", nil, oldRecords, newRecords, client)
 	assert.False(t, diags.HasError())
 	// Should contain: api (kept) + www new (replaced)
 	assert.Len(t, setHostsRecords, 2)
@@ -102,7 +103,7 @@ func TestUpdateRecordsMerge_WithEmailType(t *testing.T) {
 		},
 	}
 
-	diags := updateRecordsMerge("test.com", &emailType, oldRecords, newRecords, client)
+	diags := updateRecordsMerge(context.Background(), "test.com", &emailType, oldRecords, newRecords, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -133,7 +134,7 @@ func TestUpdateRecordsMerge_EmptyRemoteRecords(t *testing.T) {
 		},
 	}
 
-	diags := updateRecordsMerge("test.com", nil, oldRecords, newRecords, client)
+	diags := updateRecordsMerge(context.Background(), "test.com", nil, oldRecords, newRecords, client)
 	assert.False(t, diags.HasError())
 }
 
@@ -173,7 +174,7 @@ func TestUpdateRecordsMerge_SetHostsAPIError(t *testing.T) {
 		},
 	}
 
-	diags := updateRecordsMerge("test.com", nil, oldRecords, newRecords, client)
+	diags := updateRecordsMerge(context.Background(), "test.com", nil, oldRecords, newRecords, client)
 	assert.True(t, diags.HasError())
 }
 
@@ -185,6 +186,6 @@ func TestUpdateRecordsMerge_APIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	diags := updateRecordsMerge("test.com", nil, []interface{}{}, []interface{}{}, client)
+	diags := updateRecordsMerge(context.Background(), "test.com", nil, []interface{}{}, []interface{}{}, client)
 	assert.True(t, diags.HasError())
 }

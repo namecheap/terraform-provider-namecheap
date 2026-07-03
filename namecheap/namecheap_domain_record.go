@@ -160,28 +160,28 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeMerge && records != nil {
-		diags := createRecordsMerge(domain, emailType, records, client)
+		diags := createRecordsMerge(ctx, domain, emailType, records, client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeOverwrite && records != nil {
-		diags := createRecordsOverwrite(domain, emailType, records, client)
+		diags := createRecordsOverwrite(ctx, domain, emailType, records, client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeMerge && nameservers != nil {
-		diags := createNameserversMerge(domain, convertInterfacesToString(nameservers), client)
+		diags := createNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeOverwrite && nameservers != nil {
-		diags := createNameserversOverwrite(domain, convertInterfacesToString(nameservers), client)
+		diags := createNameserversOverwrite(ctx, domain, convertInterfacesToString(nameservers), client)
 		if diags.HasError() {
 			return diags
 		}
@@ -223,7 +223,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 	// We must read nameservers status before hosts.
 	// If you're using custom nameservers, then the reading records process will fail since Namecheap doesn't control
 	// the domain behaviour.
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -234,7 +234,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
 		if mode == ncModeMerge {
-			realNameservers, diags := readNameserversMerge(domain, convertInterfacesToString(nameservers), client)
+			realNameservers, diags := readNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
 			if diags.HasError() {
 				return diags
 			}
@@ -242,7 +242,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		}
 
 		if mode == ncModeOverwrite || mode == ncModeImport {
-			realNameservers, diags := readNameserversOverwrite(domain, client)
+			realNameservers, diags := readNameserversOverwrite(ctx, domain, client)
 			if diags.HasError() {
 				return diags
 			}
@@ -252,7 +252,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		_ = data.Set("record", []interface{}{})
 	} else {
 		if mode == ncModeMerge {
-			realRecords, realEmailType, diags := readRecordsMerge(domain, records, client)
+			realRecords, realEmailType, diags := readRecordsMerge(ctx, domain, records, client)
 			if diags.HasError() {
 				return diags
 			}
@@ -264,7 +264,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		}
 
 		if mode == ncModeOverwrite || mode == ncModeImport {
-			realRecords, realEmailType, diags := readRecordsOverwrite(domain, records, client)
+			realRecords, realEmailType, diags := readRecordsOverwrite(ctx, domain, records, client)
 			if diags.HasError() {
 				return diags
 			}
@@ -319,7 +319,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		defer ncMutexKV.Unlock(domain)
 	}
 
-	nsResponse, err := client.DomainsDNS.GetList(domain)
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -336,42 +336,42 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		// This condition resolves the issue if a user set up records on TF file, but in fact, manually enabled custom DNS.
 		// Before applying records, we have to set default DNS
 		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
-		_, err := client.DomainsDNS.SetDefault(domain)
+		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
 			return diag.FromErr(err)
 		}
 	}
 
 	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 {
-		diags := updateNameserversMerge(domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+		diags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) {
-		diags := updateRecordsMerge(domain, emailType, oldRecords, newRecords, client)
+		diags := updateRecordsMerge(ctx, domain, emailType, oldRecords, newRecords, client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeOverwrite && (newRecordsLen != 0 || oldRecordsLen != 0) {
-		diags := createRecordsOverwrite(domain, emailType, newRecords, client)
+		diags := createRecordsOverwrite(ctx, domain, emailType, newRecords, client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeOverwrite && newNameserversLen != 0 {
-		diags := createNameserversOverwrite(domain, convertInterfacesToString(newNameservers), client)
+		diags := createNameserversOverwrite(ctx, domain, convertInterfacesToString(newNameservers), client)
 		if diags.HasError() {
 			return diags
 		}
 	}
 
 	if mode == ncModeMerge && newNameserversLen != 0 {
-		diags := updateNameserversMerge(domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+		diags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
 		if diags.HasError() {
 			return diags
 		}
@@ -381,13 +381,13 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	// then we have to update just an email status
 	if emailType != nil && oldNameserversLen == 0 && newNameserversLen == 0 && oldRecordsLen == 0 && newRecordsLen == 0 {
 		if mode == ncModeOverwrite {
-			diags := createRecordsOverwrite(domain, emailType, []interface{}{}, client)
+			diags := createRecordsOverwrite(ctx, domain, emailType, []interface{}{}, client)
 			if diags.HasError() {
 				return diags
 			}
 		}
 		if mode == ncModeMerge {
-			diags := createRecordsMerge(domain, emailType, []interface{}{}, client)
+			diags := createRecordsMerge(ctx, domain, emailType, []interface{}{}, client)
 			if diags.HasError() {
 				return diags
 			}
@@ -396,7 +396,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 
 	// For overwrite mode, when no nameservers and records, and email type is not set, then we have to reset it to NONE
 	if emailType == nil && mode == ncModeOverwrite && oldNameserversLen == 0 && newNameserversLen == 0 && oldRecordsLen == 0 && newRecordsLen == 0 {
-		diags := createRecordsOverwrite(domain, nil, []interface{}{}, client)
+		diags := createRecordsOverwrite(ctx, domain, nil, []interface{}{}, client)
 		if diags.HasError() {
 			return diags
 		}
@@ -431,19 +431,19 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeMerge && recordsLen != 0 {
-		return deleteRecordsMerge(domain, records, client)
+		return deleteRecordsMerge(ctx, domain, records, client)
 	}
 
 	if mode == ncModeOverwrite && recordsLen != 0 {
-		return deleteRecordsOverwrite(domain, client)
+		return deleteRecordsOverwrite(ctx, domain, client)
 	}
 
 	if mode == ncModeMerge && nameserversLen != 0 {
-		return deleteNameserversMerge(domain, convertInterfacesToString(nameservers), client)
+		return deleteNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
 	}
 
 	if mode == ncModeOverwrite && nameserversLen != 0 {
-		return deleteNameserversOverwrite(domain, client)
+		return deleteNameserversOverwrite(ctx, domain, client)
 	}
 
 	return nil
