@@ -410,6 +410,7 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
 			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
 
+			managed := false
 			for _, currentRecord := range *currentRecordsConverted {
 				currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
 				if err != nil {
@@ -420,9 +421,17 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 
 				if currentRecordHash == remoteRecordHash {
 					*remoteRecord.Address = *currentRecord.Address
+					managed = true
 					break
 				}
 
+			}
+
+			// Skip Namecheap's default parking records unless the user explicitly
+			// manages them, so they don't surface as spurious drift (issue #260)
+			// while still respecting an intentionally-configured record.
+			if !managed && isDefaultParkingRecord(&remoteRecord, &domain) {
+				continue
 			}
 
 			remoteRecords = append(remoteRecords, *convertDomainRecordDetailedToTypeSetRecord(&remoteRecord))
@@ -679,13 +688,20 @@ func getFixedAddressOfRecord(record *namecheap.DomainsDNSHostRecord) (*string, e
 	return record.Address, nil
 }
 
+// isDefaultParkingRecord reports whether the record is one of Namecheap's
+// auto-provisioned default parking records (CNAME www -> parkingpage.namecheap.com.,
+// URL @ -> http://www.<domain>).
+func isDefaultParkingRecord(record *namecheap.DomainsDNSHostRecordDetailed, domain *string) bool {
+	return (*record.Type == namecheap.RecordTypeCNAME && *record.Name == "www" && *record.Address == "parkingpage.namecheap.com.") ||
+		(*record.Type == namecheap.RecordTypeURL && *record.Name == "@" && strings.HasPrefix(*record.Address, "http://www."+*domain))
+}
+
 // filterDefaultParkingRecords filters out default parking records
 func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetailed, domain *string) *[]namecheap.DomainsDNSHostRecordDetailed {
 	var filteredRecords []namecheap.DomainsDNSHostRecordDetailed
 
 	for _, record := range *records {
-		if (*record.Type == namecheap.RecordTypeCNAME && *record.Name == "www" && *record.Address == "parkingpage.namecheap.com.") ||
-			(*record.Type == namecheap.RecordTypeURL && *record.Name == "@" && strings.HasPrefix(*record.Address, "http://www."+*domain)) {
+		if isDefaultParkingRecord(&record, domain) {
 			continue
 		}
 		filteredRecords = append(filteredRecords, record)
