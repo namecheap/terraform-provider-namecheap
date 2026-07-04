@@ -4,6 +4,7 @@ require (
 	github.com/hashicorp/go-cty v1.5.0
 	github.com/hashicorp/terraform-plugin-log v0.10.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
+	github.com/hashicorp/terraform-plugin-testing v1.16.0
 	github.com/namecheap/go-namecheap-sdk/v2 v2.7.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -18,7 +19,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/hashicorp/errwrap v1.0.0 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-checkpoint v0.5.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
