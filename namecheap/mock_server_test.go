@@ -76,6 +76,20 @@ func (m *namecheapMock) stateFor(domain string) *mockDomainState {
 	return st
 }
 
+// seed sets the initial backend state for a domain, simulating records,
+// nameservers, or an email type that already exist before Terraform manages the
+// domain. Call it before the provider issues any request (e.g. in a PreCheck).
+func (m *namecheapMock) seed(domain string, hosts []hostEntry, emailType string, nameservers []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.stateFor(domain)
+	st.hosts = hosts
+	st.nameservers = nameservers
+	if emailType != "" {
+		st.emailType = emailType
+	}
+}
+
 func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -132,12 +146,26 @@ func parseSetHostsRequest(r *http.Request) []hostEntry {
 		hosts = append(hosts, hostEntry{
 			Name:    name,
 			Type:    recordType,
-			Address: r.FormValue("Address" + idx),
+			Address: mockNormalizeAddress(recordType, r.FormValue("Address"+idx)),
 			MXPref:  mxPref,
 			TTL:     ttl,
 		})
 	}
 	return hosts
+}
+
+// mockNormalizeAddress mimics the Namecheap server, which stores a trailing dot
+// on the address of hostname-valued records (CNAME/ALIAS/NS/MX). Replicating it
+// here exercises the provider's read-time address reconciliation — the same path
+// that must round-trip cleanly against the real API.
+func mockNormalizeAddress(recordType, address string) string {
+	switch recordType {
+	case "CNAME", "ALIAS", "NS", "MX":
+		if address != "" && !strings.HasSuffix(address, ".") {
+			return address + "."
+		}
+	}
+	return address
 }
 
 // splitNameservers parses the comma-separated Nameservers parameter, trimming

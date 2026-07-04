@@ -61,6 +61,76 @@ func mockCheckHostsCleared(m *namecheapMock, domain string) resource.TestCheckFu
 	}
 }
 
+// mockCheckHostContains asserts the mock persisted a host with the given name,
+// type and address for the domain.
+func mockCheckHostContains(m *namecheapMock, domain, name, recordType, address string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		st := m.state(domain)
+		if st == nil {
+			return fmt.Errorf("mock has no state for %q", domain)
+		}
+		for _, h := range st.hosts {
+			if h.Name == name && h.Type == recordType && h.Address == address {
+				return nil
+			}
+		}
+		return fmt.Errorf("mock state for %q missing host %s/%s/%s (have %+v)", domain, name, recordType, address, st.hosts)
+	}
+}
+
+// mockCheckEmailType asserts the mock persisted the given email type for the domain.
+func mockCheckEmailType(m *namecheapMock, domain, want string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		st := m.state(domain)
+		if st == nil {
+			return fmt.Errorf("mock has no state for %q", domain)
+		}
+		if st.emailType != want {
+			return fmt.Errorf("mock email type for %q = %q, want %q", domain, st.emailType, want)
+		}
+		return nil
+	}
+}
+
+// mockCheckNameservers asserts the mock persisted exactly the given set of
+// custom nameservers for the domain (order-independent).
+func mockCheckNameservers(m *namecheapMock, domain string, want ...string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		st := m.state(domain)
+		if st == nil {
+			return fmt.Errorf("mock has no state for %q", domain)
+		}
+		if len(st.nameservers) != len(want) {
+			return fmt.Errorf("mock nameserver count for %q = %d, want %d (have %v)", domain, len(st.nameservers), len(want), st.nameservers)
+		}
+		for _, w := range want {
+			found := false
+			for _, ns := range st.nameservers {
+				if ns == w {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("mock nameservers for %q missing %q (have %v)", domain, w, st.nameservers)
+			}
+		}
+		return nil
+	}
+}
+
+// mockCheckNameserversDefault is a CheckDestroy that asserts the domain was
+// returned to Namecheap's default nameservers (no custom nameservers) on destroy.
+func mockCheckNameserversDefault(m *namecheapMock, domain string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		st := m.state(domain)
+		if st != nil && len(st.nameservers) != 0 {
+			return fmt.Errorf("expected nameservers for %q to be reset to default on destroy, mock still has %v", domain, st.nameservers)
+		}
+		return nil
+	}
+}
+
 // TestAccMockDomainRecordsLifecycle drives a full create -> update -> destroy
 // lifecycle for namecheap_domain_records against the stateful mock, asserting
 // both Terraform state and the mock backend at each step. It proves the mock
