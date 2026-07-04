@@ -12,9 +12,13 @@ check:
 test:
 	go test -v ./namecheap/... -count=1 -covermode=atomic -coverprofile=coverage.out
 
+# Live-API acceptance tests against the real Namecheap sandbox.
 # Please set the following ENV variables for this test:
 # NAMECHEAP_USER_NAME, NAMECHEAP_API_USER, NAMECHEAP_API_KEY, NAMECHEAP_TEST_DOMAIN, NAMECHEAP_USE_SANDBOX (optional, default is false)
-testacc:
+# `testacc` is kept as a backwards-compatible alias for `testacc-sandbox`.
+testacc: testacc-sandbox
+
+testacc-sandbox:
 	TF_ACC=1 go test ./namecheap -v -run=TestAcc -count=1 -timeout=30m -failfast
 
 # Mock-backed acceptance tests: run the acceptance suite against an in-process
@@ -60,4 +64,4 @@ lint:
 docs:
 	tfplugindocs
 
-.PHONY: format check test testacc testacc-mock build release install_darwin_amd64 install_linux_amd64 lint docs
+.PHONY: format check test testacc testacc-sandbox testacc-mock build release install_darwin_amd64 install_linux_amd64 lint docs

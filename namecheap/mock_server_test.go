@@ -41,6 +41,13 @@ type namecheapMock struct {
 	server  *httptest.Server
 	mu      sync.Mutex
 	domains map[string]*mockDomainState
+
+	// Optional fault injection: when failCommand is set, any request whose
+	// Command equals it returns an API error with failCode/failMessage instead
+	// of the normal response. Used to exercise the provider's error-surfacing.
+	failCommand string
+	failCode    string
+	failMessage string
 }
 
 // newNamecheapMock starts a stateful mock server and registers its shutdown
@@ -57,6 +64,17 @@ func newNamecheapMock(t *testing.T) *namecheapMock {
 
 // url returns the base URL of the running mock server.
 func (m *namecheapMock) url() string { return m.server.URL }
+
+// failOn makes the mock return an API error (code/message) for every request
+// whose Command equals the given command, until cleared. Safe to call while the
+// server is running.
+func (m *namecheapMock) failOn(command, code, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failCommand = command
+	m.failCode = code
+	m.failMessage = message
+}
 
 // state returns the current mock state for a domain, or nil if the domain has
 // never been touched. Callers must not mutate the returned pointer.
@@ -101,9 +119,16 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := m.stateFor(domain)
 
 	w.Header().Set("Content-Type", "text/xml")
+
+	// Fault injection: return an API error for the configured command.
+	if m.failCommand != "" && command == m.failCommand {
+		_, _ = io.WriteString(w, apiErrorXML(m.failCode, m.failMessage))
+		return
+	}
+
+	st := m.stateFor(domain)
 	var resp string
 	switch command {
 	case "namecheap.domains.dns.getHosts":
