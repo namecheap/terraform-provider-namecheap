@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -214,6 +215,12 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 			MaxAttempts: maxRetries,
 			MaxElapsed:  retryMaxElapsed,
 		},
+		// Bridge the SDK's structured slog events into Terraform's tflog so
+		// that TF_LOG_PROVIDER_NAMECHEAP=DEBUG surfaces per-API-call entries
+		// (command, attempt, duration, status, error_code). The SDK redacts
+		// secret parameters before logging; the bridge forwards only, adding
+		// no credentials. Purely additive: it does not affect API behavior.
+		Logger: slog.New(newBridgeHandler()),
 	})
 
 	return client, diag.Diagnostics{}
