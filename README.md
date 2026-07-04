@@ -80,6 +80,21 @@ resource "namecheap_domain_records" "domain2-com" {
 }
 ```
 
+### Testing
+
+Every pull request runs a fast, credential-free mock-backed acceptance suite
+(`make testacc-mock`) on GitHub-hosted runners across a Terraform + OpenTofu
+version matrix:
+
+| Engine | Versions tested in CI |
+| --- | --- |
+| Terraform | 1.5.7 (minimum supported), 1.15.5 (latest series) |
+| OpenTofu | 1.12.3 |
+
+A live-API sandbox suite (`make testacc-sandbox`, aliased as `make testacc`)
+additionally runs on pushes to this repository. See
+[CONTRIBUTING.md](CONTRIBUTING.md#tests) for how to run each locally.
+
 ### Contributing
 
 To contribute, please read our [contributing](CONTRIBUTING.md) docs.
