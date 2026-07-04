@@ -10,9 +10,15 @@ make format         # go fmt ./...
 make check          # go vet ./...
 make lint           # golangci-lint run
 make test           # Unit tests with coverage
+make testacc-mock   # Mock-backed acceptance tests (no credentials; needs a terraform/tofu binary)
 ```
 
 Run a single test: `go test -v ./namecheap/... -run TestFunctionName -count=1`
+
+`make testacc-mock` runs the `testacc`-tagged mock acceptance suite; the mock
+lives in `namecheap/mock_server_test.go` and is exercised on every PR (see
+`CONTRIBUTING.md`). `make testacc` remains the live-API sandbox suite (needs
+`NAMECHEAP_*` credentials + a whitelisted IP).
 
 ## DCO Sign-off
 
