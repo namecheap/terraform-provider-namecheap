@@ -7,7 +7,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
@@ -185,6 +187,237 @@ func TestProviderConfigureWhitespaceOnlyCredentials(t *testing.T) {
 	assert.Contains(t, diags[0].Detail, "user_name")
 	assert.Contains(t, diags[0].Detail, "api_user")
 	assert.Contains(t, diags[0].Detail, "api_key")
+}
+
+// Resilience config options: requests_per_minute, max_retries,
+// retry_max_elapsed, request_timeout.
+
+const (
+	testEnvRequestsPerMinute = "NAMECHEAP_REQUESTS_PER_MINUTE"
+	testEnvMaxRetries        = "NAMECHEAP_MAX_RETRIES"
+	testEnvRetryMaxElapsed   = "NAMECHEAP_RETRY_MAX_ELAPSED"
+	testEnvRequestTimeout    = "NAMECHEAP_REQUEST_TIMEOUT"
+)
+
+// clearResilienceEnvVars ensures the four new env vars are unset for the
+// duration of a test, so an ambient developer/CI environment cannot leak in.
+func clearResilienceEnvVars(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{testEnvRequestsPerMinute, testEnvMaxRetries, testEnvRetryMaxElapsed, testEnvRequestTimeout} {
+		t.Setenv(k, "")
+	}
+}
+
+// baseProviderConfig sets the three required credential env vars to test
+// values and returns the raw config map other resilience-option tests build on.
+func baseProviderConfig(t *testing.T) map[string]interface{} {
+	t.Helper()
+	t.Setenv("NAMECHEAP_USER_NAME", "test-user")
+	t.Setenv("NAMECHEAP_API_USER", "test-api-user")
+	t.Setenv("NAMECHEAP_API_KEY", "test-api-key")
+	return map[string]interface{}{
+		"client_ip":   testPlaceholderClientIP,
+		"use_sandbox": false,
+	}
+}
+
+func TestProviderResilienceFieldsAreOptional(t *testing.T) {
+	p := Provider()
+	for _, field := range []string{"requests_per_minute", "max_retries", "retry_max_elapsed", "request_timeout"} {
+		s, ok := p.Schema[field]
+		assert.True(t, ok, "field %s should exist", field)
+		assert.True(t, s.Optional, "field %s should be Optional", field)
+		assert.False(t, s.Required, "field %s should not be Required", field)
+	}
+}
+
+func TestProviderResilienceDefaultsPreserveCurrentBehavior(t *testing.T) {
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors with only required fields set, got: %v", diags)
+
+	client, ok := rawProvider.Meta().(*namecheap.Client)
+	assert.True(t, ok, "expected provider meta to be *namecheap.Client")
+	assert.Equal(t, defaultRequestsPerMinute, client.ClientOptions.RateLimit.PerMinute)
+	assert.Equal(t, defaultMaxRetries, client.ClientOptions.Retry.MaxAttempts)
+	assert.Equal(t, 2*time.Minute, client.ClientOptions.Retry.MaxElapsed)
+	assert.Equal(t, 30*time.Second, client.ClientOptions.HTTPClient.Timeout)
+}
+
+func TestProviderResilienceFieldsFromInlineConfig(t *testing.T) {
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+	raw["requests_per_minute"] = 5
+	raw["max_retries"] = 10
+	raw["retry_max_elapsed"] = "90s"
+	raw["request_timeout"] = "45s"
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	assert.Equal(t, 5, client.ClientOptions.RateLimit.PerMinute)
+	assert.Equal(t, 10, client.ClientOptions.Retry.MaxAttempts)
+	assert.Equal(t, 90*time.Second, client.ClientOptions.Retry.MaxElapsed)
+	assert.Equal(t, 45*time.Second, client.ClientOptions.HTTPClient.Timeout)
+}
+
+func TestProviderResilienceFieldsFromEnvVars(t *testing.T) {
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+	t.Setenv(testEnvRequestsPerMinute, "7")
+	t.Setenv(testEnvMaxRetries, "6")
+	t.Setenv(testEnvRetryMaxElapsed, "3m")
+	t.Setenv(testEnvRequestTimeout, "20s")
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	assert.Equal(t, 7, client.ClientOptions.RateLimit.PerMinute)
+	assert.Equal(t, 6, client.ClientOptions.Retry.MaxAttempts)
+	assert.Equal(t, 3*time.Minute, client.ClientOptions.Retry.MaxElapsed)
+	assert.Equal(t, 20*time.Second, client.ClientOptions.HTTPClient.Timeout)
+}
+
+func TestProviderConfigureInvalidRetryMaxElapsedDuration(t *testing.T) {
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+	raw["retry_max_elapsed"] = "not-a-duration"
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.True(t, diags.HasError(), "expected error for unparseable retry_max_elapsed")
+	assert.Contains(t, diags[0].Summary, "retry_max_elapsed")
+}
+
+func TestProviderConfigureInvalidRequestTimeoutDuration(t *testing.T) {
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+	raw["request_timeout"] = "not-a-duration"
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.True(t, diags.HasError(), "expected error for unparseable request_timeout")
+	assert.Contains(t, diags[0].Summary, "request_timeout")
+}
+
+// Plan-time validation (ValidateDiagFunc), exercised via Provider().Validate,
+// mirroring how Terraform core invokes it during `terraform validate`/plan.
+
+func TestProviderValidateRequestsPerMinuteBounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   int
+		wantErr bool
+	}{
+		{"below minimum", 0, true},
+		{"negative", -1, true},
+		{"above maximum", 21, true},
+		{"minimum boundary", 1, false},
+		{"maximum boundary", 20, false},
+		{"typical value", 10, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Provider()
+			raw := map[string]interface{}{"requests_per_minute": tt.value}
+			diags := p.Validate(terraform.NewResourceConfigRaw(raw))
+			assert.Equal(t, tt.wantErr, diags.HasError(), "requests_per_minute=%d diags=%v", tt.value, diags)
+		})
+	}
+}
+
+func TestProviderValidateMaxRetriesBounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   int
+		wantErr bool
+	}{
+		{"negative", -1, true},
+		{"zero is allowed by validation", 0, false},
+		{"typical value", 4, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Provider()
+			raw := map[string]interface{}{"max_retries": tt.value}
+			diags := p.Validate(terraform.NewResourceConfigRaw(raw))
+			assert.Equal(t, tt.wantErr, diags.HasError(), "max_retries=%d diags=%v", tt.value, diags)
+		})
+	}
+}
+
+func TestProviderValidateRetryMaxElapsedBounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"unparseable", "not-a-duration", true},
+		{"zero", "0s", true},
+		{"negative", "-5s", true},
+		{"valid", "2m", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Provider()
+			raw := map[string]interface{}{"retry_max_elapsed": tt.value}
+			diags := p.Validate(terraform.NewResourceConfigRaw(raw))
+			assert.Equal(t, tt.wantErr, diags.HasError(), "retry_max_elapsed=%q diags=%v", tt.value, diags)
+		})
+	}
+}
+
+func TestProviderValidateRequestTimeoutBounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{"unparseable", "not-a-duration", true},
+		{"zero", "0s", true},
+		{"negative", "-5s", true},
+		{"valid", "30s", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := Provider()
+			raw := map[string]interface{}{"request_timeout": tt.value}
+			diags := p.Validate(terraform.NewResourceConfigRaw(raw))
+			assert.Equal(t, tt.wantErr, diags.HasError(), "request_timeout=%q diags=%v", tt.value, diags)
+		})
+	}
+}
+
+// Direct unit tests for the new validation functions, exercised outside the
+// schema/provider machinery for full branch coverage.
+
+func TestValidateRequestsPerMinuteFunc(t *testing.T) {
+	assert.Empty(t, validateRequestsPerMinute(1, cty.Path{}))
+	assert.Empty(t, validateRequestsPerMinute(20, cty.Path{}))
+	assert.NotEmpty(t, validateRequestsPerMinute(0, cty.Path{}))
+	assert.NotEmpty(t, validateRequestsPerMinute(21, cty.Path{}))
+	assert.NotEmpty(t, validateRequestsPerMinute(-1, cty.Path{}))
+}
+
+func TestValidateMaxRetriesFunc(t *testing.T) {
+	assert.Empty(t, validateMaxRetries(0, cty.Path{}))
+	assert.Empty(t, validateMaxRetries(4, cty.Path{}))
+	assert.NotEmpty(t, validateMaxRetries(-1, cty.Path{}))
+}
+
+func TestValidatePositiveDurationFunc(t *testing.T) {
+	assert.Empty(t, validatePositiveDuration("2m", cty.Path{}))
+	assert.Empty(t, validatePositiveDuration("30s", cty.Path{}))
+	assert.NotEmpty(t, validatePositiveDuration("not-a-duration", cty.Path{}))
+	assert.NotEmpty(t, validatePositiveDuration("0s", cty.Path{}))
+	assert.NotEmpty(t, validatePositiveDuration("-5s", cty.Path{}))
 }
 
 // Acceptance tests
