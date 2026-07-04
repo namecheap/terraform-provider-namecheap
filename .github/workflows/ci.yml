@@ -4,6 +4,15 @@ on:
   push:
     branches:
       - "**"
+  # pull_request enables CI on PRs FROM FORKS, which the push trigger never fires
+  # for. This is what lets external contributors' PRs run the required checks
+  # (Check, Trivy, govulncheck) and the credential-free mock acceptance job. The
+  # secret-bound EC2 sandbox jobs are explicitly guarded to `push` only (see
+  # start-runner / acceptance_test below) so untrusted fork code never reaches
+  # the self-hosted runner or the whitelisted-IP secrets. Uses `pull_request`
+  # (NOT pull_request_target) so fork PRs run with a read-only token and no
+  # secrets — the safe model.
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -276,13 +285,13 @@ jobs:
           retention-days: 90
 
       - name: Post or update PR comment
-        # Dependabot pushes get a read-only GITHUB_TOKEN (secrets redacted), so
-        # commenting would 403 — skip it for Dependabot; the job summary +
-        # artifact above are still produced on those runs. Every other CI run is
-        # an in-repo branch (this workflow has no pull_request / fork trigger),
-        # so the default token can comment. A sticky marker keeps it to one
-        # comment that updates in place instead of one per push.
-        if: ${{ github.actor != 'dependabot[bot]' }}
+        # Skip whenever the token is read-only and commenting would 403:
+        #  - Dependabot pushes (secrets redacted), and
+        #  - fork pull_requests (fork head repo != this repo), which get a
+        #    read-only GITHUB_TOKEN.
+        # Push runs and same-repo (internal) PRs keep a writable token and post
+        # the sticky summary. The job summary + artifact are produced regardless.
+        if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -307,14 +316,84 @@ jobs:
             echo "Posted new summary comment on PR #${pr}."
           fi
 
+  acceptance_mock:
+    # Fork-safe, credential-free acceptance tests against the in-process stateful
+    # mock (namecheap/mock_server_test.go). Runs on GitHub-hosted ubuntu-latest
+    # for EVERY pull request — including forks — and uses NO secrets, unlike the
+    # push-only EC2 sandbox pipeline below. A terraform + OpenTofu version matrix
+    # guards against engine/version-specific plan or state regressions. This job
+    # is additive (not a required status check); it complements, and never
+    # replaces, the live sandbox suite.
+    name: Mock acceptance (${{ matrix.engine }} ${{ matrix.version }})
+    needs: [check]
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: terraform
+            version: "1.5.7" # minimum supported Terraform
+          - engine: terraform
+            version: "1.15.5" # latest pinned series (mirrors the sandbox job)
+          - engine: opentofu
+            version: "1.12.3" # latest OpenTofu
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve Go minor from go.mod
+        id: gomod
+        run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.gomod.outputs.minor }}
+          check-latest: true
+
+      - name: Set up Terraform
+        if: ${{ matrix.engine == 'terraform' }}
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.version }}
+          terraform_wrapper: false
+
+      - name: Set up OpenTofu
+        if: ${{ matrix.engine == 'opentofu' }}
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ matrix.version }}
+          tofu_wrapper: false
+
+      - name: Mock acceptance tests
+        # ENGINE comes from the workflow-defined matrix (trusted), not from any
+        # ${{ github.event.* }} value, so it is safe to branch on in the shell.
+        # OpenTofu resolves provider source addresses more strictly than
+        # Terraform, so the test harness is pointed at an address it accepts.
+        env:
+          ENGINE: ${{ matrix.engine }}
+        run: |
+          if [ "${ENGINE}" = "opentofu" ]; then
+            bin="$(command -v tofu)"
+            export TF_ACC_PROVIDER_HOST="registry.opentofu.org"
+            export TF_ACC_PROVIDER_NAMESPACE="namecheap"
+          else
+            bin="$(command -v terraform)"
+          fi
+          export TF_ACC_TERRAFORM_PATH="${bin}"
+          make testacc-mock
+
   start-runner:
     name: Start self-hosted EC2 runner
     needs: [check, security, govulncheck]
-    # Dependabot-triggered runs don't have access to secrets.* (GitHub
-    # redacts them for dependabot[bot]), so start-runner and the
-    # acceptance test would fail at "Configure AWS credentials". Skip
-    # those jobs for Dependabot; the check job still runs on its PRs.
-    if: ${{ github.actor != 'dependabot[bot]' }}
+    # push-only: this pipeline needs secrets.* (AWS creds, whitelisted EIP,
+    # NAMECHEAP_API_KEY) and runs untrusted-if-forked code on the self-hosted
+    # runner, so it must never run on pull_request events — fork PRs get a
+    # read-only token with secrets redacted and would fail at "Configure AWS
+    # credentials" anyway, and pull_request_target is deliberately not used. It
+    # keeps running on every push (internal branches), unchanged. Dependabot is
+    # also excluded (its runs have no secrets either).
+    if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -375,7 +454,9 @@ jobs:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: start-runner
-    if: ${{ github.actor != 'dependabot[bot]' }}
+    # push-only, mirroring start-runner (this is the live-API sandbox run on the
+    # self-hosted EC2 runner). Fork PRs are served by acceptance_mock instead.
+    if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -482,7 +563,12 @@ jobs:
       - start-runner
       - acceptance_test
     runs-on: ubuntu-latest
-    if: ${{ always() && needs.start-runner.outputs.ec2-instance-id != '' }} # stop the runner only if it was actually started
+    # push-only (explicit), and only if a runner was actually started. The
+    # instance-id guard alone already makes this safe on PR events (start-runner
+    # is skipped there, so the output is empty), but stating the push condition
+    # keeps the "sandbox pipeline never runs on pull_request" invariant robust
+    # against future refactors of how that output is produced.
+    if: ${{ always() && github.event_name == 'push' && needs.start-runner.outputs.ec2-instance-id != '' }}
     steps:
       - name: Generate GitHub App token
         id: app-token
