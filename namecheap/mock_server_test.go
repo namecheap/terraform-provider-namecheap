@@ -180,12 +180,22 @@ func splitNameservers(raw string) []string {
 	return out
 }
 
+// mockXMLAttrEscaper escapes values placed in XML attributes. It is needed for
+// record addresses that legitimately contain quotes (e.g. a CAA iodef value like
+// `0 iodef "mailto:..."`); without it the rendered response would be malformed.
+var mockXMLAttrEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	`"`, "&quot;",
+)
+
 func renderGetHostsXML(domain string, st *mockDomainState) string {
 	var lines []string
 	for i, h := range st.hosts {
 		lines = append(lines, fmt.Sprintf(
 			`<host HostId="%d" Name="%s" Type="%s" Address="%s" MXPref="%d" TTL="%d" AssociatedAppTitle="" FriendlyName="" IsActive="true" IsDDNSEnabled="false" />`,
-			i+1, h.Name, h.Type, h.Address, h.MXPref, h.TTL))
+			i+1, mockXMLAttrEscaper.Replace(h.Name), h.Type, mockXMLAttrEscaper.Replace(h.Address), h.MXPref, h.TTL))
 	}
 	emailType := st.emailType
 	if emailType == "" {
