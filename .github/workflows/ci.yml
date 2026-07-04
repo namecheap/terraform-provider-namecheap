@@ -18,6 +18,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Single source of truth for the whitelisted sandbox Elastic IP within this
+  # file. cleanup-ec2-runners.yml repeats this same literal in its own
+  # top-level `env:` block — keep the two in sync if this value ever changes.
+  SANDBOX_EIP_ALLOCATION_ID: eipalloc-1796f61b
+
 # This workflow intentionally has NO top-level `concurrency` group. A shared
 # group serializes the whole workflow, but GitHub keeps only the newest queued
 # run per group and cancels older pending ones — so two PRs pushed seconds apart
@@ -401,6 +407,7 @@ jobs:
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+      public-ip: ${{ steps.acquire-eip.outputs.public-ip }}
     steps:
       - name: Wait for older acceptance runs to release the EIP
         # The acceptance pipeline associates one whitelisted Elastic IP to its
@@ -424,6 +431,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
@@ -438,7 +446,8 @@ jobs:
           ec2-instance-type: t3.medium
           subnet-id: subnet-01c4ff5a
           security-group-id: sg-106ec76d
-          eip-allocation-id: eipalloc-1796f61b
+          reuse: stop
+          reuse-pool-tag: sandbox-acceptance
           iam-role-name: AmazonSSMRoleForInstancesQuickSetup
           # SSE-EBS on the runner's root volume. Uses the launch
           # account's default aws/ebs KMS key; AMI snapshot-id is
@@ -449,6 +458,21 @@ jobs:
               { "Key": "Name", "Value": "github_runner" },
               { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
             ]
+      - name: Acquire sandbox EIP
+        id: acquire-eip
+        # Test-and-set the whitelisted EIP onto this instance (see
+        # scripts/eip-mutex.sh). Retries only on AWS's Resource.AlreadyAssociated
+        # contention error, up to a bounded timeout; fails fast on anything else.
+        # Reuses the AWS credentials already configured above — no new
+        # credentials step needed. The instance-id comes from a `steps.*`
+        # output via env: rather than being spliced directly into the run:
+        # script text, matching the pattern used by "Verify sandbox EIP"
+        # below.
+        env:
+          EC2_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+        run: |
+          ip="$(scripts/eip-mutex.sh acquire "$SANDBOX_EIP_ALLOCATION_ID" "$EC2_INSTANCE_ID")"
+          echo "public-ip=${ip}" >> "$GITHUB_OUTPUT"
 
   acceptance_test:
     name: Acceptance test
@@ -458,25 +482,41 @@ jobs:
     # self-hosted EC2 runner). Fork PRs are served by acceptance_mock instead.
     if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
     steps:
+      # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
+      # Runs before our own scripts exist on disk, so it — not a custom
+      # pre-checkout script — is what guarantees a clean $GITHUB_WORKSPACE at
+      # the start of every run, warm-pool reuse included.
       - uses: actions/checkout@v7
-
-      - name: Restore Go cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
         with:
-          path: |
-            ${{ github.workspace }}/.cache/go-build
-            ${{ github.workspace }}/go/pkg/mod
-          key: go-ec2-${{ hashFiles('go.sum') }}
-          restore-keys: go-ec2-
+          clean: true
 
-      - name: Set up Go
+      - name: Pre-job hygiene sweep
+        # Runs AFTER checkout so the script is available. Only ever targets the
+        # custom JOB_HOME (the workspace is already handled above by
+        # checkout's clean: true). Self-heals + warns if a crashed/cancelled
+        # prior run left this non-empty (its own always() post-sweep skipped).
+        # TMPDIR is pointed at a subdirectory of JOB_HOME rather than the
+        # shared OS /tmp: Go's t.TempDir()/os.CreateTemp and
+        # terraform-plugin-testing's scratch dirs both default to $TMPDIR, and
+        # without this they'd write to /tmp, which neither this sweep nor the
+        # post-job sweep below ever touches -- leaving test artifacts/tfstate
+        # on the reused warm-pool disk. Nesting it under JOB_HOME means it's
+        # wiped for free by the same pre/post sweep of that path.
         run: |
-          # Install the latest PATCH of the Go minor pinned by go.mod's `go`
-          # directive (the EC2 runner lacks setup-go tooling), mirroring
-          # check-latest: true in the check job. Patch bumps (1.26.3 -> 1.26.4)
-          # are picked up automatically. A newer Go minor is not auto-adopted
-          # and does not fail CI: we fall back to go.mod's exact version, which
-          # is also the floor the module requires.
+          scripts/hygiene-sweep.sh pre /opt/ci/jobs/current
+          mkdir -p /opt/ci/jobs/current/tmp
+          echo "HOME=/opt/ci/jobs/current" >> "$GITHUB_ENV"
+          echo "TMPDIR=/opt/ci/jobs/current/tmp" >> "$GITHUB_ENV"
+
+      - name: Resolve toolchain versions
+        id: versions
+        run: |
+          # Go: latest PATCH of the Go minor pinned by go.mod's `go` directive
+          # (the EC2 runner lacks setup-go tooling), mirroring check-latest:
+          # true in the check job. Patch bumps (1.26.3 -> 1.26.4) are picked up
+          # automatically. A newer Go minor is not auto-adopted and does not
+          # fail CI: we fall back to go.mod's exact version, which is also the
+          # floor the module requires.
           go_required="$(awk '/^go / {print $2; exit}' go.mod)"
           go_minor="$(printf '%s' "${go_required}" | cut -d. -f1,2)"
           # go.dev/VERSION is Go's own latest-stable endpoint (text: goX.Y.Z);
@@ -489,26 +529,8 @@ jobs:
             go_version="${go_required}" # newer minor / lookup unavailable: use go.mod's exact version
           fi
           echo "Using Go ${go_version} (go.mod pins ${go_minor}.x)"
-          tarball="go${go_version}.linux-amd64.tar.gz"
-          curl -fsSLo "${tarball}" "https://dl.google.com/go/${tarball}"
-          expected_go_sha="$(curl -fsSL "https://dl.google.com/go/${tarball}.sha256")"
-          echo "${expected_go_sha}  ${tarball}" | sha256sum -c -
-          rm -rf .go-instance
-          mkdir .go-instance
-          tar -C .go-instance -xzf "${tarball}"
-          {
-            echo '#!/bin/bash'
-            echo
-            echo 'export PATH="$PATH:'"$(pwd)"'/.go-instance/go/bin"'
-            echo 'export HOME="'"$(pwd)"'"'
-          } > go-env.sh
-          chmod +x go-env.sh
-          source go-env.sh
-          go version
-          go env GOPATH
+          echo "go_version=${go_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Terraform
-        run: |
           # Pin the Terraform MINOR series, not an exact patch. CI auto-installs
           # the latest patch in this series, so patch bumps (1.15.5 -> 1.15.6)
           # are picked up automatically and never fail. A newer minor/major
@@ -532,23 +554,65 @@ jobs:
             tf_version="${tf_fallback}" # lookup unavailable or lagging the series
           fi
           echo "Using Terraform ${tf_version} (pinned series ${tf_minor}.x)"
-          curl -fsSLo terraform.zip "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_amd64.zip"
-          expected_tf_sha="$(curl -fsSL "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_SHA256SUMS" | awk -v f="terraform_${tf_version}_linux_amd64.zip" '$2==f {print $1}')"
-          echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
-          rm -rf .terraform-bin
-          mkdir .terraform-bin
-          unzip -o terraform.zip -d .terraform-bin
-          {
-            echo 'export PATH="$PATH:'"$(pwd)"'/.terraform-bin"'
-            echo 'export TF_ACC_TERRAFORM_PATH="'"$(pwd)"'/.terraform-bin/terraform"'
-          } >> go-env.sh
-          source go-env.sh
-          terraform version
+          echo "tf_version=${tf_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go (toolcache)
+        env:
+          GO_VERSION: ${{ steps.versions.outputs.go_version }}
+        run: |
+          go_version="$GO_VERSION"
+          go_dir="/opt/ci/toolcache/go-${go_version}"
+          if [ -x "${go_dir}/go/bin/go" ] && "${go_dir}/go/bin/go" version | grep -q "go${go_version} "; then
+            echo "Go ${go_version} already present in toolcache at ${go_dir}, skipping download."
+          else
+            tarball="go${go_version}.linux-amd64.tar.gz"
+            curl -fsSLo "${tarball}" "https://dl.google.com/go/${tarball}"
+            expected_go_sha="$(curl -fsSL "https://dl.google.com/go/${tarball}.sha256")"
+            echo "${expected_go_sha}  ${tarball}" | sha256sum -c -
+            rm -rf "${go_dir}"
+            mkdir -p "${go_dir}"
+            tar -C "${go_dir}" -xzf "${tarball}"
+          fi
+          echo "${go_dir}/go/bin" >> "$GITHUB_PATH"
+          echo "GOCACHE=/opt/ci/cache/go-build" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=/opt/ci/cache/go-mod" >> "$GITHUB_ENV"
+
+      - name: Set up Terraform (toolcache)
+        env:
+          TF_VERSION: ${{ steps.versions.outputs.tf_version }}
+        run: |
+          tf_version="$TF_VERSION"
+          tf_dir="/opt/ci/toolcache/terraform-${tf_version}"
+          if [ -x "${tf_dir}/terraform" ] && "${tf_dir}/terraform" version | head -1 | grep -q "v${tf_version}$"; then
+            echo "Terraform ${tf_version} already present in toolcache at ${tf_dir}, skipping download."
+          else
+            curl -fsSLo terraform.zip "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_amd64.zip"
+            expected_tf_sha="$(curl -fsSL "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_SHA256SUMS" | awk -v f="terraform_${tf_version}_linux_amd64.zip" '$2==f {print $1}')"
+            echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
+            rm -rf "${tf_dir}"
+            mkdir -p "${tf_dir}"
+            unzip -o terraform.zip -d "${tf_dir}"
+          fi
+          echo "${tf_dir}" >> "$GITHUB_PATH"
+          echo "TF_ACC_TERRAFORM_PATH=${tf_dir}/terraform" >> "$GITHUB_ENV"
+
+      - name: Verify sandbox EIP
+        # Hard G5 assertion: never run tests without the whitelisted IP. Needs
+        # zero AWS credentials — the comparison is a plain public HTTP check
+        # against the IP start-runner already resolved and published.
+        env:
+          EXPECTED_IP: ${{ needs.start-runner.outputs.public-ip }}
+        run: |
+          actual_ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')"
+          if [ -z "${EXPECTED_IP}" ] || [ "${actual_ip}" != "${EXPECTED_IP}" ]; then
+            echo "::error::Sandbox EIP mismatch: runner public IP is '${actual_ip}', expected the whitelisted sandbox EIP '${EXPECTED_IP}'. Refusing to run acceptance tests without the whitelisted IP."
+            exit 1
+          fi
+          echo "Verified runner public IP (${actual_ip}) matches the whitelisted sandbox EIP."
 
       - name: Acceptance Test
         run: |
           export CGO_ENABLED=0
-          source go-env.sh
           make testacc
         env:
           NAMECHEAP_USER_NAME: saTerraformProvider
@@ -556,6 +620,28 @@ jobs:
           NAMECHEAP_TEST_DOMAIN: terraform-provider-test.net
           NAMECHEAP_USE_SANDBOX: true
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+
+      - name: Post-job hygiene sweep
+        # Last step, if: always() — this is what actually satisfies G6 ("no
+        # code/env/secrets survive on the stopped disk"), since it runs before
+        # the instance goes idle/stopped. The next run's checkout clean: true
+        # only protects that NEXT run's start, not this run's stopped-disk
+        # window. Guards for the one case where the script itself can't be on
+        # disk: checkout (the job's first step) failing outright. In that case
+        # nothing meaningful was written to JOB_HOME this run (HOME is only
+        # repointed there by "Pre-job hygiene sweep", which never got to run
+        # either) and $GITHUB_WORKSPACE holds at most a partial checkout, but
+        # this still cleans both paths inline instead of silently no-op'ing
+        # via a bare command-not-found failure.
+        if: always()
+        run: |
+          if [ -x scripts/hygiene-sweep.sh ]; then
+            scripts/hygiene-sweep.sh post "$GITHUB_WORKSPACE" /opt/ci/jobs/current
+          else
+            echo "::warning::scripts/hygiene-sweep.sh not found on disk (checkout likely failed this run) -- falling back to inline cleanup of \$GITHUB_WORKSPACE and /opt/ci/jobs/current"
+            rm -rf -- "$GITHUB_WORKSPACE" /opt/ci/jobs/current
+            mkdir -p -- "$GITHUB_WORKSPACE" /opt/ci/jobs/current
+          fi
 
   stop-runner:
     name: Stop self-hosted EC2 runner
@@ -584,10 +670,36 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+      - name: Checkout
+        # if: always() so a failure in "Generate GitHub App token" or
+        # "Configure AWS credentials" above never causes this step to be
+        # SKIPPED (its default success()-only condition) -- if it were, the
+        # if: always() "Release sandbox EIP" step below would still run but
+        # fail with "No such file or directory" instead of ever attempting
+        # the release, silently stranding the EIP on the stopping instance.
+        if: always()
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Release sandbox EIP
+        # Tolerant of "nothing was ever acquired" (e.g. start-runner failed
+        # before its own acquire step ran). if: always() so a failure earlier
+        # in this job never leaves the EIP associated with a stopping instance.
+        # Passes this job's own started instance-id so eip-mutex.sh can detect
+        # a cross-repo/cross-run steal (the EIP now associated with a
+        # DIFFERENT instance) and skip rather than rip it away from that
+        # other, legitimately-running holder.
+        if: always()
+        env:
+          STARTED_INSTANCE_ID: ${{ needs.start-runner.outputs.ec2-instance-id }}
+        run: scripts/eip-mutex.sh release "$SANDBOX_EIP_ALLOCATION_ID" "$STARTED_INSTANCE_ID"
       - name: Stop EC2 runner
+        # if: always() so a failure in the release step above doesn't skip
+        # stopping the instance.
+        if: always()
         uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
         with:
           mode: stop
+          reuse: stop
+          reuse-pool-tag: sandbox-acceptance
           github-token: ${{ steps.app-token.outputs.token }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}

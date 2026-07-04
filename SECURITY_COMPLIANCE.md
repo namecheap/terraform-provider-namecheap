@@ -123,8 +123,11 @@ before `tar -xzf` / `unzip` runs.
 
 ## Self-hosted runner supply chain
 
-The acceptance-test job runs on an ephemeral EC2 instance launched by the
-self-hosted runner action:
+The acceptance-test job runs on an EC2 instance launched by the self-hosted
+runner action. Since #279 that instance is kept warm (stopped, not
+terminated) between runs — see
+[Warm-pool lifecycle, hygiene sweeps, and the EIP mutex](#warm-pool-lifecycle-hygiene-sweeps-and-the-eip-mutex-279)
+below for the reuse/cleanup/mutex mechanics:
 
 - Runner binary version is controlled via the SHA-pinned
   `namecheap/ec2-github-runner` action (currently bundles
@@ -136,11 +139,81 @@ self-hosted runner action:
   [`CONTRIBUTING.md`](CONTRIBUTING.md#dependabot-prs-maintainers).
 - AMI comes from `DEVOPS/hardened-amazon-linux2023` (internal).
 - Only one acceptance run may hold the single whitelisted Elastic IP at a
-  time. `start-runner` serializes access with the SHA-pinned
-  `ahmadnassri/action-workflow-queue` action (MIT), which queues a newer run
-  behind older in-progress ones (FIFO, no cancellation). This replaces the
-  former shared `concurrency` group, which silently cancelled pending runs
-  when PRs were pushed close together.
+  time. Within this repo, `start-runner` serializes access with the
+  SHA-pinned `ahmadnassri/action-workflow-queue` action (MIT), which queues a
+  newer run behind older in-progress ones (FIFO, no cancellation). This
+  replaces the former shared `concurrency` group, which silently cancelled
+  pending runs when PRs were pushed close together. Across repos, the EIP
+  mutex described below adds a second layer, since the queue only serializes
+  runs within this repository.
+
+### Warm-pool lifecycle, hygiene sweeps, and the EIP mutex (#279)
+
+- **Warm pool.** `stop-runner` calls `namecheap/ec2-github-runner` with
+  `reuse: stop` and `reuse-pool-tag: sandbox-acceptance` instead of
+  terminating the instance, and `start-runner` reuses it on the next push.
+  Most pushes therefore warm-start in seconds; a cold boot (~2-4 min) only
+  happens after the nightly drain or the action's own `max-lifetime-minutes`
+  (default 360) / `reuse-max-cycles` (default 20) limits, both left at their
+  defaults. This is safe only because the sandbox pipeline is **push-only and
+  never runs fork/PR code** — warm reuse means job N+1 runs on job N's disk,
+  which the [fork-safe PR gating](#fork-safe-pull-request-ci) below makes a
+  guarantee about trusted code only, not a coincidence. The
+  `max-lifetime-minutes` TTL arms only on a cold boot and is **not** re-armed
+  by a warm restart, so it is a first-session backstop, not the real
+  daily-termination mechanism — that's the nightly drain below.
+- **Per-job hygiene sweeps.** Only the Go/Terraform toolchain
+  (`/opt/ci/toolcache`) and the Go build caches (`GOCACHE`/`GOMODCACHE` under
+  `/opt/ci/cache`) persist across a stop/start cycle. Everything else — the
+  checked-out workspace and the per-job `$HOME` at `/opt/ci/jobs/current` — is
+  wiped by `scripts/hygiene-sweep.sh` both before ("pre", which also emits a
+  `::warning::` and self-heals if it finds leftovers from a crashed or
+  cancelled prior run that skipped its own cleanup) and after ("post",
+  `if: always()`, the step that actually guarantees no code, env vars, or
+  secrets remain on the stopped disk) every job. The initial workspace
+  freshness guarantee at the very start of a run instead comes from
+  `actions/checkout`'s own `clean: true`, since our script can't run before
+  the repo it lives in has been checked out.
+- **EIP mutex (`scripts/eip-mutex.sh`).** The whitelisted Elastic IP
+  (`eipalloc-1796f61b`) is no longer passed to the action's
+  `eip-allocation-id` input, which reassociates permissively and can silently
+  steal the address out from under another in-progress job. Instead,
+  `start-runner` runs `scripts/eip-mutex.sh acquire`, which calls
+  `aws ec2 associate-address --no-allow-reassociation` — an atomic
+  test-and-set — and retries only on the `Resource.AlreadyAssociated`
+  contention error (bounded by a 1800s budget matching the workflow queue's
+  timeout), failing fast with no retry on any other AWS error.
+  `acceptance_test` then hard-asserts its own public IP equals that address
+  before `make testacc` runs, and `stop-runner` releases the address with
+  `scripts/eip-mutex.sh release` (`aws ec2 disassociate-address`,
+  `if: always()`, so a stop-step failure elsewhere can't strand the lock).
+- **New IAM prerequisite.** The CI AWS identity now additionally requires
+  `ec2:DisassociateAddress` and `ec2:DescribeAddresses`, on top of the
+  already-granted `ec2:AssociateAddress` and `ec2:DescribeInstances`. This
+  repository does not manage that IAM policy — **an AWS admin must grant both
+  new actions to the CI role/user before this pipeline will work.**
+- **Nightly drain and leak reaper.**
+  [`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml) runs
+  `mode: cleanup` on two schedules: a nightly full drain at `37 2 * * *` UTC
+  with a deliberately tiny `reaper-stopped-max-age` so the day's pool
+  instance always ages past the threshold and is terminated, and a
+  `7,37 * * * *` UTC leak-reaper pass at the action's own default threshold
+  that catches crashed/cancelled leftovers without draining the warm pool
+  during the day. Both passes also release the EIP, belt-and-braces, if it's
+  still associated with a stopped instance. `workflow_dispatch` exposes a
+  `mode` choice and a `dry_run` input (default `true`) for safe manual runs.
+- **Cross-repo hazard.** `eipalloc-1796f61b` is also used by
+  `namecheap/mcp-server-namecheap`'s acceptance workflow, which as of this
+  writing still hands the IP straight to the action's permissive
+  `eip-allocation-id` input and can silently reassociate it away from a
+  run in this repo. The mutex above makes this repository a well-behaved
+  actor — it will wait on, or loudly fail, contention rather than stealing —
+  but it cannot force the other repository to do the same. A companion issue
+  is being filed against `namecheap/mcp-server-namecheap` to adopt the same
+  acquire/release discipline (tracking: TBD-companion-issue); until it lands,
+  an occasional `acceptance_test` failure at the "Verify sandbox EIP" step
+  may be caused by a concurrent run in that other repo rather than a bug
+  here.
 
 ## Fork-safe pull-request CI
 
