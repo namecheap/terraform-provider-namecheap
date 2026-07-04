@@ -223,6 +223,14 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 		Logger: slog.New(newBridgeHandler()),
 	})
 
+	// Test-only endpoint override. In normal (released) builds this is a no-op
+	// (see endpoint_override.go), so the shipped provider contains no code path
+	// that can redirect API traffic away from the sandbox/production endpoint
+	// selected above. Only under the `testacc` build tag is it compiled to read
+	// NAMECHEAP_API_URL and point the client at a local mock server
+	// (see endpoint_override_testacc.go), which the acceptance-test harness uses.
+	applyTestEndpointOverride(client)
+
 	return client, diag.Diagnostics{}
 }
 
