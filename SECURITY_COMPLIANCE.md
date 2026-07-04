@@ -208,12 +208,13 @@ below for the reuse/cleanup/mutex mechanics:
   `eip-allocation-id` input and can silently reassociate it away from a
   run in this repo. The mutex above makes this repository a well-behaved
   actor — it will wait on, or loudly fail, contention rather than stealing —
-  but it cannot force the other repository to do the same. A companion issue
-  is being filed against `namecheap/mcp-server-namecheap` to adopt the same
-  acquire/release discipline (tracking: TBD-companion-issue); until it lands,
-  an occasional `acceptance_test` failure at the "Verify sandbox EIP" step
-  may be caused by a concurrent run in that other repo rather than a bug
-  here.
+  but it cannot force the other repository to do the same.
+  `namecheap/mcp-server-namecheap` adopting the same acquire/release
+  discipline (or at minimum passing `--no-allow-reassociation`) is a
+  prerequisite for full protection and is tracked outside this repository;
+  until it happens, an occasional `acceptance_test` failure at the "Verify
+  sandbox EIP" step may be caused by a concurrent run in that other repo
+  rather than a bug here.
 
 ## Fork-safe pull-request CI
 
