@@ -93,6 +93,9 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
 - `namecheap/ec2-github-runner` is SHA-pinned for both the `start-runner`
   and `stop-runner` jobs at the same SHA (#149). Rotations are tracked
   as single-line PRs (#159, #164, #165).
+- `hashicorp/setup-terraform` and `opentofu/setup-opentofu` (used by the
+  fork-safe `acceptance_mock` job) are likewise SHA-pinned with a trailing
+  `# v<semver>` comment.
 - Dependabot covers `gomod` and `github-actions` with a weekly cadence
   and a 5-PR cap per ecosystem (#150).
 
@@ -138,6 +141,26 @@ self-hosted runner action:
   behind older in-progress ones (FIFO, no cancellation). This replaces the
   former shared `concurrency` group, which silently cancelled pending runs
   when PRs were pushed close together.
+
+## Fork-safe pull-request CI
+
+CI runs on both `push` and `pull_request`, which lets PRs from forks run the
+required checks and a credential-free acceptance suite without ever exposing
+secrets:
+
+- The trigger is `pull_request`, **never `pull_request_target`** — fork code runs
+  only on GitHub-hosted runners with a read-only token and `secrets.*` redacted.
+- The secret-bound EC2 sandbox jobs (`start-runner`, `acceptance_test`,
+  `stop-runner`) are gated `github.event_name == 'push'`, so untrusted fork code
+  never reaches the self-hosted runner, the whitelisted Elastic IP, or the AWS /
+  Namecheap credentials. They keep running on every in-repo push, unchanged.
+- The `acceptance_mock` job provides the fork-facing acceptance signal: it runs
+  on `pull_request` on GitHub-hosted `ubuntu-latest`, references no `secrets.*`,
+  and drives the in-process mock (see
+  [`CONTRIBUTING.md`](CONTRIBUTING.md#running-mock-acceptance-tests)). The
+  test-only `NAMECHEAP_API_URL` endpoint override it relies on is compiled only
+  under the `testacc` build tag and is absent from released binaries.
+- No `${{ github.event.* }}` value is interpolated into a `run:` shell block.
 
 ## What triggers a compliance failure
 

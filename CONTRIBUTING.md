@@ -41,6 +41,29 @@ Run acceptance tests:
 $ make testacc
 ```
 
+### Running mock acceptance tests
+
+The provider also ships a **mock-backed** acceptance suite that runs the same
+`resource.Test` lifecycles against an in-process, stateful mock of the Namecheap
+API — no credentials, no network, no whitelisted IP:
+
+```shell
+$ make testacc-mock
+```
+
+This suite is compiled only under the `testacc` build tag (which enables a
+test-only `NAMECHEAP_API_URL` endpoint override; see
+[`SECURITY_COMPLIANCE.md`](SECURITY_COMPLIANCE.md#fork-safe-pull-request-ci)),
+so it never affects `make test` or released binaries. It still drives a real
+`terraform` binary; `make testacc-mock` uses the one on your `PATH` (set
+`TF_ACC_TERRAFORM_PATH` to target a specific `terraform`/`tofu`). It is a fast,
+credential-free **complement** to — not a replacement for — the live sandbox
+suite, which remains the source of truth for API-contract behavior.
+
+If the Namecheap SDK ever ships a reusable mock package (SDK issue #121), the
+in-repo mock in `namecheap/mock_server_test.go` can be swapped out behind the
+same test helpers without touching individual test bodies.
+
 ## Git Email Privacy
 
 To keep your personal email out of the public git history, consider using a GitHub noreply address.
@@ -86,9 +109,28 @@ $ git push --force-with-lease
 - Keep PRs focused — one logical change per PR.
 - Familiarize yourself with [`SECURITY_COMPLIANCE.md`](SECURITY_COMPLIANCE.md) for the compliance gates your PR will be checked against (dependency drift, vulnerability and license scans, SBOM publication, etc.).
 
+### What runs on your PR
+
+Every pull request — **including PRs from forks** — runs, on GitHub-hosted
+runners with no secrets:
+
+- the `check` job (unit tests, lint, coverage), and
+- `acceptance_mock`: the credential-free mock acceptance suite (`make
+  testacc-mock`) across a Terraform + OpenTofu version matrix.
+
+The live-API sandbox suite (`acceptance_test`, on the self-hosted EC2 runner) is
+**push-only** — it runs on branch pushes within this repository, not on
+`pull_request` events, because it needs secrets that GitHub does not expose to
+fork PRs. So for a fork contribution, the mock suite is the acceptance signal;
+a maintainer validates against the live sandbox before merge.
+
+Definition of done for a change to provider behavior: unit tests **and** a
+mock-backed `TestAccMock*` case cover it, and both pass locally
+(`make test && make testacc-mock`).
+
 ### Dependabot PRs (maintainers)
 
-Dependabot-triggered workflow runs don't have access to repository secrets — GitHub redacts `secrets.*` for `dependabot[bot]` by design, so any job that reaches AWS, the self-hosted EC2 runner, or the Namecheap sandbox credentials cannot complete. For that reason the `start-runner`, `acceptance_test`, and `stop-runner` jobs are gated with `if: ${{ github.actor != 'dependabot[bot]' }}` and will show as **skipped** (not failed) on Dependabot PRs. The `check` job still runs and must pass.
+Dependabot-triggered workflow runs don't have access to repository secrets — GitHub redacts `secrets.*` for `dependabot[bot]` by design, so any job that reaches AWS, the self-hosted EC2 runner, or the Namecheap sandbox credentials cannot complete. For that reason the `start-runner`, `acceptance_test`, and `stop-runner` jobs are gated with `if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}` and will show as **skipped** (not failed) on Dependabot PRs. The `check` job and the credential-free `acceptance_mock` job still run and must pass.
 
 Before merging a Dependabot PR, a maintainer must trigger acceptance tests manually under their own identity. Secrets resolve for maintainer-initiated runs, so the full pipeline executes. Use the exact branch name shown on the PR — Dependabot prefixes branches with the ecosystem (`go_modules`, `github_actions`, etc.), and the package segment that follows varies per update:
 
