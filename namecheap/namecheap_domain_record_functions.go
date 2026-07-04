@@ -32,17 +32,17 @@ func validateGetHostsResponse(response *namecheap.DomainsDNSGetHostsCommandRespo
 func createNameserversMerge(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if err := validateGetListResponse(nsResponse); err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
 		_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, nameservers)
 		if err != nil {
-			return diag.FromErr(err)
+			return diagFromClientError(err)
 		}
 	} else {
 		var newNameservers []string
@@ -72,7 +72,7 @@ func createNameserversMerge(ctx context.Context, domain string, nameservers []st
 
 		_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
 		if err != nil {
-			return diag.FromErr(err)
+			return diagFromClientError(err)
 		}
 	}
 
@@ -83,7 +83,7 @@ func createNameserversMerge(ctx context.Context, domain string, nameservers []st
 func createNameserversOverwrite(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, nameservers)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -94,11 +94,11 @@ func createNameserversOverwrite(ctx context.Context, domain string, nameservers 
 func readNameserversMerge(ctx context.Context, domain string, currentNameservers []string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return nil, diag.FromErr(err)
+		return nil, diagFromClientError(err)
 	}
 
 	if err := validateGetListResponse(nsResponse); err != nil {
-		return nil, diag.FromErr(err)
+		return nil, diagFromClientError(err)
 	}
 
 	var foundNameservers []string
@@ -121,11 +121,11 @@ func readNameserversMerge(ctx context.Context, domain string, currentNameservers
 func readNameserversOverwrite(ctx context.Context, domain string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return nil, diag.FromErr(err)
+		return nil, diagFromClientError(err)
 	}
 
 	if err := validateGetListResponse(nsResponse); err != nil {
-		return nil, diag.FromErr(err)
+		return nil, diagFromClientError(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS || nsResponse.DomainDNSGetListResult.Nameservers == nil {
@@ -140,11 +140,11 @@ func readNameserversOverwrite(ctx context.Context, domain string, client *namech
 func updateNameserversMerge(ctx context.Context, domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if err := validateGetListResponse(nsResponse); err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	var newNameservers []string
@@ -174,14 +174,14 @@ func updateNameserversMerge(ctx context.Context, domain string, previousNameserv
 	if len(newNameservers) == 0 {
 		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
-			return diag.FromErr(err)
+			return diagFromClientError(err)
 		}
 		return nil
 	}
 
 	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -193,11 +193,11 @@ func updateNameserversMerge(ctx context.Context, domain string, previousNameserv
 func deleteNameserversMerge(ctx context.Context, domain string, previousNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if err := validateGetListResponse(nsResponse); err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
@@ -232,14 +232,14 @@ func deleteNameserversMerge(ctx context.Context, domain string, previousNameserv
 	if len(remainNameservers) == 0 {
 		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
-			return diag.FromErr(err)
+			return diagFromClientError(err)
 		}
 		return nil
 	}
 
 	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, remainNameservers)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -249,7 +249,7 @@ func deleteNameserversMerge(ctx context.Context, domain string, previousNameserv
 func deleteNameserversOverwrite(ctx context.Context, domain string, client *namecheap.Client) diag.Diagnostics {
 	_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -259,11 +259,11 @@ func deleteNameserversOverwrite(ctx context.Context, domain string, client *name
 func createRecordsMerge(ctx context.Context, domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	recordsConverted := convertRecordTypeSetToDomainRecords(&records)
@@ -289,7 +289,7 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 	for _, record := range *recordsConverted {
 		fixedAddress, err := getFixedAddressOfRecord(&record)
 		if err != nil {
-			return diag.FromErr(err)
+			return diagFromClientError(err)
 		}
 		recordHash := hashRecord(*record.HostName, *record.RecordType, *fixedAddress)
 
@@ -323,7 +323,7 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 		Tag:       nil,
 	})
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -346,7 +346,7 @@ func createRecordsOverwrite(ctx context.Context, domain string, emailType *strin
 		Tag:       nil,
 	})
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return diag.Diagnostics{}
@@ -357,11 +357,11 @@ func createRecordsOverwrite(ctx context.Context, domain string, emailType *strin
 func readRecordsMerge(ctx context.Context, domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return nil, nil, diag.FromErr(err)
+		return nil, nil, diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return nil, nil, diag.FromErr(err)
+		return nil, nil, diagFromClientError(err)
 	}
 
 	currentRecordsConverted := convertRecordTypeSetToDomainRecords(&currentRecords)
@@ -372,7 +372,7 @@ func readRecordsMerge(ctx context.Context, domain string, currentRecords []inter
 		for _, currentRecord := range *currentRecordsConverted {
 			currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
 			if err != nil {
-				return nil, nil, diag.FromErr(err)
+				return nil, nil, diagFromClientError(err)
 			}
 
 			currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
@@ -395,11 +395,11 @@ func readRecordsMerge(ctx context.Context, domain string, currentRecords []inter
 func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return nil, nil, diag.FromErr(err)
+		return nil, nil, diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return nil, nil, diag.FromErr(err)
+		return nil, nil, diagFromClientError(err)
 	}
 
 	currentRecordsConverted := convertRecordTypeSetToDomainRecords(&currentRecords)
@@ -414,7 +414,7 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 			for _, currentRecord := range *currentRecordsConverted {
 				currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
 				if err != nil {
-					return nil, nil, diag.FromErr(err)
+					return nil, nil, diagFromClientError(err)
 				}
 
 				currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
@@ -446,11 +446,11 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 func updateRecordsMerge(ctx context.Context, domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	var newRecordList []namecheap.DomainsDNSHostRecord
@@ -465,7 +465,7 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 			for _, prevRecord := range *previousRecordsMapped {
 				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
 				if err != nil {
-					return diag.FromErr(err)
+					return diagFromClientError(err)
 				}
 				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
 				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
@@ -500,7 +500,7 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 		Tag:       nil,
 	})
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -511,11 +511,11 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	var remainedRecords []namecheap.DomainsDNSHostRecord
@@ -529,7 +529,7 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 			for _, prevRecord := range *previousRecordsMapped {
 				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
 				if err != nil {
-					return diag.FromErr(err)
+					return diagFromClientError(err)
 				}
 				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
 				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
@@ -560,7 +560,7 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 		Tag:       nil,
 	})
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil
@@ -578,7 +578,7 @@ func deleteRecordsOverwrite(ctx context.Context, domain string, client *namechea
 		Tag:       nil,
 	})
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	return nil

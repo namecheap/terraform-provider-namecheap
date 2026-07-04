@@ -225,7 +225,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 	// the domain behaviour.
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if nsResponse == nil || nsResponse.DomainDNSGetListResult == nil || nsResponse.DomainDNSGetListResult.IsUsingOurDNS == nil {
@@ -321,7 +321,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return diag.FromErr(err)
+		return diagFromClientError(err)
 	}
 
 	if nsResponse == nil || nsResponse.DomainDNSGetListResult == nil || nsResponse.DomainDNSGetListResult.IsUsingOurDNS == nil {
@@ -338,7 +338,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
 		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
-			return diag.FromErr(err)
+			return diagFromClientError(err)
 		}
 	}
 
