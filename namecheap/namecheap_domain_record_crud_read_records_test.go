@@ -183,6 +183,64 @@ func TestReadRecordsOverwrite_CNAMEDotFix(t *testing.T) {
 	assert.Equal(t, "example.com", (*foundRecords)[0]["address"])
 }
 
+func TestReadRecordsOverwrite_FiltersDefaultParkingRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			{Name: "www", Type: "CNAME", Address: "parkingpage.namecheap.com.", MXPref: 10, TTL: 1800},
+			{Name: "@", Type: "URL", Address: "http://www.test.com", MXPref: 10, TTL: 1800},
+			{Name: "blog", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+		}))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+
+	// With no records configured, OVERWRITE read must still drop Namecheap's
+	// default parking records so they don't surface as spurious drift (issue #260).
+	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, foundRecords)
+	assert.Len(t, *foundRecords, 1)
+	assert.Equal(t, "blog", (*foundRecords)[0]["hostname"])
+	assert.Equal(t, "A", (*foundRecords)[0]["type"])
+}
+
+func TestReadRecordsOverwrite_KeepsUserManagedParkingRecord(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			// User-managed record that happens to look like the default parking URL.
+			{Name: "@", Type: "URL", Address: "http://www.test.com", MXPref: 10, TTL: 1800},
+			// Unmanaged default parking record.
+			{Name: "www", Type: "CNAME", Address: "parkingpage.namecheap.com.", MXPref: 10, TTL: 1800},
+			// Ordinary managed record.
+			{Name: "blog", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+		}))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+
+	// The user explicitly manages the parking-lookalike URL record, so it must be
+	// preserved (issue #260 filtering must not drop intentionally-configured records),
+	// while the unmanaged parking CNAME is still filtered out.
+	currentRecords := []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "URL", "address": "http://www.test.com", "mx_pref": 10, "ttl": 1800},
+	}
+
+	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
+	assert.False(t, diags.HasError())
+	assert.NotNil(t, foundRecords)
+	assert.Len(t, *foundRecords, 2)
+
+	hostnames := map[string]bool{}
+	for _, rec := range *foundRecords {
+		hostnames[rec["hostname"].(string)+"/"+rec["type"].(string)] = true
+	}
+	assert.True(t, hostnames["@/URL"], "user-managed parking-lookalike record must be preserved")
+	assert.True(t, hostnames["blog/A"], "ordinary record must be preserved")
+	assert.False(t, hostnames["www/CNAME"], "unmanaged default parking record must be filtered")
+}
+
 func TestReadRecordsOverwrite_GetHostsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
