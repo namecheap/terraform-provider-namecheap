@@ -3,6 +3,8 @@ package namecheap_provider
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"regexp"
 	"strings"
@@ -187,6 +189,105 @@ func TestProviderConfigureWhitespaceOnlyCredentials(t *testing.T) {
 	assert.Contains(t, diags[0].Detail, "user_name")
 	assert.Contains(t, diags[0].Detail, "api_user")
 	assert.Contains(t, diags[0].Detail, "api_key")
+}
+
+// client_ip auto-detection: the configureContext `if clientIp == ""` branch.
+
+// setRequiredCredentialsWithoutClientIP sets the three required credential env
+// vars and clears NAMECHEAP_CLIENT_IP so that an ambient value cannot leak in
+// and suppress the auto-detect branch under test.
+func setRequiredCredentialsWithoutClientIP(t *testing.T) {
+	t.Helper()
+	t.Setenv("NAMECHEAP_USER_NAME", "test-user")
+	t.Setenv("NAMECHEAP_API_USER", "test-api-user")
+	t.Setenv("NAMECHEAP_API_KEY", "test-api-key")
+	t.Setenv("NAMECHEAP_CLIENT_IP", "")
+}
+
+func TestProviderConfigureAutoDetectsClientIPWhenUnset(t *testing.T) {
+	setRequiredCredentialsWithoutClientIP(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("203.0.113.7"))
+	}))
+	defer server.Close()
+	withDetectionURL(t, server.URL)
+
+	rawProvider := Provider()
+	raw := map[string]interface{}{
+		"use_sandbox": false,
+	}
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors on successful auto-detect, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	assert.Equal(t, "203.0.113.7", client.ClientOptions.ClientIp)
+}
+
+func TestProviderConfigureAutoDetectClientIPFailure(t *testing.T) {
+	setRequiredCredentialsWithoutClientIP(t)
+
+	// A server that has been shut down makes detection fail at the transport
+	// layer (connection refused), exercising the diag.Error path.
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	url := server.URL
+	server.Close()
+	withDetectionURL(t, url)
+
+	rawProvider := Provider()
+	raw := map[string]interface{}{
+		"use_sandbox": false,
+	}
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.True(t, diags.HasError(), "expected error when auto-detect fails")
+	assert.Equal(t, "Unable to auto-detect client_ip", diags[0].Summary)
+	assert.Equal(t, cty.Path{cty.GetAttrStep{Name: "client_ip"}}, diags[0].AttributePath)
+}
+
+func TestProviderConfigureExplicitClientIPHonored(t *testing.T) {
+	setRequiredCredentialsWithoutClientIP(t)
+
+	// Point detection at a server that would return a different IP, to prove the
+	// resolver is never consulted when client_ip is explicitly set.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("203.0.113.7"))
+	}))
+	defer server.Close()
+	withDetectionURL(t, server.URL)
+
+	rawProvider := Provider()
+	raw := map[string]interface{}{
+		"client_ip":   "198.51.100.42",
+		"use_sandbox": false,
+	}
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors when client_ip is set inline, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	assert.Equal(t, "198.51.100.42", client.ClientOptions.ClientIp)
+}
+
+func TestProviderConfigureWhitespaceClientIPTriggersDetection(t *testing.T) {
+	setRequiredCredentialsWithoutClientIP(t)
+
+	// A whitespace-only client_ip is trimmed to "" and must trigger auto-detect
+	// rather than being passed through to the SDK verbatim.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("203.0.113.7"))
+	}))
+	defer server.Close()
+	withDetectionURL(t, server.URL)
+
+	rawProvider := Provider()
+	raw := map[string]interface{}{
+		"client_ip":   "   ",
+		"use_sandbox": false,
+	}
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	assert.Equal(t, "203.0.113.7", client.ClientOptions.ClientIp)
 }
 
 // Resilience config options: requests_per_minute, max_retries,

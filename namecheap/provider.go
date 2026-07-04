@@ -3,6 +3,7 @@ package namecheap_provider
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -58,9 +59,8 @@ func Provider() *schema.Provider {
 			"client_ip": {
 				Type:        schema.TypeString,
 				Optional:    true,
-				Description: "Client IP address",
+				Description: "The public IP address the Namecheap API sees as the caller; it must be whitelisted at https://ap.www.namecheap.com/settings/tools/apiaccess/whitelisted-ips. Leaving it unset now auto-detects this machine's public IP address via an outbound HTTPS request to api.ipify.org (previously it defaulted to the non-functional 0.0.0.0); if that request fails (for example on a host with no outbound network access), provider configuration fails with guidance to set client_ip explicitly.",
 				DefaultFunc: schema.EnvDefaultFunc("NAMECHEAP_CLIENT_IP", nil),
-				Default:     "0.0.0.0",
 			},
 
 			"use_sandbox": {
@@ -113,7 +113,7 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 	userName := strings.TrimSpace(data.Get("user_name").(string))
 	apiUser := strings.TrimSpace(data.Get("api_user").(string))
 	apiKey := strings.TrimSpace(data.Get("api_key").(string))
-	clientIp := data.Get("client_ip").(string)
+	clientIp := strings.TrimSpace(data.Get("client_ip").(string))
 	useSandbox := data.Get("use_sandbox").(bool)
 
 	var missing []string
@@ -163,6 +163,41 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 				AttributePath: cty.Path{cty.GetAttrStep{Name: "request_timeout"}},
 			},
 		}
+	}
+
+	// client_ip is only meaningful when it names the public IP the Namecheap
+	// API sees as the caller (and which the account has whitelisted). When it
+	// is left unset we auto-detect that public IP rather than sending the old
+	// non-functional 0.0.0.0 default. An explicitly-set value (inline or via
+	// NAMECHEAP_CLIENT_IP) is always honored unchanged, so this stays
+	// non-breaking.
+	if clientIp == "" {
+		baseCtx := ctx
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+		detectCtx, cancel := context.WithTimeout(baseCtx, 5*time.Second)
+		defer cancel()
+
+		ip, detectErr := detectClientIP(detectCtx, &http.Client{})
+		if detectErr != nil {
+			return nil, diag.Diagnostics{
+				{
+					Severity: diag.Error,
+					Summary:  "Unable to auto-detect client_ip",
+					Detail: fmt.Sprintf(
+						"client_ip is unset and the provider could not auto-detect this machine's public IP address: %s. "+
+							"To resolve, either set the client_ip argument (or the NAMECHEAP_CLIENT_IP environment variable) to the "+
+							"public IP this provider calls from, and make sure that IP is whitelisted at "+
+							"https://ap.www.namecheap.com/settings/tools/apiaccess/whitelisted-ips.",
+						detectErr,
+					),
+					AttributePath: cty.Path{cty.GetAttrStep{Name: "client_ip"}},
+				},
+			}
+		}
+		clientIp = ip
+		log.Printf("[INFO] namecheap: auto-detected client_ip %s", ip)
 	}
 
 	client := namecheap.NewClient(&namecheap.ClientOptions{
