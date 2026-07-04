@@ -13,6 +13,7 @@ A Terraform Provider for Namecheap domain DNS configuration.
 - [Namecheap Provider Documentation](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs)
 - [Guide: Migration to v2.0.0 new major release](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/namecheap_provider_migration_v2.0.0)
 - [Guide: Namecheap domain records](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/namecheap_domain_records_guide)
+- [Guide: Running in CI and automation environments](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/ci-environments)
 
 ## Prerequisites
 
@@ -23,6 +24,8 @@ Next, find out your IP address and add that IP (or any other IPs accessing this 
 this [whitelist admin page](https://ap.www.namecheap.com/settings/tools/apiaccess/whitelisted-ips) on Namecheap.
 
 Once you've done that, make note of the API key, your IP address, and your username to fill into our `provider` block.
+
+`client_ip` is optional: when it is left unset the provider auto-detects the caller's public IP over HTTPS. Set it explicitly (or via `NAMECHEAP_CLIENT_IP`) when running on hosts with restricted egress or split routing. For running from CI runners, containers, and other automation, see the [Running in CI and automation environments](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/ci-environments) guide.
 
 ## Usage Example
 
@@ -46,6 +49,12 @@ provider "namecheap" {
   api_key = "your_api_key"
   client_ip = "your.ip.address.here"
   use_sandbox = false
+
+  # Optional client resilience tuning (defaults shown):
+  # requests_per_minute = 20      # client-side rate limit (1-20)
+  # max_retries         = 4       # attempts per call (>= 0; 0 means SDK default of 4)
+  # retry_max_elapsed   = "2m"    # max total retry time (Go duration)
+  # request_timeout     = "30s"   # per-request HTTP timeout (Go duration)
 }
 
 
