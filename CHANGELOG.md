@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.6](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.3.5...v2.3.6) (2026-07-04)
+
+
+### Bug Fixes
+
+* filter default parking records in readRecordsOverwrite ([#262](https://github.com/namecheap/terraform-provider-namecheap/issues/262)) ([392b847](https://github.com/namecheap/terraform-provider-namecheap/commit/392b847d16c8a5d2fad3208242350fa237a9eb41))
+
 ## [2.3.5](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.3.4...v2.3.5) (2026-06-17)
 
 
