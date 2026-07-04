@@ -17,6 +17,13 @@ test:
 testacc:
 	TF_ACC=1 go test ./namecheap -v -run=TestAcc -count=1 -timeout=30m -failfast
 
+# Mock-backed acceptance tests: run the acceptance suite against an in-process
+# stateful mock of the Namecheap API (no credentials, no network). Requires the
+# `testacc` build tag so the NAMECHEAP_API_URL endpoint override is compiled in,
+# and a terraform binary (uses the one on PATH; falls back to auto-download).
+testacc-mock:
+	TF_ACC=1 TF_ACC_TERRAFORM_PATH=$$(command -v terraform) go test -tags testacc ./namecheap -v -run='^TestAccMock' -count=1 -timeout=10m
+
 build:
 	go build -o ${BINARY}
 
@@ -52,4 +59,4 @@ lint:
 docs:
 	tfplugindocs
 
-.PHONY: format check test testacc build release install_darwin_amd64 install_linux_amd64 lint docs
+.PHONY: format check test testacc testacc-mock build release install_darwin_amd64 install_linux_amd64 lint docs
