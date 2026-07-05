@@ -407,7 +407,7 @@ jobs:
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
-      public-ip: ${{ steps.acquire-eip.outputs.public-ip }}
+      public-ip: ${{ steps.verify-eip.outputs.public-ip }}
     steps:
       - name: Wait for older acceptance runs to release the EIP
         # The acceptance pipeline associates one whitelisted Elastic IP to its
@@ -432,6 +432,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Wait for sandbox EIP to become free
+        # Precondition gate for the cold-launch "Start EC2 runner" step below.
+        # This script never associates the EIP itself (only the action's own
+        # eip-allocation-id input does, on a genuine cold launch) -- it just
+        # blocks until the allocation is unassociated (or reaps it off a
+        # stopped, NOT-ours instance) so that association doesn't race a
+        # still-live holder in another repo/run. If the current holder is
+        # this repo's own stopped warm-pool instance, this step is a no-op:
+        # see scripts/eip-mutex.sh's wait-until-free comments for why that
+        # case is deliberately left untouched.
+        run: scripts/eip-mutex.sh wait-until-free "$SANDBOX_EIP_ALLOCATION_ID"
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
@@ -453,25 +464,31 @@ jobs:
           # account's default aws/ebs KMS key; AMI snapshot-id is
           # dropped so AWS re-encrypts at launch time.
           encrypt-ebs: "true"
+          # Restores the action's own early association (removed by mistake in
+          # #281): this is what gives the instance internet connectivity during
+          # its own bootstrap, on both a cold launch and (implicitly, since the
+          # EIP is left attached across stop/start) a warm restart.
+          eip-allocation-id: ${{ env.SANDBOX_EIP_ALLOCATION_ID }}
           aws-resource-tags: >
             [
               { "Key": "Name", "Value": "github_runner" },
               { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
             ]
-      - name: Acquire sandbox EIP
-        id: acquire-eip
-        # Test-and-set the whitelisted EIP onto this instance (see
-        # scripts/eip-mutex.sh). Retries only on AWS's Resource.AlreadyAssociated
-        # contention error, up to a bounded timeout; fails fast on anything else.
-        # Reuses the AWS credentials already configured above — no new
-        # credentials step needed. The instance-id comes from a `steps.*`
-        # output via env: rather than being spliced directly into the run:
-        # script text, matching the pattern used by "Verify sandbox EIP"
-        # below.
+      - name: Verify EIP ownership
+        id: verify-eip
+        # Hard-fail gate: confirms the EIP that's supposed to be ours (either
+        # just associated by the action's own eip-allocation-id on a cold
+        # launch, or already attached from a prior run on a warm restart) is
+        # still associated with the exact instance start-ec2-runner reports.
+        # Catches both the residual cold-launch race between the wait step
+        # above and the action's own associate call, and a cross-repo steal
+        # that could have hit a warm-restart instance while it sat stopped
+        # (see SECURITY_COMPLIANCE.md's cross-repo hazard note). Never
+        # proceeds to run tests without this confirmation.
         env:
           EC2_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
         run: |
-          ip="$(scripts/eip-mutex.sh acquire "$SANDBOX_EIP_ALLOCATION_ID" "$EC2_INSTANCE_ID")"
+          ip="$(scripts/eip-mutex.sh verify "$SANDBOX_EIP_ALLOCATION_ID" "$EC2_INSTANCE_ID")"
           echo "public-ip=${ip}" >> "$GITHUB_OUTPUT"
 
   acceptance_test:
@@ -670,30 +687,10 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - name: Checkout
-        # if: always() so a failure in "Generate GitHub App token" or
-        # "Configure AWS credentials" above never causes this step to be
-        # SKIPPED (its default success()-only condition) -- if it were, the
-        # if: always() "Release sandbox EIP" step below would still run but
-        # fail with "No such file or directory" instead of ever attempting
-        # the release, silently stranding the EIP on the stopping instance.
-        if: always()
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Release sandbox EIP
-        # Tolerant of "nothing was ever acquired" (e.g. start-runner failed
-        # before its own acquire step ran). if: always() so a failure earlier
-        # in this job never leaves the EIP associated with a stopping instance.
-        # Passes this job's own started instance-id so eip-mutex.sh can detect
-        # a cross-repo/cross-run steal (the EIP now associated with a
-        # DIFFERENT instance) and skip rather than rip it away from that
-        # other, legitimately-running holder.
-        if: always()
-        env:
-          STARTED_INSTANCE_ID: ${{ needs.start-runner.outputs.ec2-instance-id }}
-        run: scripts/eip-mutex.sh release "$SANDBOX_EIP_ALLOCATION_ID" "$STARTED_INSTANCE_ID"
       - name: Stop EC2 runner
-        # if: always() so a failure in the release step above doesn't skip
-        # stopping the instance.
+        # if: always() so a failure in "Generate GitHub App token" or
+        # "Configure AWS credentials" above doesn't skip stopping the
+        # instance.
         if: always()
         uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
         with:

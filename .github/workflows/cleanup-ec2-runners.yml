@@ -7,7 +7,12 @@ name: Cleanup EC2 runners
 # FIRST cold boot), so something outside ci.yml has to guarantee the pool is
 # drained at least once a day (G7) and that crashed/cancelled leftovers don't
 # linger for hours (belt-and-braces on top of ci.yml's own pre/post hygiene
-# sweeps and stop-runner's `if: always()` EIP release).
+# sweeps). EIP release for the warm-pool instance now happens exclusively as
+# an automatic AWS side effect of instance termination, which only occurs
+# here, in the nightly full drain below -- the EIP stays attached to the pool
+# instance across every warm stop/start cycle in between (see ci.yml's
+# start-runner "Wait for sandbox EIP to become free" / "Verify EIP ownership"
+# steps and scripts/eip-mutex.sh for the full model).
 #
 # Two passes share this one workflow:
 #   - nightly full drain (37 2 * * * UTC): tiny reaper-stopped-max-age so the
@@ -42,11 +47,6 @@ on:
           Ignored on schedule-triggered runs (those always run live).
         type: boolean
         default: true
-
-env:
-  # Must match ci.yml's SANDBOX_EIP_ALLOCATION_ID literal exactly -- both
-  # workflows manage the SAME shared Elastic IP mutex.
-  SANDBOX_EIP_ALLOCATION_ID: eipalloc-1796f61b
 
 jobs:
   reap:
@@ -133,11 +133,3 @@ jobs:
         if: ${{ !(github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'leak-reap' }}
         run: |
           echo "DRY RUN: would run mode:cleanup (default reaper-stopped-max-age)"
-
-      - name: Belt-and-braces EIP release if stopped
-        # Runs on every live invocation of this workflow regardless of which
-        # pass fired (not gated on steps.pass.outputs.kind) -- a stopped
-        # instance still holding the whitelisted EIP is a leak either way.
-        # `always()` so a failure in the cleanup steps above doesn't skip it.
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.dry_run == false) }}
-        run: scripts/eip-mutex.sh reap-if-stopped "$SANDBOX_EIP_ALLOCATION_ID"

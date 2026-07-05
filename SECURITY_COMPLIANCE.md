@@ -175,18 +175,29 @@ below for the reuse/cleanup/mutex mechanics:
   `actions/checkout`'s own `clean: true`, since our script can't run before
   the repo it lives in has been checked out.
 - **EIP mutex (`scripts/eip-mutex.sh`).** The whitelisted Elastic IP
-  (`eipalloc-1796f61b`) is no longer passed to the action's
-  `eip-allocation-id` input, which reassociates permissively and can silently
-  steal the address out from under another in-progress job. Instead,
-  `start-runner` runs `scripts/eip-mutex.sh acquire`, which calls
-  `aws ec2 associate-address --no-allow-reassociation` — an atomic
-  test-and-set — and retries only on the `Resource.AlreadyAssociated`
-  contention error (bounded by a 1800s budget matching the workflow queue's
-  timeout), failing fast with no retry on any other AWS error.
-  `acceptance_test` then hard-asserts its own public IP equals that address
-  before `make testacc` runs, and `stop-runner` releases the address with
-  `scripts/eip-mutex.sh release` (`aws ec2 disassociate-address`,
-  `if: always()`, so a stop-step failure elsewhere can't strand the lock).
+  (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input
+  again on every cold launch — that input is what actually associates the
+  EIP, giving the instance connectivity during its own bootstrap (the fix
+  for the CloudTrail-confirmed cold-boot failures). Immediately before that
+  step, `start-runner` runs `scripts/eip-mutex.sh wait-until-free` as a
+  precondition gate (not an acquire-and-hold): it blocks until the
+  allocation is unassociated, or reaps it off a stopped instance that
+  belongs to another repository, so the action's own association doesn't
+  race a still-live holder elsewhere. The EIP is then deliberately left
+  attached to the pool instance across every warm stop/start cycle rather
+  than released per stop — the action's warm-restart path never
+  re-associates the EIP itself, so a warm restart's connectivity depends on
+  it already being there. After `mode: start` returns, `start-runner`'s
+  "Verify EIP ownership" step (`scripts/eip-mutex.sh verify`) hard-asserts
+  the EIP is still associated with this job's instance, covering both the
+  residual cold-launch race and a warm-restart cross-repo steal, before
+  `acceptance_test` is allowed to run `make testacc`. There is no explicit
+  release step anywhere — release only ever happens as an automatic AWS
+  side effect of `cleanup-ec2-runners.yml` terminating the pool instance,
+  which is normally the nightly full drain but can occasionally be the
+  leak-reaper pass instead, if the pool instance happens to sit stopped
+  past its default `reaper-stopped-max-age` before the next drain runs
+  (see below).
 - **New IAM prerequisite.** The CI AWS identity now additionally requires
   `ec2:DisassociateAddress` and `ec2:DescribeAddresses`, on top of the
   already-granted `ec2:AssociateAddress` and `ec2:DescribeInstances`. This
@@ -199,22 +210,35 @@ below for the reuse/cleanup/mutex mechanics:
   instance always ages past the threshold and is terminated, and a
   `7,37 * * * *` UTC leak-reaper pass at the action's own default threshold
   that catches crashed/cancelled leftovers without draining the warm pool
-  during the day. Both passes also release the EIP, belt-and-braces, if it's
-  still associated with a stopped instance. `workflow_dispatch` exposes a
-  `mode` choice and a `dry_run` input (default `true`) for safe manual runs.
+  during the day. Neither pass touches the EIP directly — it stays attached
+  to the pool instance across every warm stop/start cycle and is only
+  released as an automatic AWS side effect of whichever pass terminates
+  that instance first. That's normally the nightly full drain, but the
+  leak-reaper pass will do it instead if the pool instance is ever left
+  stopped long enough to age past its own default threshold between
+  drains (see the EIP mutex bullet above).
+  `workflow_dispatch` exposes a `mode` choice and a `dry_run` input (default
+  `true`) for safe manual runs.
 - **Cross-repo hazard.** `eipalloc-1796f61b` is also used by
   `namecheap/mcp-server-namecheap`'s acceptance workflow, which as of this
   writing still hands the IP straight to the action's permissive
-  `eip-allocation-id` input and can silently reassociate it away from a
-  run in this repo. The mutex above makes this repository a well-behaved
-  actor — it will wait on, or loudly fail, contention rather than stealing —
-  but it cannot force the other repository to do the same.
-  `namecheap/mcp-server-namecheap` adopting the same acquire/release
-  discipline (or at minimum passing `--no-allow-reassociation`) is a
-  prerequisite for full protection and is tracked outside this repository;
-  until it happens, an occasional `acceptance_test` failure at the "Verify
-  sandbox EIP" step may be caused by a concurrent run in that other repo
-  rather than a bug here.
+  `eip-allocation-id` input and can silently reassociate it away from a run
+  in this repo. This repository's own cold-launch association now goes
+  through that same permissive `eip-allocation-id` input — not an atomic
+  `--no-allow-reassociation` test-and-set performed by our own script — so
+  the association call itself is no longer what protects us. Protection
+  instead comes from wrapping that call: `wait-until-free` blocks
+  beforehand so the association doesn't race a still-live holder, and
+  `verify` hard-fails afterward if the EIP turns out not to be associated
+  with our own instance. This makes the repository a well-behaved actor —
+  it will wait on, or loudly fail, contention rather than stealing — but it
+  cannot force the other repository to do the same, and cannot prevent a
+  steal, only detect one after the fact. `namecheap/mcp-server-namecheap`
+  adopting the same wait/verify discipline (or at minimum passing
+  `--no-allow-reassociation` itself) is a prerequisite for full protection
+  and is tracked outside this repository; until it happens, an occasional
+  `acceptance_test` failure at the "Verify sandbox EIP" step may be caused
+  by a concurrent run in that other repo rather than a bug here.
 
 ## Fork-safe pull-request CI
 
