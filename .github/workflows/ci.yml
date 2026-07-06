@@ -476,12 +476,6 @@ jobs:
           pre-runner-script: |
             mkdir -p /opt/ci
             chown -R runner:runner /opt/ci
-          # TEMPORARY diagnostic: surfaces wait_for_runner_poll's live
-          # bootstrap phone-home tag value every 10s, to see whether/where
-          # the instance's own self-tagging is getting stuck or denied.
-          # Revert once the current registration-timeout investigation
-          # concludes.
-          debug: "true"
           # Restores the action's own early association (removed by mistake in
           # #281): this is what gives the instance internet connectivity during
           # its own bootstrap, on both a cold launch and (implicitly, since the
