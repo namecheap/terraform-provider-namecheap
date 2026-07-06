@@ -445,7 +445,7 @@ jobs:
         run: scripts/eip-mutex.sh wait-until-free "$SANDBOX_EIP_ALLOCATION_ID"
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
+        uses: namecheap/ec2-github-runner@032802a94cac8dd9466d70565fcd7d4d5019de7f # v4.0.0 @ 2026-07-05: includes #62 phone-home fix
         with:
           mode: start
           github-token: ${{ steps.app-token.outputs.token }}
@@ -692,7 +692,7 @@ jobs:
         # "Configure AWS credentials" above doesn't skip stopping the
         # instance.
         if: always()
-        uses: namecheap/ec2-github-runner@c5db9f03dff1e63a46d40c9b94a49fc5ee6feff1 # v4.0.0 @ 2026-07-02
+        uses: namecheap/ec2-github-runner@032802a94cac8dd9466d70565fcd7d4d5019de7f # v4.0.0 @ 2026-07-05: includes #62 phone-home fix
         with:
           mode: stop
           reuse: stop
