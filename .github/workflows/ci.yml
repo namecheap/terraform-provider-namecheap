@@ -464,6 +464,18 @@ jobs:
           # account's default aws/ebs KMS key; AMI snapshot-id is
           # dropped so AWS re-encrypts at launch time.
           encrypt-ebs: "true"
+          # Runs once, as root, on the cold-launch bootstrap only (not on
+          # every warm restart) -- but /opt/ci persists across stop/start on
+          # the same root volume, so a one-time chown here is all the
+          # unprivileged `runner` user needs to create JOB_HOME under it for
+          # every subsequent job. Without this, scripts/hygiene-sweep.sh's
+          # `mkdir -p /opt/ci/jobs/current` fails outright: /opt is root-owned
+          # 755, and the actions-runner process (and everything run.sh spawns)
+          # runs as the unprivileged `runner` user, which has no write access
+          # to create a new directory directly under /opt.
+          pre-runner-script: |
+            mkdir -p /opt/ci
+            chown -R runner:runner /opt/ci
           # TEMPORARY diagnostic: surfaces wait_for_runner_poll's live
           # bootstrap phone-home tag value every 10s, to see whether/where
           # the instance's own self-tagging is getting stuck or denied.
