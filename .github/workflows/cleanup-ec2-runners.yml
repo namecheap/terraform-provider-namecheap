@@ -108,7 +108,7 @@ jobs:
         # reaper-stopped-max-age is deliberately tiny (1) so the day's pool
         # instance -- stopped anywhere from seconds to ~24h earlier -- is
         # always older than the threshold and gets terminated.
-        uses: namecheap/ec2-github-runner@032802a94cac8dd9466d70565fcd7d4d5019de7f # v4.0.0 @ 2026-07-05: includes #62 phone-home fix
+        uses: namecheap/ec2-github-runner@301e1c127c4ce4bee4784165e0fa74382a434cab # v4.0.0 @ 2026-07-06: includes #62 phone-home fix + #64 GH_REPO_URL sed-delimiter fix
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}
@@ -124,7 +124,7 @@ jobs:
         # threshold applies, per the issue's "default thresholds" requirement
         # for this pass.
         if: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'leak-reap' }}
-        uses: namecheap/ec2-github-runner@032802a94cac8dd9466d70565fcd7d4d5019de7f # v4.0.0 @ 2026-07-05: includes #62 phone-home fix
+        uses: namecheap/ec2-github-runner@301e1c127c4ce4bee4784165e0fa74382a434cab # v4.0.0 @ 2026-07-06: includes #62 phone-home fix + #64 GH_REPO_URL sed-delimiter fix
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}
