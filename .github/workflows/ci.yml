@@ -445,7 +445,7 @@ jobs:
         run: scripts/eip-mutex.sh wait-until-free "$SANDBOX_EIP_ALLOCATION_ID"
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.0 @ 2026-07-06: includes #62 phone-home fix + #64 GH_REPO_URL sed-delimiter fix + #65 phone-home error detail + #66 warm-start user-data double-base64 fix
+        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # post-v4.0.0 main (2026-07-06): reuse:stop warm-pool registration fixes (#62/#64/#65/#66)
         with:
           mode: start
           github-token: ${{ steps.app-token.outputs.token }}
@@ -476,10 +476,13 @@ jobs:
           pre-runner-script: |
             mkdir -p /opt/ci
             chown -R runner:runner /opt/ci
-          # Restores the action's own early association (removed by mistake in
-          # #281): this is what gives the instance internet connectivity during
-          # its own bootstrap, on both a cold launch and (implicitly, since the
-          # EIP is left attached across stop/start) a warm restart.
+          # The action associates this EIP early in its own bootstrap, which is
+          # what gives the instance outbound internet connectivity while it
+          # registers the runner -- on a cold launch, and (since the EIP is left
+          # attached across stop/start) implicitly on a warm restart too. The
+          # single whitelisted sandbox EIP is also what the Namecheap sandbox
+          # API allows, so this association is load-bearing for the acceptance
+          # tests, not just for bootstrap.
           eip-allocation-id: ${{ env.SANDBOX_EIP_ALLOCATION_ID }}
           aws-resource-tags: >
             [
@@ -704,7 +707,7 @@ jobs:
         # "Configure AWS credentials" above doesn't skip stopping the
         # instance.
         if: always()
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.0 @ 2026-07-06: includes #62 phone-home fix + #64 GH_REPO_URL sed-delimiter fix + #65 phone-home error detail + #66 warm-start user-data double-base64 fix
+        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # post-v4.0.0 main (2026-07-06): reuse:stop warm-pool registration fixes (#62/#64/#65/#66)
         with:
           mode: stop
           reuse: stop
