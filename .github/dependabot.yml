@@ -5,9 +5,24 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Go module bumps change the SHIPPED provider binary, so they must land as
+    # a releasing Conventional Commit type. release-please maps `fix:` -> patch,
+    # which opens/refreshes the Release PR and actually ships the dependency.
+    # Dependabot's default `chore(deps):` is NON-releasing, so without this
+    # bumps would sit unreleased until an unrelated fix:/feat: swept them in.
+    # `include: scope` yields `fix(deps): ...`. See CLAUDE.md > Commit Messages.
+    commit-message:
+      prefix: "fix"
+      include: "scope"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Action bumps are CI-only and never touch the shipped binary, so they use
+    # a NON-releasing type (`ci`) and must not cut a release. Matches the
+    # maintainer's manual `ci:` convention for runner/scanner bumps.
+    commit-message:
+      prefix: "ci"
+      include: "scope"
