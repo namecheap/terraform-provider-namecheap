@@ -126,8 +126,8 @@ before `tar -xzf` / `unzip` runs.
 The acceptance-test job runs on an EC2 instance launched by the self-hosted
 runner action. Since #279 that instance is kept warm (stopped, not
 terminated) between runs — see
-[Warm-pool lifecycle, hygiene sweeps, and the EIP mutex](#warm-pool-lifecycle-hygiene-sweeps-and-the-eip-mutex-279)
-below for the reuse/cleanup/mutex mechanics:
+[Warm-pool lifecycle, hygiene sweeps, and the sandbox EIP](#warm-pool-lifecycle-hygiene-sweeps-and-the-sandbox-eip-279)
+below for the reuse/cleanup/EIP mechanics:
 
 - Runner binary version is controlled via the SHA-pinned
   `namecheap/ec2-github-runner` action (currently bundles
@@ -138,16 +138,16 @@ below for the reuse/cleanup/mutex mechanics:
   re-trigger the acceptance pipeline manually per the flow in
   [`CONTRIBUTING.md`](CONTRIBUTING.md#dependabot-prs-maintainers).
 - AMI comes from `DEVOPS/hardened-amazon-linux2023` (internal).
-- Only one acceptance run may hold the single whitelisted Elastic IP at a
-  time. Within this repo, `start-runner` serializes access with the
-  SHA-pinned `ahmadnassri/action-workflow-queue` action (MIT), which queues a
-  newer run behind older in-progress ones (FIFO, no cancellation). This
-  replaces the former shared `concurrency` group, which silently cancelled
-  pending runs when PRs were pushed close together. Across repos, the EIP
-  mutex described below adds a second layer, since the queue only serializes
-  runs within this repository.
+- Only one acceptance run may hold this repo's whitelisted Elastic IP at a
+  time. `start-runner` serializes access with the SHA-pinned
+  `ahmadnassri/action-workflow-queue` action (MIT), which queues a newer run
+  behind older in-progress ones (FIFO, no cancellation). This replaces the
+  former shared `concurrency` group, which silently cancelled pending runs
+  when PRs were pushed close together. The EIP is dedicated to this repository
+  (see the dedicated sandbox EIP bullet below), so this within-repo queue is
+  the only serialization needed — there is no cross-repo mutex.
 
-### Warm-pool lifecycle, hygiene sweeps, and the EIP mutex (#279)
+### Warm-pool lifecycle, hygiene sweeps, and the sandbox EIP (#279)
 
 - **Warm pool.** `stop-runner` calls `namecheap/ec2-github-runner` with
   `reuse: stop` and `reuse-pool-tag: sandbox-acceptance` instead of
@@ -174,35 +174,36 @@ below for the reuse/cleanup/mutex mechanics:
   freshness guarantee at the very start of a run instead comes from
   `actions/checkout`'s own `clean: true`, since our script can't run before
   the repo it lives in has been checked out.
-- **EIP mutex (`scripts/eip-mutex.sh`).** The whitelisted Elastic IP
-  (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input
-  again on every cold launch — that input is what actually associates the
-  EIP, giving the instance connectivity during its own bootstrap (the fix
-  for the CloudTrail-confirmed cold-boot failures). Immediately before that
-  step, `start-runner` runs `scripts/eip-mutex.sh wait-until-free` as a
-  precondition gate (not an acquire-and-hold): it blocks until the
-  allocation is unassociated, or reaps it off a stopped instance that
-  belongs to another repository, so the action's own association doesn't
-  race a still-live holder elsewhere. The EIP is then deliberately left
-  attached to the pool instance across every warm stop/start cycle rather
-  than released per stop — the action's warm-restart path never
-  re-associates the EIP itself, so a warm restart's connectivity depends on
-  it already being there. After `mode: start` returns, `start-runner`'s
-  "Verify EIP ownership" step (`scripts/eip-mutex.sh verify`) hard-asserts
-  the EIP is still associated with this job's instance, covering both the
-  residual cold-launch race and a warm-restart cross-repo steal, before
-  `acceptance_test` is allowed to run `make testacc`. There is no explicit
-  release step anywhere — release only ever happens as an automatic AWS
-  side effect of `cleanup-ec2-runners.yml` terminating the pool instance,
-  which is normally the nightly full drain but can occasionally be the
-  leak-reaper pass instead, if the pool instance happens to sit stopped
-  past its default `reaper-stopped-max-age` before the next drain runs
-  (see below).
-- **New IAM prerequisite.** The CI AWS identity now additionally requires
-  `ec2:DisassociateAddress` and `ec2:DescribeAddresses`, on top of the
-  already-granted `ec2:AssociateAddress` and `ec2:DescribeInstances`. This
-  repository does not manage that IAM policy — **an AWS admin must grant both
-  new actions to the CI role/user before this pipeline will work.**
+- **Dedicated sandbox EIP.** The whitelisted Elastic IP
+  (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input,
+  which associates it on every cold launch — that is what gives the instance
+  connectivity during its own bootstrap (the fix for the CloudTrail-confirmed
+  cold-boot failures) and is also the IP the Namecheap sandbox API allows. The
+  EIP is deliberately left attached to the pool instance across every warm
+  stop/start cycle rather than released per stop, because the action's
+  warm-restart path never re-associates it. **This repository is the sole
+  user of this allocation** (`mcp-server-namecheap` moved to its own dedicated
+  EIP — see the "Dedicated per-repo sandbox EIP" milestone, #282 /
+  `mcp-server-namecheap#16`), so there is no cross-repo contention and no lock
+  script: `start-runner`'s "Resolve sandbox EIP public IP" step just reads the
+  allocation's public IP and publishes it, and `acceptance_test`'s
+  credential-free "Verify sandbox EIP" step compares the runner's actual
+  public IP against it — refusing to run `make testacc` unless the runner
+  really holds the whitelisted IP, which also confirms the association
+  succeeded. Concurrent runs *within this repo* are still serialized by
+  `ahmadnassri/action-workflow-queue` (a single EIP can't serve two runners at
+  once); there is no explicit release step anywhere — release only ever
+  happens as an automatic AWS side effect of `cleanup-ec2-runners.yml`
+  terminating the pool instance, which is normally the nightly full drain but
+  can occasionally be the leak-reaper pass instead, if the pool instance
+  happens to sit stopped past its default `reaper-stopped-max-age` before the
+  next drain runs (see below).
+- **IAM prerequisite.** The CI AWS identity requires `ec2:AssociateAddress`
+  and `ec2:DescribeInstances` (used by the action to associate the EIP and
+  manage the instance) plus `ec2:DescribeAddresses` (to resolve the
+  whitelisted EIP's public IP for the acceptance gate). `ec2:DisassociateAddress`
+  is **not** required — the former cross-repo EIP reaper that used it has been
+  removed along with the shared-EIP mutex.
 - **Nightly drain and leak reaper.**
   [`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml) runs
   `mode: cleanup` on two schedules: a nightly full drain at `37 2 * * *` UTC
@@ -216,33 +217,18 @@ below for the reuse/cleanup/mutex mechanics:
   that instance first. That's normally the nightly full drain, but the
   leak-reaper pass will do it instead if the pool instance is ever left
   stopped long enough to age past its own default threshold between
-  drains (see the EIP mutex bullet above).
+  drains (see the dedicated sandbox EIP bullet above).
   `workflow_dispatch` exposes a `mode` choice and a `dry_run` input (default
   `true`) for safe manual runs.
-- **Cross-repo hazard.** `eipalloc-1796f61b` is also used by
-  `namecheap/mcp-server-namecheap`'s acceptance workflow, which as of this
-  writing still hands the IP straight to the action's permissive
-  `eip-allocation-id` input and can silently reassociate it away from a run
-  in this repo. This repository's own cold-launch association now goes
-  through that same permissive `eip-allocation-id` input — not an atomic
-  `--no-allow-reassociation` test-and-set performed by our own script — so
-  the association call itself is no longer what protects us. Protection
-  instead comes from wrapping that call: `wait-until-free` blocks
-  beforehand so the association doesn't race a still-live holder, and
-  `verify` hard-fails afterward if the EIP turns out not to be associated
-  with our own instance. This makes the repository a well-behaved actor —
-  it will wait on, or loudly fail, contention rather than stealing — but it
-  cannot force the other repository to do the same, and cannot prevent a
-  steal, only detect one after the fact. Until then, an occasional
-  `acceptance_test` failure at the "Verify sandbox EIP" step may be caused
-  by a concurrent run in that other repo rather than a bug here.
-
-  **Planned resolution.** Rather than have `mcp-server-namecheap` adopt the
-  same wait/verify discipline, each repo is being moved to its **own**
-  dedicated whitelisted EIP, which removes the contention at the source and
-  lets this whole mutex (`scripts/eip-mutex.sh`, the `wait-until-free` /
-  `verify` steps, and the `ec2:DisassociateAddress` grant) be deleted.
-  Tracked under the "Dedicated per-repo sandbox EIP" milestone:
+- **One EIP per repo (no cross-repo mutex).** `eipalloc-1796f61b` was
+  previously shared with `namecheap/mcp-server-namecheap`'s acceptance
+  workflow, which could silently reassociate ("steal") it mid-run. That is
+  why this pipeline once carried a cross-repo lock (`scripts/eip-mutex.sh`
+  with `wait-until-free` reaping + `verify`). The shared arrangement has been
+  retired: each repo that runs sandbox acceptance now owns its **own**
+  dedicated whitelisted EIP, so there is no contention to arbitrate and the
+  lock script, its two workflow steps, and the `ec2:DisassociateAddress` grant
+  are gone. Tracked under the "Dedicated per-repo sandbox EIP" milestone:
   namecheap/terraform-provider-namecheap#282 (this repo) and
   namecheap/mcp-server-namecheap#16 (the dedicated EIP for that repo).
 

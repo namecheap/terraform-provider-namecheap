@@ -407,7 +407,7 @@ jobs:
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
-      public-ip: ${{ steps.verify-eip.outputs.public-ip }}
+      public-ip: ${{ steps.eip-ip.outputs.public-ip }}
     steps:
       - name: Wait for older acceptance runs to release the EIP
         # The acceptance pipeline associates one whitelisted Elastic IP to its
@@ -431,18 +431,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Wait for sandbox EIP to become free
-        # Precondition gate for the cold-launch "Start EC2 runner" step below.
-        # This script never associates the EIP itself (only the action's own
-        # eip-allocation-id input does, on a genuine cold launch) -- it just
-        # blocks until the allocation is unassociated (or reaps it off a
-        # stopped, NOT-ours instance) so that association doesn't race a
-        # still-live holder in another repo/run. If the current holder is
-        # this repo's own stopped warm-pool instance, this step is a no-op:
-        # see scripts/eip-mutex.sh's wait-until-free comments for why that
-        # case is deliberately left untouched.
-        run: scripts/eip-mutex.sh wait-until-free "$SANDBOX_EIP_ALLOCATION_ID"
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # post-v4.0.0 main (2026-07-06): reuse:stop warm-pool registration fixes (#62/#64/#65/#66)
@@ -489,21 +477,25 @@ jobs:
               { "Key": "Name", "Value": "github_runner" },
               { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
             ]
-      - name: Verify EIP ownership
-        id: verify-eip
-        # Hard-fail gate: confirms the EIP that's supposed to be ours (either
-        # just associated by the action's own eip-allocation-id on a cold
-        # launch, or already attached from a prior run on a warm restart) is
-        # still associated with the exact instance start-ec2-runner reports.
-        # Catches both the residual cold-launch race between the wait step
-        # above and the action's own associate call, and a cross-repo steal
-        # that could have hit a warm-restart instance while it sat stopped
-        # (see SECURITY_COMPLIANCE.md's cross-repo hazard note). Never
-        # proceeds to run tests without this confirmation.
-        env:
-          EC2_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+      - name: Resolve sandbox EIP public IP
+        id: eip-ip
+        # Publish the whitelisted EIP's public IP (resolved from the allocation
+        # itself, the source of truth for "the IP the Namecheap sandbox API
+        # allows") so acceptance_test's credential-free "Verify sandbox EIP"
+        # gate can compare the runner's actual public IP against it. That gate
+        # is what confirms the action actually associated the EIP to this
+        # runner: if association had failed, the runner's public IP would not
+        # match and acceptance would refuse to run. No cross-repo mutex is
+        # needed -- this repo is the sole user of eipalloc-1796f61b (see
+        # SECURITY_COMPLIANCE.md's dedicated-EIP note).
         run: |
-          ip="$(scripts/eip-mutex.sh verify "$SANDBOX_EIP_ALLOCATION_ID" "$EC2_INSTANCE_ID")"
+          ip="$(aws ec2 describe-addresses \
+            --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
+            --query 'Addresses[0].PublicIp' --output text)"
+          if [ -z "$ip" ] || [ "$ip" = "None" ]; then
+            echo "::error::Could not resolve a public IP for allocation ${SANDBOX_EIP_ALLOCATION_ID}."
+            exit 1
+          fi
           echo "public-ip=${ip}" >> "$GITHUB_OUTPUT"
 
   acceptance_test:
