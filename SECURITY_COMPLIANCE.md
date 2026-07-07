@@ -233,12 +233,18 @@ below for the reuse/cleanup/mutex mechanics:
   with our own instance. This makes the repository a well-behaved actor —
   it will wait on, or loudly fail, contention rather than stealing — but it
   cannot force the other repository to do the same, and cannot prevent a
-  steal, only detect one after the fact. `namecheap/mcp-server-namecheap`
-  adopting the same wait/verify discipline (or at minimum passing
-  `--no-allow-reassociation` itself) is a prerequisite for full protection
-  and is tracked outside this repository; until it happens, an occasional
+  steal, only detect one after the fact. Until then, an occasional
   `acceptance_test` failure at the "Verify sandbox EIP" step may be caused
   by a concurrent run in that other repo rather than a bug here.
+
+  **Planned resolution.** Rather than have `mcp-server-namecheap` adopt the
+  same wait/verify discipline, each repo is being moved to its **own**
+  dedicated whitelisted EIP, which removes the contention at the source and
+  lets this whole mutex (`scripts/eip-mutex.sh`, the `wait-until-free` /
+  `verify` steps, and the `ec2:DisassociateAddress` grant) be deleted.
+  Tracked under the "Dedicated per-repo sandbox EIP" milestone:
+  namecheap/terraform-provider-namecheap#282 (this repo) and
+  namecheap/mcp-server-namecheap#16 (the dedicated EIP for that repo).
 
 ## Fork-safe pull-request CI
 
