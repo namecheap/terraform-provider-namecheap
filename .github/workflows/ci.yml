@@ -412,11 +412,15 @@ jobs:
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
       public-ip: ${{ steps.eip-ip.outputs.public-ip }}
     steps:
-      - name: Wait for older acceptance runs to release the EIP
-        # The acceptance pipeline associates one whitelisted Elastic IP to its
-        # ephemeral EC2 runner; two runners at once would fight over that IP.
-        # Queue this run (FIFO, no cancellation) behind any older in-progress CI
-        # run, which holds the IP until its stop-runner job terminates the host.
+      - name: Wait for older acceptance runs to finish (single sandbox EIP)
+        # The acceptance pipeline uses one whitelisted Elastic IP and one
+        # warm-pool instance; two runs at once would both try to attach that
+        # EIP and start that instance, fighting over them. Queue this run (FIFO,
+        # no cancellation) behind any older in-progress CI run so only one holds
+        # the sandbox EIP at a time. The older run frees it when its stop-runner
+        # stops the pooled instance (reuse: stop, not terminate — the EIP stays
+        # attached to the stopped instance); this run's "Pre-attach sandbox EIP"
+        # step then re-attaches it before start-up.
         uses: ahmadnassri/action-workflow-queue@542658b3a8270cac81ae15d401b0d974732808ac # v1.2.0
         with:
           timeout: 1800000 # 30 min cap for a backlog of queued acceptance runs
