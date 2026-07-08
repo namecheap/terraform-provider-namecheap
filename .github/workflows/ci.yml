@@ -19,10 +19,13 @@ permissions:
   contents: read
 
 env:
-  # Single source of truth for the whitelisted sandbox Elastic IP within this
-  # file. cleanup-ec2-runners.yml repeats this same literal in its own
-  # top-level `env:` block — keep the two in sync if this value ever changes.
-  SANDBOX_EIP_ALLOCATION_ID: eipalloc-1796f61b
+  # This repo's dedicated whitelisted sandbox Elastic IP allocation, consumed
+  # by start-runner's `eip-allocation-id` input and its EIP-resolve step.
+  # Sourced from a repo variable (not a literal) so another repo can adopt this
+  # workflow with its own dedicated EIP without editing YAML — mirroring the
+  # `vars.APP_CLIENT_ID` pattern used elsewhere. cleanup-ec2-runners.yml does
+  # not declare this; it only mentions the allocation in a prose comment.
+  SANDBOX_EIP_ALLOCATION_ID: ${{ vars.SANDBOX_EIP_ALLOCATION_ID }}
 
 # This workflow intentionally has NO top-level `concurrency` group. A shared
 # group serializes the whole workflow, but GitHub keeps only the newest queued
@@ -433,7 +436,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # post-v4.0.0 main (2026-07-06): reuse:stop warm-pool registration fixes (#62/#64/#65/#66)
+        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
         with:
           mode: start
           github-token: ${{ steps.app-token.outputs.token }}
@@ -699,7 +702,7 @@ jobs:
         # "Configure AWS credentials" above doesn't skip stopping the
         # instance.
         if: always()
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # post-v4.0.0 main (2026-07-06): reuse:stop warm-pool registration fixes (#62/#64/#65/#66)
+        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
         with:
           mode: stop
           reuse: stop

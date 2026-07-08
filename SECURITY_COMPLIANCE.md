@@ -181,11 +181,15 @@ below for the reuse/cleanup/EIP mechanics:
   cold-boot failures) and is also the IP the Namecheap sandbox API allows. The
   EIP is deliberately left attached to the pool instance across every warm
   stop/start cycle rather than released per stop, because the action's
-  warm-restart path never re-associates it. **This repository is the sole
-  user of this allocation** (`mcp-server-namecheap` moved to its own dedicated
-  EIP — see the "Dedicated per-repo sandbox EIP" milestone, #282 /
-  `mcp-server-namecheap#16`), so there is no cross-repo contention and no lock
-  script: `start-runner`'s "Resolve sandbox EIP public IP" step just reads the
+  warm-restart path never re-associates it. **This repository is currently the
+  sole user of this allocation** — `mcp-server-namecheap`'s Acceptance (EC2)
+  workflow is *disabled* pending its own dedicated EIP (#282 /
+  `mcp-server-namecheap#16`, both still open), so nothing else associates the
+  IP today. This is an interim stopgap enforced by that disabled workflow, not
+  yet a permanent architectural per-repo split; re-enabling that workflow
+  before it has its own EIP would reintroduce the contention. On that basis
+  there is no cross-repo contention to arbitrate and no lock script:
+  `start-runner`'s "Resolve sandbox EIP public IP" step just reads the
   allocation's public IP and publishes it, and `acceptance_test`'s
   credential-free "Verify sandbox EIP" step compares the runner's actual
   public IP against it — refusing to run `make testacc` unless the runner
@@ -198,12 +202,25 @@ below for the reuse/cleanup/EIP mechanics:
   can occasionally be the leak-reaper pass instead, if the pool instance
   happens to sit stopped past its default `reaper-stopped-max-age` before the
   next drain runs (see below).
-- **IAM prerequisite.** The CI AWS identity requires `ec2:AssociateAddress`
-  and `ec2:DescribeInstances` (used by the action to associate the EIP and
-  manage the instance) plus `ec2:DescribeAddresses` (to resolve the
-  whitelisted EIP's public IP for the acceptance gate). `ec2:DisassociateAddress`
-  is **not** required — the former cross-repo EIP reaper that used it has been
-  removed along with the shared-EIP mutex.
+- **IAM prerequisite.** The CI AWS identity (`sys_github_runner_provisioner`)
+  needs the full set below for the warm-pool + EIP + diagnostics model; an
+  admin granting less will hit `UnauthorizedOperation` mid-cycle (see the
+  policy-diff comment on #281 for the ready-to-apply statements):
+  - **Instance lifecycle (cold launch):** `ec2:RunInstances`,
+    `ec2:TerminateInstances`, `ec2:CreateTags`, `ec2:DescribeImages`,
+    `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus`.
+  - **Warm pool (`reuse: stop`):** `ec2:StopInstances`, `ec2:StartInstances`,
+    `ec2:ModifyInstanceAttribute` — stopping the pool instance each run and
+    rewriting its user-data on warm restart. Without these, reuse can't work
+    at all.
+  - **EIP:** `ec2:AssociateAddress` (the action attaches the EIP on cold
+    launch) and `ec2:DescribeAddresses` (the "Resolve sandbox EIP public IP"
+    step). `ec2:DisassociateAddress` is **not** required — the cross-repo EIP
+    reaper that used it was removed with the mutex.
+  - **Bootstrap diagnostics:** `ec2:GetConsoleOutput` and `ec2:DescribeTags`,
+    for the action's fast-fail/console-capture on a failed registration
+    (without them, failures degrade to timeout-only detection with no console
+    output — the exact symptom seen earlier in this PR).
 - **Nightly drain and leak reaper.**
   [`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml) runs
   `mode: cleanup` on two schedules: a nightly full drain at `37 2 * * *` UTC
@@ -224,11 +241,13 @@ below for the reuse/cleanup/EIP mechanics:
   previously shared with `namecheap/mcp-server-namecheap`'s acceptance
   workflow, which could silently reassociate ("steal") it mid-run. That is
   why this pipeline once carried a cross-repo lock (`scripts/eip-mutex.sh`
-  with `wait-until-free` reaping + `verify`). The shared arrangement has been
-  retired: each repo that runs sandbox acceptance now owns its **own**
-  dedicated whitelisted EIP, so there is no contention to arbitrate and the
-  lock script, its two workflow steps, and the `ec2:DisassociateAddress` grant
-  are gone. Tracked under the "Dedicated per-repo sandbox EIP" milestone:
+  with `wait-until-free` reaping + `verify`). That lock — its script, its two
+  workflow steps, and the `ec2:DisassociateAddress` grant — has been removed.
+  The migration to a genuine per-repo split is **in progress, not complete**:
+  `mcp-server-namecheap`'s acceptance workflow is disabled as an interim
+  stopgap so it no longer touches this IP, and giving it its own dedicated EIP
+  (after which the disable is lifted) is still open work. Tracked under the
+  "Dedicated per-repo sandbox EIP" milestone:
   namecheap/terraform-provider-namecheap#282 (this repo) and
   namecheap/mcp-server-namecheap#16 (the dedicated EIP for that repo).
 
