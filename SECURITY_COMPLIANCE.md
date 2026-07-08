@@ -180,10 +180,14 @@ below for the reuse/cleanup/EIP mechanics:
   connectivity during its own bootstrap (the fix for the CloudTrail-confirmed
   cold-boot failures) and is also the IP the Namecheap sandbox API allows. The
   action does **not** re-associate on a warm restart, and a pooled instance can
-  lose the association while it sits stopped, so `start-runner` re-associates
-  the EIP explicitly (`associate-address --allow-reassociation`) on every start
-  — a no-op reattach after a cold launch, the actual fix after a warm one —
-  rather than trusting it to persist. **This repository is currently the
+  lose the association while it sits stopped, so `start-runner` pre-attaches the
+  EIP to the stopped pool instance *before* the action starts it (the
+  "Pre-attach sandbox EIP to the warm-pool instance" step, whose filter mirrors
+  the action's own pool selection), so the instance boots with the whitelisted
+  IP and the runner registers on it. Associating *after* `mode: start` is
+  deliberately avoided: it would change an already-registered runner's public
+  IP and sever its connection to GitHub, hanging the job. **This repository is
+  currently the
   sole user of this allocation** — `mcp-server-namecheap`'s Acceptance (EC2)
   workflow is *disabled* pending its own dedicated EIP (#282 /
   `mcp-server-namecheap#16`, both still open), so nothing else associates the
@@ -191,8 +195,8 @@ below for the reuse/cleanup/EIP mechanics:
   yet a permanent architectural per-repo split; re-enabling that workflow
   before it has its own EIP would reintroduce the contention. On that basis
   there is no cross-repo contention to arbitrate and no lock script:
-  `start-runner`'s "Associate sandbox EIP and resolve its public IP" step
-  attaches the EIP and publishes its public IP, and `acceptance_test`'s
+  `start-runner`'s "Resolve sandbox EIP public IP" step publishes the
+  allocation's public IP, and `acceptance_test`'s
   credential-free "Verify sandbox EIP" step compares the runner's actual
   public IP against it — refusing to run `make testacc` unless the runner
   really holds the whitelisted IP, which also confirms the association
@@ -215,11 +219,13 @@ below for the reuse/cleanup/EIP mechanics:
     `ec2:ModifyInstanceAttribute` — stopping the pool instance each run and
     rewriting its user-data on warm restart. Without these, reuse can't work
     at all.
-  - **EIP:** `ec2:AssociateAddress` (the action attaches the EIP on cold
-    launch; `start-runner`'s "Associate sandbox EIP and resolve its public IP"
-    step re-attaches it on every start) and `ec2:DescribeAddresses` (same step,
-    resolving the public IP). `ec2:DisassociateAddress` is **not** required —
-    the cross-repo EIP reaper that used it was removed with the mutex.
+  - **EIP:** `ec2:AssociateAddress` (the action attaches the EIP on a cold
+    launch; `start-runner`'s "Pre-attach sandbox EIP" step attaches it to the
+    stopped pool instance on a warm restart) and `ec2:DescribeAddresses` (the
+    "Resolve sandbox EIP public IP" step). The pre-attach also uses the
+    already-required `ec2:DescribeInstances`. `ec2:DisassociateAddress` is
+    **not** required — the cross-repo EIP reaper that used it was removed with
+    the mutex.
   - **Bootstrap diagnostics:** `ec2:GetConsoleOutput` and `ec2:DescribeTags`,
     for the action's fast-fail/console-capture on a failed registration
     (without them, failures degrade to timeout-only detection with no console

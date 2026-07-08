@@ -434,6 +434,43 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+      - name: Pre-attach sandbox EIP to the warm-pool instance
+        # Warm-restart fix. The action associates the EIP itself only on a COLD
+        # launch (eip-allocation-id); on a warm restart it just StartInstances
+        # the pooled instance and assumes the EIP is still attached -- but it
+        # can drift off while the instance sits stopped, landing the runner on a
+        # non-whitelisted auto-assigned IP. Associating AFTER mode:start is not
+        # an option: it changes the public IP of an already-registered runner
+        # and severs its connection to GitHub (the job then hangs). So attach
+        # the EIP to the stopped pool instance HERE, before the action starts
+        # it, so it boots with the whitelisted IP and registers on it. The
+        # filter mirrors the action's own findStoppedPoolInstance selection
+        # exactly (managed + repository + pool tags, stopped, matching type).
+        # No match => cold launch, where eip-allocation-id handles association.
+        env:
+          POOL_TAG: sandbox-acceptance
+          INSTANCE_TYPE: t3.medium
+        run: |
+          iid="$(aws ec2 describe-instances \
+            --filters "Name=tag:ec2-github-runner:managed,Values=true" \
+                      "Name=tag:ec2-github-runner:repository,Values=${GITHUB_REPOSITORY}" \
+                      "Name=tag:ec2-github-runner:pool,Values=${POOL_TAG}" \
+                      "Name=instance-state-name,Values=stopped" \
+                      "Name=instance-type,Values=${INSTANCE_TYPE}" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)"
+          count="$(printf '%s' "$iid" | tr '\t' '\n' | grep -c . || true)"
+          if [ "$count" = "0" ]; then
+            echo "No stopped warm-pool instance; cold launch will associate the EIP via eip-allocation-id."
+          else
+            first="$(printf '%s' "$iid" | tr '\t' '\n' | head -n1)"
+            if [ "$count" != "1" ]; then
+              echo "::warning::Found ${count} stopped warm-pool instances (${iid}); the reaper is not draining them. Pre-attaching to ${first}; the acceptance \"Verify sandbox EIP\" gate will fail cleanly if the action reuses a different one."
+            fi
+            aws ec2 associate-address \
+              --allocation-id "$SANDBOX_EIP_ALLOCATION_ID" \
+              --instance-id "$first" --allow-reassociation >/dev/null
+            echo "Pre-attached ${SANDBOX_EIP_ALLOCATION_ID} to stopped warm-pool instance ${first}."
+          fi
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
@@ -480,27 +517,17 @@ jobs:
               { "Key": "Name", "Value": "github_runner" },
               { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
             ]
-      - name: Associate sandbox EIP and resolve its public IP
+      - name: Resolve sandbox EIP public IP
         id: eip-ip
-        # Deterministically put the whitelisted EIP on this run's instance and
-        # publish its public IP for acceptance_test's credential-free "Verify
-        # sandbox EIP" gate. The action associates the EIP itself only on a
-        # COLD launch (via eip-allocation-id, which is what gives the instance
-        # outbound connectivity during its own bootstrap); on a WARM restart it
-        # never re-associates and relies on the EIP still being attached from a
-        # prior run -- but a pooled instance can lose the association while it
-        # sits stopped, which lands the runner on an auto-assigned IP that the
-        # Namecheap sandbox API rejects. Rather than depend on that persistence,
-        # associate here on every start: a no-op reattach on a cold launch, the
-        # actual fix on a warm one. `--allow-reassociation` is safe because this
-        # repo is the sole user of eipalloc-1796f61b (see SECURITY_COMPLIANCE.md).
-        env:
-          EC2_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+        # Publish the whitelisted EIP's public IP (from the allocation itself,
+        # the source of truth for the IP the Namecheap sandbox API allows) so
+        # acceptance_test's credential-free "Verify sandbox EIP" gate can check
+        # the runner's actual public IP against it. The EIP is already attached
+        # by this point -- via eip-allocation-id on a cold launch, or the
+        # "Pre-attach sandbox EIP" step above on a warm restart -- so this only
+        # reads and publishes; it never re-associates a running/registered
+        # instance (doing so would change its IP and sever the runner).
         run: |
-          aws ec2 associate-address \
-            --allocation-id "$SANDBOX_EIP_ALLOCATION_ID" \
-            --instance-id "$EC2_INSTANCE_ID" \
-            --allow-reassociation >/dev/null
           ip="$(aws ec2 describe-addresses \
             --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
             --query 'Addresses[0].PublicIp' --output text)"
