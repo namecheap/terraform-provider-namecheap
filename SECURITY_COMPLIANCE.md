@@ -179,9 +179,11 @@ below for the reuse/cleanup/EIP mechanics:
   which associates it on every cold launch — that is what gives the instance
   connectivity during its own bootstrap (the fix for the CloudTrail-confirmed
   cold-boot failures) and is also the IP the Namecheap sandbox API allows. The
-  EIP is deliberately left attached to the pool instance across every warm
-  stop/start cycle rather than released per stop, because the action's
-  warm-restart path never re-associates it. **This repository is currently the
+  action does **not** re-associate on a warm restart, and a pooled instance can
+  lose the association while it sits stopped, so `start-runner` re-associates
+  the EIP explicitly (`associate-address --allow-reassociation`) on every start
+  — a no-op reattach after a cold launch, the actual fix after a warm one —
+  rather than trusting it to persist. **This repository is currently the
   sole user of this allocation** — `mcp-server-namecheap`'s Acceptance (EC2)
   workflow is *disabled* pending its own dedicated EIP (#282 /
   `mcp-server-namecheap#16`, both still open), so nothing else associates the
@@ -189,8 +191,8 @@ below for the reuse/cleanup/EIP mechanics:
   yet a permanent architectural per-repo split; re-enabling that workflow
   before it has its own EIP would reintroduce the contention. On that basis
   there is no cross-repo contention to arbitrate and no lock script:
-  `start-runner`'s "Resolve sandbox EIP public IP" step just reads the
-  allocation's public IP and publishes it, and `acceptance_test`'s
+  `start-runner`'s "Associate sandbox EIP and resolve its public IP" step
+  attaches the EIP and publishes its public IP, and `acceptance_test`'s
   credential-free "Verify sandbox EIP" step compares the runner's actual
   public IP against it — refusing to run `make testacc` unless the runner
   really holds the whitelisted IP, which also confirms the association
@@ -214,9 +216,10 @@ below for the reuse/cleanup/EIP mechanics:
     rewriting its user-data on warm restart. Without these, reuse can't work
     at all.
   - **EIP:** `ec2:AssociateAddress` (the action attaches the EIP on cold
-    launch) and `ec2:DescribeAddresses` (the "Resolve sandbox EIP public IP"
-    step). `ec2:DisassociateAddress` is **not** required — the cross-repo EIP
-    reaper that used it was removed with the mutex.
+    launch; `start-runner`'s "Associate sandbox EIP and resolve its public IP"
+    step re-attaches it on every start) and `ec2:DescribeAddresses` (same step,
+    resolving the public IP). `ec2:DisassociateAddress` is **not** required —
+    the cross-repo EIP reaper that used it was removed with the mutex.
   - **Bootstrap diagnostics:** `ec2:GetConsoleOutput` and `ec2:DescribeTags`,
     for the action's fast-fail/console-capture on a failed registration
     (without them, failures degrade to timeout-only detection with no console

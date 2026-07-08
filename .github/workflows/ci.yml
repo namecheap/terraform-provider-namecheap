@@ -480,18 +480,27 @@ jobs:
               { "Key": "Name", "Value": "github_runner" },
               { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
             ]
-      - name: Resolve sandbox EIP public IP
+      - name: Associate sandbox EIP and resolve its public IP
         id: eip-ip
-        # Publish the whitelisted EIP's public IP (resolved from the allocation
-        # itself, the source of truth for "the IP the Namecheap sandbox API
-        # allows") so acceptance_test's credential-free "Verify sandbox EIP"
-        # gate can compare the runner's actual public IP against it. That gate
-        # is what confirms the action actually associated the EIP to this
-        # runner: if association had failed, the runner's public IP would not
-        # match and acceptance would refuse to run. No cross-repo mutex is
-        # needed -- this repo is the sole user of eipalloc-1796f61b (see
-        # SECURITY_COMPLIANCE.md's dedicated-EIP note).
+        # Deterministically put the whitelisted EIP on this run's instance and
+        # publish its public IP for acceptance_test's credential-free "Verify
+        # sandbox EIP" gate. The action associates the EIP itself only on a
+        # COLD launch (via eip-allocation-id, which is what gives the instance
+        # outbound connectivity during its own bootstrap); on a WARM restart it
+        # never re-associates and relies on the EIP still being attached from a
+        # prior run -- but a pooled instance can lose the association while it
+        # sits stopped, which lands the runner on an auto-assigned IP that the
+        # Namecheap sandbox API rejects. Rather than depend on that persistence,
+        # associate here on every start: a no-op reattach on a cold launch, the
+        # actual fix on a warm one. `--allow-reassociation` is safe because this
+        # repo is the sole user of eipalloc-1796f61b (see SECURITY_COMPLIANCE.md).
+        env:
+          EC2_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
         run: |
+          aws ec2 associate-address \
+            --allocation-id "$SANDBOX_EIP_ALLOCATION_ID" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --allow-reassociation >/dev/null
           ip="$(aws ec2 describe-addresses \
             --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
             --query 'Addresses[0].PublicIp' --output text)"
