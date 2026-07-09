@@ -192,30 +192,32 @@ func TestAccMockDomainContactsDrift(t *testing.T) {
 	})
 }
 
-// TestAccMockDomainContactsImport seeds pre-existing contacts (a portfolio
-// domain not yet Terraform-managed) and imports them by domain name.
+// TestAccMockDomainContactsImport creates a domain's contacts, then imports the
+// resource by domain name and verifies every block round-trips through
+// getContacts into Terraform state.
 func TestAccMockDomainContactsImport(t *testing.T) {
 	m := newNamecheapMock(t)
 	const resourceName = "namecheap_domain_contacts.test"
-
-	m.seedContacts(mockContactsDomain, map[string]map[string]string{
-		"Registrant": fullContactWire(),
-		"Tech":       fullContactWire(),
-		"Admin":      fullContactWire(),
-		"AuxBilling": fullContactWire(),
-	})
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { mockPreCheck(t, m) },
 		ProviderFactories: mockProviderFactories(),
 		Steps: []resource.TestStep{
 			{
-				Config:        registrantOnlyConfig(mockContactsDomain, "jane@example.com"),
+				// Establish the contacts first. The import step below deliberately
+				// carries no Config: an import-only step that also supplies a Config
+				// makes the test harness run a fresh `init`, which OpenTofu resolves
+				// against its registry and fails for this in-process provider.
+				// Applying first, then importing with no Config, mirrors the other
+				// import tests and passes on both Terraform and OpenTofu.
+				Config: registrantOnlyConfig(mockContactsDomain, "jane@example.com"),
+			},
+			{
 				ResourceName:  resourceName,
 				ImportState:   true,
 				ImportStateId: mockContactsDomain,
-				// Verify the imported Terraform state was seeded from getContacts:
-				// the registrant and every optional block are populated.
+				// Verify getContacts populated the registrant and every optional
+				// block (the optional blocks default to the registrant on create).
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 imported state, got %d", len(states))
@@ -238,21 +240,4 @@ func TestAccMockDomainContactsImport(t *testing.T) {
 			},
 		},
 	})
-}
-
-// fullContactWire is the wire (Namecheap field name) form of a complete contact,
-// used to seed the mock for import tests.
-func fullContactWire() map[string]string {
-	return map[string]string{
-		"FirstName":        "Jane",
-		"LastName":         "Doe",
-		"Address1":         "1 Main St",
-		"City":             "Lisbon",
-		"StateProvince":    "Lisboa",
-		"PostalCode":       "1000-001",
-		"Country":          "PT",
-		"Phone":            "+351.123456789",
-		"EmailAddress":     "jane@example.com",
-		"OrganizationName": "Example Corp",
-	}
 }

@@ -397,12 +397,3 @@ func renderGetContactsXML(domain string, st *mockDomainState) string {
   </CommandResponse>
 </ApiResponse>`, domain, strings.Join(blocks, "\n      "))
 }
-
-// seedContacts sets the initial contact state for a domain, simulating contacts
-// that already exist before Terraform manages them (used by the import path).
-func (m *namecheapMock) seedContacts(domain string, contacts map[string]map[string]string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	st := m.stateFor(domain)
-	st.contacts = contacts
-}
