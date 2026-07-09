@@ -9,14 +9,17 @@ import (
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 )
 
-// dataSourceNamecheapDomain exposes read-only information about a single domain
-// via the namecheap.domains.getInfo API command.
+// dataSourceNamecheapDomain exposes read-only information about a single domain.
 //
-// getInfo returns DNS-oriented information (provider type, nameservers, premium
-// flags). It does NOT return the domain lifecycle fields (created/expires/
-// is_expired/is_locked/auto_renew/whois_guard); those are only available through
-// the account portfolio listing, so they are exposed by the namecheap_domains
-// data source rather than fabricated here.
+// It combines two API commands so the exported attributes match the issue's
+// contract in full:
+//   - namecheap.domains.getInfo supplies the DNS-oriented fields (provider type,
+//     nameservers, premium flags);
+//   - namecheap.domains.getList supplies the domain lifecycle fields
+//     (created/expires/is_expired/is_locked/auto_renew/whois_guard), which
+//     getInfo does not return.
+//
+// The two-call cost is documented on the registry page.
 func dataSourceNamecheapDomain() *schema.Resource {
 	return &schema.Resource{
 		ReadContext: dataSourceNamecheapDomainRead,
@@ -53,6 +56,41 @@ func dataSourceNamecheapDomain() *schema.Resource {
 				Elem:        &schema.Schema{Type: schema.TypeString},
 				Description: "The nameservers currently configured for the domain.",
 			},
+			"created": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Registration date as an RFC3339 timestamp (UTC).",
+			},
+			"expires": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "Expiration date as an RFC3339 timestamp (UTC).",
+			},
+			"expires_in_days": {
+				Type:        schema.TypeInt,
+				Computed:    true,
+				Description: "Whole calendar days until the domain expires (negative if already expired).",
+			},
+			"is_expired": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Whether the domain has expired.",
+			},
+			"is_locked": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Whether the registrar lock is enabled.",
+			},
+			"auto_renew": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Whether auto-renew is enabled.",
+			},
+			"whois_guard": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "WhoisGuard status (e.g. ENABLED, DISABLED, NOTPRESENT).",
+			},
 		},
 	}
 }
@@ -88,6 +126,15 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 		if info.DnsDetails.Nameservers != nil {
 			_ = data.Set("nameservers", *info.DnsDetails.Nameservers)
 		}
+	}
+
+	// getInfo does not carry the domain lifecycle fields (created/expires/
+	// is_expired/is_locked/auto_renew/whois_guard). Fetch them from the account
+	// portfolio listing, which does. getInfo above has already confirmed the
+	// domain exists, so a portfolio miss leaves the lifecycle fields at their
+	// zero values rather than failing the whole lookup.
+	if diags := setDomainLifecycleFromList(ctx, client, data, domain); diags != nil {
+		return diags
 	}
 
 	data.SetId(domain)

@@ -1,13 +1,61 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 )
+
+// domainLifecycleAttrs are the attributes exported by the namecheap_domain data
+// source that originate from the portfolio listing (namecheap.domains.getList)
+// rather than from getInfo. They are a subset of domainPortfolioElemSchema so
+// the single-domain and portfolio shapes stay consistent.
+var domainLifecycleAttrs = []string{
+	"created", "expires", "expires_in_days",
+	"is_expired", "is_locked", "auto_renew", "whois_guard",
+}
+
+// setDomainLifecycleFromList fetches domain from the account portfolio listing
+// and copies the lifecycle attributes (see domainLifecycleAttrs) onto data.
+//
+// getList's SearchTerm is a substring keyword filter, not an exact lookup, so
+// the exact domain is matched client-side (case-insensitively) among the
+// returned rows. A transport/API error is surfaced (named with the domain); a
+// clean response that simply does not contain the domain is treated as "no
+// lifecycle data available" and leaves the fields at their zero values, because
+// the caller has already confirmed the domain exists via getInfo.
+func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, data *schema.ResourceData, domain string) diag.Diagnostics {
+	resp, err := client.Domains.GetListWithContext(ctx, &namecheap.DomainsGetListArgs{
+		SearchTerm: namecheap.String(domain),
+		Page:       namecheap.Int(1),
+		PageSize:   namecheap.Int(domainsPageSize),
+	})
+	if err != nil {
+		return dataSourceDomainReadError(domain, err)
+	}
+	if resp == nil || resp.Domains == nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	for i := range *resp.Domains {
+		d := &(*resp.Domains)[i]
+		if d.Name == nil || !strings.EqualFold(*d.Name, domain) {
+			continue
+		}
+		flat := flattenPortfolioDomain(d, now)
+		for _, attr := range domainLifecycleAttrs {
+			_ = data.Set(attr, flat[attr])
+		}
+		break
+	}
+	return nil
+}
 
 // dataSourceDomainReadError converts an SDK error from a domain-scoped read into
 // diagnostics that name the domain. It reuses diagFromClientError so that known
