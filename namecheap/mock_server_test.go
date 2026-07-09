@@ -30,6 +30,11 @@ type mockDomainState struct {
 	// the namecheap.domains.ns.* commands, which are independent of the custom
 	// nameserver assignment tracked by `nameservers`.
 	personalNS map[string]string
+	// contacts holds the four WHOIS contact blocks keyed by role prefix
+	// ("Registrant", "Tech", "Admin", "AuxBilling"); each inner map is
+	// fieldName -> value (e.g. "FirstName" -> "Jane"). nil until setContacts
+	// is called.
+	contacts map[string]map[string]string
 }
 
 // namecheapMock is a minimal STATEFUL mock of the Namecheap DNS API, sufficient
@@ -121,6 +126,11 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 
 	command := r.FormValue("Command")
 	domain := r.FormValue("SLD") + "." + r.FormValue("TLD")
+	// The contacts commands identify the domain with a single DomainName
+	// parameter rather than the split SLD/TLD the DNS commands use.
+	if dn := r.FormValue("DomainName"); dn != "" {
+		domain = dn
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -180,6 +190,11 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 		ns := r.FormValue("Nameserver")
 		delete(st.personalNS, ns)
 		resp = renderResultXML("DomainNSDeleteResult", domain, fmt.Sprintf(`Nameserver="%s" IsSuccess="true"`, ns))
+	case "namecheap.domains.getContacts":
+		resp = renderGetContactsXML(domain, st)
+	case "namecheap.domains.setContacts":
+		st.contacts = parseSetContactsRequest(r)
+		resp = renderResultXML("DomainSetContactResult", domain, `IsSuccess="true"`)
 	default:
 		resp = apiErrorXML("1010101", "mock: unsupported command "+command)
 	}
@@ -325,4 +340,69 @@ func renderResultXML(element, domain, statusAttr string) string {
     <%s Domain="%s" %s />
   </CommandResponse>
 </ApiResponse>`, element, domain, statusAttr)
+}
+
+// mockContactBlocks are the four WHOIS contact roles, using the request/response
+// element prefixes the Namecheap contacts API uses.
+var mockContactBlocks = []string{"Registrant", "Tech", "Admin", "AuxBilling"}
+
+// mockContactFieldSuffixes are the ContactInfo field names as they appear both
+// as setContacts request suffixes (e.g. "RegistrantFirstName") and getContacts
+// response child elements.
+var mockContactFieldSuffixes = []string{
+	"FirstName", "LastName", "Address1", "City", "StateProvince", "PostalCode",
+	"Country", "Phone", "EmailAddress", "OrganizationName", "JobTitle", "Address2",
+}
+
+// parseSetContactsRequest extracts the flattened <Prefix><Field> parameters the
+// SDK sends for setContacts into a role -> field -> value map, keeping only
+// non-empty values (the SDK omits unset optional fields).
+func parseSetContactsRequest(r *http.Request) map[string]map[string]string {
+	contacts := map[string]map[string]string{}
+	for _, prefix := range mockContactBlocks {
+		block := map[string]string{}
+		for _, suffix := range mockContactFieldSuffixes {
+			if v := r.FormValue(prefix + suffix); v != "" {
+				block[suffix] = v
+			}
+		}
+		if len(block) > 0 {
+			contacts[prefix] = block
+		}
+	}
+	return contacts
+}
+
+// renderGetContactsXML renders a getContacts response from the persisted contact
+// state, emitting one element per role with its non-empty fields.
+func renderGetContactsXML(domain string, st *mockDomainState) string {
+	var blocks []string
+	for _, prefix := range mockContactBlocks {
+		fields := st.contacts[prefix]
+		var children []string
+		for _, suffix := range mockContactFieldSuffixes {
+			if v, ok := fields[suffix]; ok && v != "" {
+				children = append(children, fmt.Sprintf("<%s>%s</%s>", suffix, mockXMLAttrEscaper.Replace(v), suffix))
+			}
+		}
+		blocks = append(blocks, fmt.Sprintf("<%s>%s</%s>", prefix, strings.Join(children, ""), prefix))
+	}
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse>
+    <DomainContactsResult Domain="%s" domainnameid="12345" Readonly="false">
+      %s
+    </DomainContactsResult>
+  </CommandResponse>
+</ApiResponse>`, domain, strings.Join(blocks, "\n      "))
+}
+
+// seedContacts sets the initial contact state for a domain, simulating contacts
+// that already exist before Terraform manages them (used by the import path).
+func (m *namecheapMock) seedContacts(domain string, contacts map[string]map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.stateFor(domain)
+	st.contacts = contacts
 }
