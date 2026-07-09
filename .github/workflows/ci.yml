@@ -328,14 +328,16 @@ jobs:
   acceptance_mock:
     # Fork-safe, credential-free acceptance tests against the in-process stateful
     # mock (namecheap/mock_server_test.go). Runs on GitHub-hosted ubuntu-latest
-    # for EVERY pull request — including forks — and uses NO secrets, unlike the
-    # push-only EC2 sandbox pipeline below. A terraform + OpenTofu version matrix
-    # guards against engine/version-specific plan or state regressions. This job
-    # is additive (not a required status check); it complements, and never
-    # replaces, the live sandbox suite.
+    # with NO secrets, and a terraform + OpenTofu version matrix that guards
+    # against engine/version-specific plan or state regressions.
+    #
+    # This is the FALLBACK path for pull requests that cannot reach the live
+    # sandbox suite below: fork PRs (secrets are redacted for them) and Dependabot
+    # PRs (same). Same-repo, non-Dependabot PRs run the live sandbox suite
+    # instead, so the two never both run on one PR.
     name: Mock acceptance (${{ matrix.engine }} ${{ matrix.version }})
     needs: [check]
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -395,14 +397,18 @@ jobs:
   start-runner:
     name: Start self-hosted EC2 runner
     needs: [check, security, govulncheck]
-    # push-only: this pipeline needs secrets.* (AWS creds, whitelisted EIP,
-    # NAMECHEAP_API_KEY) and runs untrusted-if-forked code on the self-hosted
-    # runner, so it must never run on pull_request events — fork PRs get a
-    # read-only token with secrets redacted and would fail at "Configure AWS
-    # credentials" anyway, and pull_request_target is deliberately not used. It
-    # keeps running on every push (internal branches), unchanged. Dependabot is
-    # also excluded (its runs have no secrets either).
-    if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
+    # The live-API sandbox pipeline needs secrets.* (AWS creds, whitelisted EIP,
+    # NAMECHEAP_API_KEY), so it only runs where secrets are available AND the code
+    # is trusted:
+    #   * same-repo pull requests (head repo == this repo) — this is what makes
+    #     the real acceptance suite run on EVERY maintainer PR; and
+    #   * pushes to master (the post-merge run).
+    # It must NEVER run for fork PRs (secrets are redacted; pull_request_target is
+    # deliberately not used) — those are served by acceptance_mock instead — nor
+    # for Dependabot (no secrets). Gating pushes to master (not every branch)
+    # means a same-repo PR gets exactly one live run (from its pull_request
+    # event), never a duplicate from the branch push.
+    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -545,9 +551,10 @@ jobs:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: start-runner
-    # push-only, mirroring start-runner (this is the live-API sandbox run on the
-    # self-hosted EC2 runner). Fork PRs are served by acceptance_mock instead.
-    if: ${{ github.event_name == 'push' && github.actor != 'dependabot[bot]' }}
+    # Same gate as start-runner (the live-API sandbox run on the self-hosted EC2
+    # runner): same-repo PRs + pushes to master, never forks/Dependabot. Fork and
+    # Dependabot PRs are served by acceptance_mock instead.
+    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
     steps:
       # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
       # Runs before our own scripts exist on disk, so it — not a custom
@@ -716,12 +723,11 @@ jobs:
       - start-runner
       - acceptance_test
     runs-on: ubuntu-latest
-    # push-only (explicit), and only if a runner was actually started. The
-    # instance-id guard alone already makes this safe on PR events (start-runner
-    # is skipped there, so the output is empty), but stating the push condition
-    # keeps the "sandbox pipeline never runs on pull_request" invariant robust
-    # against future refactors of how that output is produced.
-    if: ${{ always() && github.event_name == 'push' && needs.start-runner.outputs.ec2-instance-id != '' }}
+    # Runs whenever a runner was actually started, regardless of the triggering
+    # event. The instance-id guard is the real safety condition: it is non-empty
+    # only when start-runner ran (same-repo PR or push to master), so this
+    # correctly tears the runner down for both those cases and no-ops otherwise.
+    if: ${{ always() && needs.start-runner.outputs.ec2-instance-id != '' }}
     steps:
       - name: Generate GitHub App token
         id: app-token

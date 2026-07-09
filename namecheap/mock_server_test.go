@@ -25,6 +25,11 @@ type mockDomainState struct {
 	hosts       []hostEntry
 	emailType   string
 	nameservers []string
+	// personalNS holds registered personal (glue/vanity) nameservers for the
+	// domain, keyed by nameserver host with its glue IP as the value. It backs
+	// the namecheap.domains.ns.* commands, which are independent of the custom
+	// nameserver assignment tracked by `nameservers`.
+	personalNS map[string]string
 }
 
 // namecheapMock is a minimal STATEFUL mock of the Namecheap DNS API, sufficient
@@ -147,6 +152,34 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 	case "namecheap.domains.dns.setDefault":
 		st.nameservers = nil
 		resp = renderResultXML("DomainDNSSetDefaultResult", domain, `Updated="true"`)
+	case "namecheap.domains.ns.create":
+		ns := r.FormValue("Nameserver")
+		ip := r.FormValue("IP")
+		if st.personalNS == nil {
+			st.personalNS = map[string]string{}
+		}
+		st.personalNS[ns] = ip
+		resp = renderResultXML("DomainNSCreateResult", domain, fmt.Sprintf(`Nameserver="%s" IP="%s" IsSuccess="true"`, ns, ip))
+	case "namecheap.domains.ns.getInfo":
+		ns := r.FormValue("Nameserver")
+		ip, ok := st.personalNS[ns]
+		if !ok {
+			resp = apiErrorXML("5013160", "Nameserver not found")
+			break
+		}
+		resp = renderNSInfoXML(domain, ns, ip)
+	case "namecheap.domains.ns.update":
+		ns := r.FormValue("Nameserver")
+		ip := r.FormValue("IP")
+		if st.personalNS == nil {
+			st.personalNS = map[string]string{}
+		}
+		st.personalNS[ns] = ip
+		resp = renderResultXML("DomainNSUpdateResult", domain, fmt.Sprintf(`Nameserver="%s" IsSuccess="true"`, ns))
+	case "namecheap.domains.ns.delete":
+		ns := r.FormValue("Nameserver")
+		delete(st.personalNS, ns)
+		resp = renderResultXML("DomainNSDeleteResult", domain, fmt.Sprintf(`Nameserver="%s" IsSuccess="true"`, ns))
 	default:
 		resp = apiErrorXML("1010101", "mock: unsupported command "+command)
 	}
@@ -260,6 +293,25 @@ func renderGetListXML(domain string, st *mockDomainState) string {
     </DomainDNSGetListResult>
   </CommandResponse>
 </ApiResponse>`, domain, usingStr, strings.Join(lines, "\n      "))
+}
+
+// renderNSInfoXML renders a domains.ns.getInfo success response for a
+// registered personal nameserver, including its glue IP and a couple of
+// representative statuses (which the provider does not consume but the SDK
+// decodes).
+func renderNSInfoXML(domain, nameserver, ip string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse>
+    <DomainNSInfoResult Domain="%s" Nameserver="%s" IP="%s">
+      <NameserverStatuses>
+        <Status>OK</Status>
+        <Status>Linked</Status>
+      </NameserverStatuses>
+    </DomainNSInfoResult>
+  </CommandResponse>
+</ApiResponse>`, domain, nameserver, ip)
 }
 
 // renderResultXML renders a generic success CommandResponse for write commands
