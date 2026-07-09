@@ -16,13 +16,13 @@ import (
 // an unambiguous separator for both composition and import parsing.
 const nameserverIDSeparator = "/"
 
-// resourceNamecheapNameserver manages a personal (glue/vanity) nameserver such
-// as ns1.example.com registered against a domain on the account via the
-// namecheap.domains.ns.* API family. This is distinct from assigning custom
-// nameservers to a domain (namecheap_domain_records' nameservers argument, which
-// calls domains.dns.setCustom): this resource registers the nameserver host and
-// its glue IP so it can itself be used as a nameserver.
-func resourceNamecheapNameserver() *schema.Resource {
+// resourceNamecheapPersonalNameserver manages a personal (glue/vanity)
+// nameserver such as ns1.example.com registered against a domain on the account
+// via the namecheap.domains.ns.* API family. This is distinct from assigning
+// custom nameservers to a domain (namecheap_domain_records' nameservers
+// argument, which calls domains.dns.setCustom): this resource registers the
+// nameserver host and its glue IP so it can itself be used as a nameserver.
+func resourceNamecheapPersonalNameserver() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resourceNameserverCreate,
 		ReadContext:   resourceNameserverRead,

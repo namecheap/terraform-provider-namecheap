@@ -103,7 +103,7 @@ func nsDeleteSuccessXML(domain, nameserver string) string {
 
 func nsTestData(t *testing.T, domain, nameserver, ip string) *schema.ResourceData {
 	t.Helper()
-	return schema.TestResourceDataRaw(t, resourceNamecheapNameserver().Schema, map[string]interface{}{
+	return schema.TestResourceDataRaw(t, resourceNamecheapPersonalNameserver().Schema, map[string]interface{}{
 		"domain":     domain,
 		"nameserver": nameserver,
 		"ip":         ip,
@@ -231,7 +231,7 @@ func TestResourceNameserverDelete(t *testing.T) {
 
 func TestResourceNameserverImport(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
-		d := schema.TestResourceDataRaw(t, resourceNamecheapNameserver().Schema, map[string]interface{}{})
+		d := schema.TestResourceDataRaw(t, resourceNamecheapPersonalNameserver().Schema, map[string]interface{}{})
 		d.SetId("Example.com/NS1.example.com")
 
 		res, err := resourceNameserverImport(context.Background(), d, nil)
@@ -245,7 +245,7 @@ func TestResourceNameserverImport(t *testing.T) {
 	invalidIDs := []string{"", "no-separator", "example.com/", "/ns1.example.com"}
 	for _, id := range invalidIDs {
 		t.Run(fmt.Sprintf("invalid_%q", id), func(t *testing.T) {
-			d := schema.TestResourceDataRaw(t, resourceNamecheapNameserver().Schema, map[string]interface{}{})
+			d := schema.TestResourceDataRaw(t, resourceNamecheapPersonalNameserver().Schema, map[string]interface{}{})
 			d.SetId(id)
 
 			_, err := resourceNameserverImport(context.Background(), d, nil)

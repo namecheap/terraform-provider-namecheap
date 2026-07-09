@@ -45,13 +45,13 @@ func mockCheckNameserverAbsent(m *namecheapMock, domain, nameserver string) reso
 }
 
 // TestAccMockNameserverLifecycle drives a full create -> update (IP change) ->
-// import -> destroy lifecycle for namecheap_nameserver against the stateful
-// mock, asserting both Terraform state and the mock backend at each step.
+// import -> destroy lifecycle for namecheap_personal_nameserver against the
+// stateful mock, asserting both Terraform state and the mock backend at each step.
 func TestAccMockNameserverLifecycle(t *testing.T) {
 	m := newNamecheapMock(t)
 	const domain = "mock-example.com"
 	const nameserver = "ns1.mock-example.com"
-	const resourceName = "namecheap_nameserver.test"
+	const resourceName = "namecheap_personal_nameserver.test"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { mockPreCheck(t, m) },
@@ -60,7 +60,7 @@ func TestAccMockNameserverLifecycle(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
-resource "namecheap_nameserver" "test" {
+resource "namecheap_personal_nameserver" "test" {
   domain     = "%s"
   nameserver = "%s"
   ip         = "1.2.3.4"
@@ -74,7 +74,7 @@ resource "namecheap_nameserver" "test" {
 			},
 			{
 				Config: fmt.Sprintf(`
-resource "namecheap_nameserver" "test" {
+resource "namecheap_personal_nameserver" "test" {
   domain     = "%s"
   nameserver = "%s"
   ip         = "5.6.7.8"
