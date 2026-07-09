@@ -2,12 +2,27 @@ package namecheap_provider
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 )
+
+// domainGoneErrorCodes are the Namecheap API error numbers that mean the domain
+// is no longer readable through this account: 2019166 "Domain not found" and
+// 2016166 "Domain is not associated with your account". The SDK surfaces these
+// as a returned *namecheap.APIError (not a nil result), so Read matches them to
+// drop the resource from state rather than failing every refresh.
+var domainGoneErrorCodes = map[int]bool{2019166: true, 2016166: true}
+
+// isDomainGoneError reports whether err is one of the "domain no longer in this
+// account" API errors (see domainGoneErrorCodes).
+func isDomainGoneError(err error) bool {
+	var apiErr *namecheap.APIError
+	return errors.As(err, &apiErr) && domainGoneErrorCodes[apiErr.Number]
+}
 
 // resourceNamecheapDomainContacts manages a domain's WHOIS contact information
 // (the Registrant, Tech, Admin and AuxBilling blocks) via the Namecheap
@@ -41,9 +56,14 @@ func resourceNamecheapDomainContacts() *schema.Resource {
 
 		Importer: &schema.ResourceImporter{
 			StateContext: func(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-				if err := data.Set("domain", strings.ToLower(data.Id())); err != nil {
+				domain := strings.ToLower(data.Id())
+				if err := data.Set("domain", domain); err != nil {
 					return nil, err
 				}
+				// Normalize the ID too, so importing "EXAMPLE.COM" does not leave
+				// an uppercase ID that silently flips on the first update (which
+				// sets a lowercased ID).
+				data.SetId(domain)
 				return []*schema.ResourceData{data}, nil
 			},
 		},
@@ -116,8 +136,16 @@ func setDomainContacts(ctx context.Context, data *schema.ResourceData, meta inte
 		AuxBilling: contactOrDefault(data.Get("aux_billing"), registrant),
 	}
 
-	if _, err := client.Domains.SetContactsWithContext(ctx, args); err != nil {
+	resp, err := client.Domains.SetContactsWithContext(ctx, args)
+	if err != nil {
 		return diagFromClientError(err)
+	}
+	// Guard against a Status=OK response that nonetheless reports the update did
+	// not take effect, so the provider does not claim success and write state
+	// for contacts the API rejected.
+	if resp != nil && resp.DomainSetContactResult != nil &&
+		resp.DomainSetContactResult.IsSuccess != nil && !*resp.DomainSetContactResult.IsSuccess {
+		return diag.Errorf("Namecheap reported the contact update for %q was not successful (setContacts returned IsSuccess=false)", domain)
 	}
 
 	data.SetId(domain)
@@ -131,13 +159,21 @@ func resourceContactsRead(ctx context.Context, data *schema.ResourceData, meta i
 
 	resp, err := client.Domains.GetContactsWithContext(ctx, domain)
 	if err != nil {
+		// A domain removed from the account is reported by the API as a
+		// Status=ERROR ("Domain not found" / "not associated"), which the SDK
+		// surfaces as an *namecheap.APIError. Treat it as gone and drop the
+		// resource from state so Terraform plans a recreate rather than failing
+		// every refresh; any other error is real.
+		if isDomainGoneError(err) {
+			data.SetId("")
+			return nil
+		}
 		return diagFromClientError(err)
 	}
 
 	if resp == nil || resp.DomainContactsResult == nil {
-		// The domain is no longer present in the account (or was removed
-		// out-of-band): drop the resource from state so Terraform plans a
-		// recreate rather than erroring on every refresh.
+		// Defensive: a Status=OK response carrying no result also means the
+		// domain's contacts are unavailable; drop from state as above.
 		data.SetId("")
 		return nil
 	}

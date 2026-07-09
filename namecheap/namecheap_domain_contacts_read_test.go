@@ -137,15 +137,36 @@ func TestResourceContactsRead_NotFound(t *testing.T) {
 	assert.Empty(t, d.Id(), "a domain absent from the account should be dropped from state")
 }
 
+// TestResourceContactsRead_DomainGone: the API reports a removed domain as a
+// Status=ERROR ("Domain not found", 2019166), which the SDK returns as an error.
+// Read must treat it as gone (clear the ID) rather than failing the refresh.
+func TestResourceContactsRead_DomainGone(t *testing.T) {
+	for _, code := range []string{"2019166", "2016166"} {
+		t.Run(code, func(t *testing.T) {
+			url := contactsTestServer(t, func(string) string { return apiErrorXML(code, "gone") })
+			client := newTestClient(url)
+
+			d := schema.TestResourceDataRaw(t, resourceNamecheapDomainContacts().Schema, map[string]interface{}{"domain": "example.com"})
+			d.SetId("example.com")
+			diags := resourceContactsRead(context.Background(), d, client)
+
+			require.False(t, diags.HasError(), "a domain-gone error must not fail the refresh; got %+v", diags)
+			assert.Empty(t, d.Id(), "a removed domain should be dropped from state")
+		})
+	}
+}
+
+// TestResourceContactsRead_Error: a non-"gone" API error is still surfaced.
 func TestResourceContactsRead_Error(t *testing.T) {
-	url := contactsTestServer(t, func(string) string { return apiErrorXML("2019166", "Domain not found") })
+	url := contactsTestServer(t, func(string) string { return apiErrorXML("4022336", "internal error") })
 	client := newTestClient(url)
 
 	d := schema.TestResourceDataRaw(t, resourceNamecheapDomainContacts().Schema, map[string]interface{}{"domain": "example.com"})
 	d.SetId("example.com")
 	diags := resourceContactsRead(context.Background(), d, client)
 
-	assert.True(t, diags.HasError(), "a getContacts API error should surface")
+	assert.True(t, diags.HasError(), "a non-not-found getContacts API error should surface")
+	assert.Equal(t, "example.com", d.Id(), "state must be left intact on a hard error")
 }
 
 func TestResourceContactsCreate_Success(t *testing.T) {

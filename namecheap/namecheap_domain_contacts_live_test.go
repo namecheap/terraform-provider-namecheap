@@ -3,10 +3,12 @@ package namecheap_provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 )
 
 // TestAccNamecheapDomainContacts is a live-sandbox acceptance test for the
@@ -15,7 +17,14 @@ import (
 // credentials / NAMECHEAP_TEST_DOMAIN are absent, so it never touches the real
 // API in CI without explicit opt-in. It exercises the setContacts + getContacts
 // round-trip on the configured test domain.
+//
+// Because destroy is state-only (the API cannot delete contacts) the test would
+// otherwise permanently overwrite the shared sandbox domain's real WHOIS
+// contacts. To avoid that it captures the domain's current contacts up front and
+// restores them in a t.Cleanup that runs after the test's own destroy.
 func TestAccNamecheapDomainContacts(t *testing.T) {
+	captureAndRestoreContacts(t)
+
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
 		ProviderFactories: testAccProviderFactories,
@@ -54,6 +63,52 @@ func TestAccNamecheapDomainContacts(t *testing.T) {
 			},
 		},
 	})
+}
+
+// captureAndRestoreContacts snapshots the test domain's current WHOIS contacts
+// and registers a t.Cleanup that writes them back, so a live run leaves the
+// shared sandbox domain's contact data as it found it. It is a no-op unless the
+// acceptance environment is fully configured (the test itself skips in that
+// case, via testAccPreCheck).
+func captureAndRestoreContacts(t *testing.T) {
+	t.Helper()
+	if os.Getenv("TF_ACC") == "" || os.Getenv("NAMECHEAP_API_KEY") == "" || *testAccDomain == "" {
+		return
+	}
+
+	original, err := namecheapSDKClient.Domains.GetContactsWithContext(context.Background(), *testAccDomain)
+	if err != nil {
+		t.Fatalf("failed to capture existing contacts for %q before the test: %v", *testAccDomain, err)
+	}
+	if original == nil || original.DomainContactsResult == nil || original.DomainContactsResult.Registrant == nil {
+		t.Logf("no existing registrant captured for %q; skipping restore", *testAccDomain)
+		return
+	}
+
+	orig := original.DomainContactsResult
+	registrant := *orig.Registrant
+	t.Cleanup(func() {
+		_, err := namecheapSDKClient.Domains.SetContactsWithContext(context.Background(), &namecheap.DomainsSetContactsArgs{
+			DomainName: *testAccDomain,
+			Registrant: registrant,
+			Tech:       contactOrRegistrant(orig.Tech, registrant),
+			Admin:      contactOrRegistrant(orig.Admin, registrant),
+			AuxBilling: contactOrRegistrant(orig.AuxBilling, registrant),
+		})
+		if err != nil {
+			t.Errorf("failed to restore original contacts for %q: %v", *testAccDomain, err)
+		}
+	})
+}
+
+// contactOrRegistrant returns *c when set, otherwise the registrant fallback —
+// mirroring the resource's default-to-registrant rule when rebuilding the
+// restore payload (setContacts requires all four blocks).
+func contactOrRegistrant(c *namecheap.ContactInfo, registrant namecheap.ContactInfo) namecheap.ContactInfo {
+	if c != nil {
+		return *c
+	}
+	return registrant
 }
 
 // testAccDomainContactsAPIRegistrant fetches the domain's contacts through the

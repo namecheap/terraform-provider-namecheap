@@ -161,17 +161,40 @@ func customizeContactsDiff(_ context.Context, diff *schema.ResourceDiff, _ inter
 		return nil
 	}
 
+	// The registrant (or one of its fields) may be interpolated from another
+	// resource and not yet known at plan time. When it is unknown, the optional
+	// blocks that default to it must stay computed rather than being planned
+	// with the current (partial/empty) registrant values — otherwise apply-time
+	// re-evaluation yields different values and Terraform fails with "Provider
+	// produced inconsistent final plan".
+	registrantKnown := diff.NewValueKnown("registrant")
 	registrant := diff.Get("registrant")
-	if contactIsEmpty(registrant) {
-		// Registrant not yet known (e.g. interpolated from another resource):
-		// nothing to default from at this stage.
+	if registrantKnown && contactIsEmpty(registrant) {
+		// Registrant is known and empty: nothing to default from at this stage.
 		return nil
 	}
 
 	for _, block := range []string{"tech", "admin", "aux_billing"} {
 		cfg := rawConfig.GetAttr(block)
+		// A block whose config value is unknown (e.g. a dynamic block driven by
+		// an unknown for_each) cannot be measured or defaulted yet. Guard
+		// LengthInt, which panics on an unknown cty value, and leave it computed.
+		if !cfg.IsKnown() {
+			if err := diff.SetNewComputed(block); err != nil {
+				return err
+			}
+			continue
+		}
 		if !cfg.IsNull() && cfg.LengthInt() > 0 {
 			// User set the block explicitly; leave it untouched.
+			continue
+		}
+		if !registrantKnown {
+			// Defaults to the registrant, whose values are not known yet: keep
+			// the block computed instead of baking in empty strings.
+			if err := diff.SetNewComputed(block); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := diff.SetNew(block, registrant); err != nil {
