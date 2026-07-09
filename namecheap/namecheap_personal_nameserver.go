@@ -2,6 +2,7 @@ package namecheap_provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,20 @@ import (
 // ID. Neither a domain nor a nameserver hostname may contain a slash, so it is
 // an unambiguous separator for both composition and import parsing.
 const nameserverIDSeparator = "/"
+
+// nameserverNotFoundErrorCode is the Namecheap API error number returned by
+// domains.ns.getInfo and domains.ns.delete when the personal nameserver does not
+// exist. Namecheap signals a missing nameserver as a Status=ERROR response (not
+// an empty Status=OK body), which the SDK surfaces as a non-nil *namecheap.APIError.
+const nameserverNotFoundErrorCode = 5013160
+
+// isNameserverNotFoundError reports whether err is the Namecheap
+// "Nameserver not found" API error (code 5013160). The provider treats that as
+// "the resource no longer exists" rather than a hard failure.
+func isNameserverNotFoundError(err error) bool {
+	var apiErr *namecheap.APIError
+	return errors.As(err, &apiErr) && apiErr.Number == nameserverNotFoundErrorCode
+}
 
 // resourceNamecheapPersonalNameserver manages a personal (glue/vanity)
 // nameserver such as ns1.example.com registered against a domain on the account
@@ -107,11 +122,19 @@ func resourceNameserverRead(ctx context.Context, data *schema.ResourceData, meta
 
 	resp, err := client.DomainsNS.GetInfoWithContext(ctx, sld, tld, nameserver)
 	if err != nil {
+		// A nameserver deleted out-of-band is reported by the API as a
+		// Status=ERROR "Nameserver not found" (code 5013160). Treat it as gone
+		// and drop it from state so Terraform plans a recreate instead of
+		// failing the refresh with a hard diagnostic.
+		if isNameserverNotFoundError(err) {
+			data.SetId("")
+			return nil
+		}
 		return diagFromClientError(err)
 	}
 
-	// A nil result means the nameserver is no longer registered; drop it from
-	// state so Terraform plans a recreate instead of erroring.
+	// Defensive: a Status=OK response carrying no result element also means the
+	// nameserver is no longer registered; drop it from state as above.
 	if resp == nil || resp.DomainNameserverInfoResult == nil {
 		data.SetId("")
 		return nil
@@ -169,6 +192,12 @@ func resourceNameserverDelete(ctx context.Context, data *schema.ResourceData, me
 	}
 
 	if _, err := client.DomainsNS.DeleteWithContext(ctx, sld, tld, nameserver); err != nil {
+		// Deleting an already-absent nameserver is a no-op success, so a
+		// "Nameserver not found" (5013160) is swallowed to keep destroy
+		// idempotent (e.g. when it was removed out-of-band before this run).
+		if isNameserverNotFoundError(err) {
+			return nil
+		}
 		return diagFromClientError(err)
 	}
 

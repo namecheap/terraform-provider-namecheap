@@ -178,7 +178,27 @@ func TestResourceNameserverRead(t *testing.T) {
 	assert.Equal(t, "example.com/ns1.example.com", d.Id())
 }
 
+// TestResourceNameserverReadNotFound covers the real not-found path: the API
+// reports a missing nameserver as a Status=ERROR "Nameserver not found" (5013160)
+// — the same shape the stateful mock returns — which the SDK surfaces as an
+// error. Read must treat it as "gone" (clear the ID) rather than failing.
 func TestResourceNameserverReadNotFound(t *testing.T) {
+	m := newNSMockServer(t, func(_ string, _ url.Values) string {
+		return apiErrorXML("5013160", "Nameserver not found")
+	})
+	client := newTestClient(m.server.URL)
+
+	d := nsTestData(t, "example.com", "ns1.example.com", "1.2.3.4")
+	d.SetId("example.com/ns1.example.com")
+	diags := resourceNameserverRead(context.Background(), d, client)
+
+	assert.False(t, diags.HasError(), "a not-found nameserver must not error; got %v", diags)
+	assert.Empty(t, d.Id(), "a missing nameserver should be removed from state")
+}
+
+// TestResourceNameserverReadEmptyResult covers the defensive path: a Status=OK
+// response with no result element is also treated as "gone".
+func TestResourceNameserverReadEmptyResult(t *testing.T) {
 	m := newNSMockServer(t, func(_ string, _ url.Values) string {
 		return nsGetInfoEmptyXML()
 	})
@@ -189,7 +209,23 @@ func TestResourceNameserverReadNotFound(t *testing.T) {
 	diags := resourceNameserverRead(context.Background(), d, client)
 
 	assert.False(t, diags.HasError(), "unexpected diags: %v", diags)
-	assert.Empty(t, d.Id(), "a missing nameserver should be removed from state")
+	assert.Empty(t, d.Id(), "an empty result should be removed from state")
+}
+
+// TestResourceNameserverReadAPIError asserts that a non-not-found API error is
+// still surfaced as a hard diagnostic (Read only swallows 5013160).
+func TestResourceNameserverReadAPIError(t *testing.T) {
+	m := newNSMockServer(t, func(_ string, _ url.Values) string {
+		return apiErrorXML("2019166", "Domain not found")
+	})
+	client := newTestClient(m.server.URL)
+
+	d := nsTestData(t, "example.com", "ns1.example.com", "1.2.3.4")
+	d.SetId("example.com/ns1.example.com")
+	diags := resourceNameserverRead(context.Background(), d, client)
+
+	assert.True(t, diags.HasError(), "a non-not-found API error must surface")
+	assert.Equal(t, "example.com/ns1.example.com", d.Id(), "state must be left intact on a hard error")
 }
 
 func TestResourceNameserverUpdate(t *testing.T) {
@@ -227,6 +263,22 @@ func TestResourceNameserverDelete(t *testing.T) {
 	assert.Equal(t, "example", form.Get("SLD"))
 	assert.Equal(t, "com", form.Get("TLD"))
 	assert.Equal(t, "ns1.example.com", form.Get("Nameserver"))
+}
+
+// TestResourceNameserverDeleteNotFound asserts destroy is idempotent: deleting a
+// nameserver the API already considers absent (5013160) is a no-op success, not
+// an error.
+func TestResourceNameserverDeleteNotFound(t *testing.T) {
+	m := newNSMockServer(t, func(_ string, _ url.Values) string {
+		return apiErrorXML("5013160", "Nameserver not found")
+	})
+	client := newTestClient(m.server.URL)
+
+	d := nsTestData(t, "example.com", "ns1.example.com", "1.2.3.4")
+	d.SetId("example.com/ns1.example.com")
+	diags := resourceNameserverDelete(context.Background(), d, client)
+
+	assert.False(t, diags.HasError(), "deleting an already-absent nameserver must not error; got %v", diags)
 }
 
 func TestResourceNameserverImport(t *testing.T) {
