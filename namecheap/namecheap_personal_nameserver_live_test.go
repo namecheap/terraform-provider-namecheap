@@ -3,10 +3,10 @@ package namecheap_provider
 import (
 	"context"
 	"fmt"
-	"strings"
+	"strconv"
 	"testing"
+	"time"
 
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -26,7 +26,9 @@ import (
 // with a fresh one, and the glue IPs are RFC 5737 documentation addresses.
 func TestAccNamecheapPersonalNameserver(t *testing.T) {
 	domain := *testAccDomain
-	suffix := strings.ToLower(acctest.RandString(8))
+	// A per-run suffix (base36 of the current time) keeps the nameserver hosts
+	// unique so a crashed prior run can never collide with a fresh one.
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
 	ns1 := fmt.Sprintf("ns1-%s.%s", suffix, domain)
 	ns2 := fmt.Sprintf("ns2-%s.%s", suffix, domain)
 
