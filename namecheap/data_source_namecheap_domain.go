@@ -132,11 +132,14 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 	// is_expired/is_locked/auto_renew/whois_guard). Fetch them from the account
 	// portfolio listing, which does. getInfo above has already confirmed the
 	// domain exists, so a portfolio miss leaves the lifecycle fields at their
-	// zero values rather than failing the whole lookup.
-	if diags := setDomainLifecycleFromList(ctx, client, data, domain); diags != nil {
-		return diags
+	// zero values (with a warning) rather than failing the whole lookup.
+	lifecycleDiags := setDomainLifecycleFromList(ctx, client, data, domain)
+	if lifecycleDiags.HasError() {
+		return lifecycleDiags
 	}
 
 	data.SetId(domain)
-	return nil
+	// Propagate any non-error diagnostics (e.g. the portfolio-miss warning)
+	// without discarding the successful read.
+	return lifecycleDiags
 }

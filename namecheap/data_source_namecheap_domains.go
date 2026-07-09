@@ -59,38 +59,11 @@ func dataSourceNamecheapDomainsRead(ctx context.Context, data *schema.ResourceDa
 	listType := data.Get("list_type").(string)
 	searchTerm := data.Get("search_term").(string)
 
-	var allDomains []namecheap.Domain
-	for page := 1; ; page++ {
-		args := &namecheap.DomainsGetListArgs{
-			ListType: namecheap.String(listType),
-			Page:     namecheap.Int(page),
-			PageSize: namecheap.Int(domainsPageSize),
-		}
-		if searchTerm != "" {
-			args.SearchTerm = namecheap.String(searchTerm)
-		}
-
-		resp, err := client.Domains.GetListWithContext(ctx, args)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-		if resp == nil {
-			return diag.Errorf("Namecheap returned an empty response while listing domains (page %d)", page)
-		}
-
-		if resp.Domains != nil {
-			allDomains = append(allDomains, *resp.Domains...)
-		}
-
-		// Stop when the paging block indicates every item has been fetched.
-		// When paging is absent or degenerate, stop after the current page so a
-		// malformed response cannot spin an unbounded loop.
-		if resp.Paging == nil || resp.Paging.TotalItems == nil || resp.Paging.PageSize == nil || *resp.Paging.PageSize <= 0 {
-			break
-		}
-		if page*(*resp.Paging.PageSize) >= *resp.Paging.TotalItems {
-			break
-		}
+	// fetchAllDomains walks every page of the filtered listing (shared with the
+	// single-domain lifecycle lookup) so the returned set is always complete.
+	allDomains, err := fetchAllDomains(ctx, client, listType, searchTerm)
+	if err != nil {
+		return diagFromClientError(err)
 	}
 
 	now := time.Now().UTC()

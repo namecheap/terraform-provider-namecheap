@@ -20,31 +20,67 @@ var domainLifecycleAttrs = []string{
 	"is_expired", "is_locked", "auto_renew", "whois_guard",
 }
 
+// fetchAllDomains pages through namecheap.domains.getList for the given filters,
+// returning every matching domain across all pages. It is shared by the
+// namecheap_domains portfolio read and by setDomainLifecycleFromList so both walk
+// the whole result set rather than a single page. Page/PageSize are managed here
+// (PageSize is the documented maximum); listType/searchTerm map to the getList
+// ListType/SearchTerm params (searchTerm is omitted when empty).
+func fetchAllDomains(ctx context.Context, client *namecheap.Client, listType, searchTerm string) ([]namecheap.Domain, error) {
+	var all []namecheap.Domain
+	for page := 1; ; page++ {
+		args := &namecheap.DomainsGetListArgs{
+			ListType: namecheap.String(listType),
+			Page:     namecheap.Int(page),
+			PageSize: namecheap.Int(domainsPageSize),
+		}
+		if searchTerm != "" {
+			args.SearchTerm = namecheap.String(searchTerm)
+		}
+
+		resp, err := client.Domains.GetListWithContext(ctx, args)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil {
+			return nil, fmt.Errorf("empty response from Namecheap while listing domains (page %d)", page)
+		}
+		if resp.Domains != nil {
+			all = append(all, *resp.Domains...)
+		}
+
+		// Stop when the paging block indicates every item has been fetched. When
+		// paging is absent or degenerate, stop after the current page so a
+		// malformed response cannot spin an unbounded loop.
+		if resp.Paging == nil || resp.Paging.TotalItems == nil || resp.Paging.PageSize == nil || *resp.Paging.PageSize <= 0 {
+			break
+		}
+		if page*(*resp.Paging.PageSize) >= *resp.Paging.TotalItems {
+			break
+		}
+	}
+	return all, nil
+}
+
 // setDomainLifecycleFromList fetches domain from the account portfolio listing
 // and copies the lifecycle attributes (see domainLifecycleAttrs) onto data.
 //
-// getList's SearchTerm is a substring keyword filter, not an exact lookup, so
-// the exact domain is matched client-side (case-insensitively) among the
-// returned rows. A transport/API error is surfaced (named with the domain); a
-// clean response that simply does not contain the domain is treated as "no
-// lifecycle data available" and leaves the fields at their zero values, because
-// the caller has already confirmed the domain exists via getInfo.
+// getList's SearchTerm is a substring keyword filter, not an exact lookup, so it
+// pages through the entire filtered result set and matches the exact domain
+// client-side (case-insensitively) — a match must never be missed just because
+// it landed on a later page. A transport/API error is surfaced (named with the
+// domain). When the domain is genuinely absent from the listing (despite getInfo
+// having confirmed it exists), the lifecycle fields are left at their zero values
+// and a warning is emitted so the gap is visible rather than silent.
 func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, data *schema.ResourceData, domain string) diag.Diagnostics {
-	resp, err := client.Domains.GetListWithContext(ctx, &namecheap.DomainsGetListArgs{
-		SearchTerm: namecheap.String(domain),
-		Page:       namecheap.Int(1),
-		PageSize:   namecheap.Int(domainsPageSize),
-	})
+	domains, err := fetchAllDomains(ctx, client, domainsListTypeAll, domain)
 	if err != nil {
 		return dataSourceDomainReadError(domain, err)
 	}
-	if resp == nil || resp.Domains == nil {
-		return nil
-	}
 
 	now := time.Now().UTC()
-	for i := range *resp.Domains {
-		d := &(*resp.Domains)[i]
+	for i := range domains {
+		d := &domains[i]
 		if d.Name == nil || !strings.EqualFold(*d.Name, domain) {
 			continue
 		}
@@ -52,9 +88,17 @@ func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, d
 		for _, attr := range domainLifecycleAttrs {
 			_ = data.Set(attr, flat[attr])
 		}
-		break
+		return nil
 	}
-	return nil
+
+	return diag.Diagnostics{{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Lifecycle fields unavailable for domain %q", domain),
+		Detail: "getInfo confirmed the domain exists, but it did not appear in the " +
+			"namecheap.domains.getList portfolio listing, so the lifecycle fields " +
+			"(created, expires, expires_in_days, is_expired, is_locked, auto_renew, whois_guard) " +
+			"were left empty. This is unexpected; please report it if it persists.",
+	}}
 }
 
 // dataSourceDomainReadError converts an SDK error from a domain-scoped read into
@@ -153,12 +197,27 @@ func domainRecordElemSchema() map[string]*schema.Schema {
 }
 
 // flattenHostRecord converts an SDK detailed host record into the map shape
-// described by domainRecordElemSchema.
+// described by domainRecordElemSchema. The address is normalized the same way
+// the namecheap_domain_records resource normalizes on read (via
+// getFixedAddressOfRecord: a trailing dot for CNAME/ALIAS/NS/MX, quotes for CAA),
+// so a record exported here composes into that resource without plan drift on
+// those types. On a malformed value (e.g. a bad CAA) or a nil field it falls
+// back to the raw address rather than failing the read.
 func flattenHostRecord(h *namecheap.DomainsDNSHostRecordDetailed) map[string]interface{} {
+	address := derefString(h.Address)
+	if h.Type != nil && h.Address != nil {
+		if fixed, err := getFixedAddressOfRecord(&namecheap.DomainsDNSHostRecord{
+			HostName:   h.Name,
+			RecordType: h.Type,
+			Address:    h.Address,
+		}); err == nil && fixed != nil {
+			address = *fixed
+		}
+	}
 	return map[string]interface{}{
 		"hostname": derefString(h.Name),
 		"type":     derefString(h.Type),
-		"address":  derefString(h.Address),
+		"address":  address,
 		"mx_pref":  derefInt(h.MXPref),
 		"ttl":      derefInt(h.TTL),
 	}

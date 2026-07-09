@@ -61,11 +61,30 @@ func dataSourceNamecheapDomainRecordsRead(ctx context.Context, data *schema.Reso
 		return dataSourceDomainReadError(domain, err)
 	}
 
-	nameservers := []string{}
-	if !*nsResp.DomainDNSGetListResult.IsUsingOurDNS && nsResp.DomainDNSGetListResult.Nameservers != nil {
-		nameservers = *nsResp.DomainDNSGetListResult.Nameservers
+	// A domain on custom nameservers is not served by Namecheap's DNS, so
+	// getHosts would fail (the resource read guards the same way, see
+	// resourceRecordRead in namecheap_domain_record.go). Expose the nameservers
+	// and an empty record set instead of calling getHosts.
+	if !*nsResp.DomainDNSGetListResult.IsUsingOurDNS {
+		nameservers := []string{}
+		if nsResp.DomainDNSGetListResult.Nameservers != nil {
+			nameservers = *nsResp.DomainDNSGetListResult.Nameservers
+		}
+		if err := data.Set("nameservers", nameservers); err != nil {
+			return diag.FromErr(err)
+		}
+		if err := data.Set("records", []map[string]interface{}{}); err != nil {
+			return diag.FromErr(err)
+		}
+		if err := data.Set("email_type", ""); err != nil {
+			return diag.FromErr(err)
+		}
+		data.SetId(domain)
+		return nil
 	}
-	if err := data.Set("nameservers", nameservers); err != nil {
+
+	// Namecheap DNS: no custom nameservers to expose; read the live record set.
+	if err := data.Set("nameservers", []string{}); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -83,8 +102,13 @@ func dataSourceNamecheapDomainRecordsRead(ctx context.Context, data *schema.Reso
 
 	records := []map[string]interface{}{}
 	if hostsResp.DomainDNSGetHostsResult.Hosts != nil {
-		for i := range *hostsResp.DomainDNSGetHostsResult.Hosts {
-			records = append(records, flattenHostRecord(&(*hostsResp.DomainDNSGetHostsResult.Hosts)[i]))
+		// Filter Namecheap's default parking records (CNAME www->parkingpage,
+		// URL @->http://www.<domain>) exactly as the namecheap_domain_records
+		// resource does on read (issue #260); otherwise composing this data
+		// source into that resource writes the parking records back and drifts.
+		filtered := filterDefaultParkingRecords(hostsResp.DomainDNSGetHostsResult.Hosts, &domain)
+		for i := range *filtered {
+			records = append(records, flattenHostRecord(&(*filtered)[i]))
 		}
 	}
 	if err := data.Set("records", records); err != nil {
