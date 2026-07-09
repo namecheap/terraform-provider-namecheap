@@ -205,6 +205,49 @@ func TestResourceContactsCreate_Error(t *testing.T) {
 	assert.True(t, diags.HasError(), "a setContacts API error should surface")
 }
 
+func TestResourceContactsUpdate_Success(t *testing.T) {
+	url := contactsTestServer(t, func(command string) string {
+		switch command {
+		case "namecheap.domains.setContacts":
+			return xmlSetContactsOK("example.com")
+		case "namecheap.domains.getContacts":
+			return xmlGetContacts("example.com")
+		}
+		return apiErrorXML("1010101", "unexpected "+command)
+	})
+	client := newTestClient(url)
+
+	d := schema.TestResourceDataRaw(t, resourceNamecheapDomainContacts().Schema, registrantRaw())
+	d.SetId("example.com")
+	diags := resourceContactsUpdate(context.Background(), d, client)
+
+	require.False(t, diags.HasError(), "unexpected diags: %+v", diags)
+	assert.Equal(t, "example.com", d.Id())
+}
+
+// TestResourceContactsCreate_IsSuccessFalse: a Status=OK setContacts response
+// that reports IsSuccess=false must surface as an error, not a silent success.
+func TestResourceContactsCreate_IsSuccessFalse(t *testing.T) {
+	url := contactsTestServer(t, func(command string) string {
+		if command == "namecheap.domains.setContacts" {
+			return `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse>
+    <DomainSetContactResult Domain="example.com" IsSuccess="false" />
+  </CommandResponse>
+</ApiResponse>`
+		}
+		return apiErrorXML("1010101", "unexpected "+command)
+	})
+	client := newTestClient(url)
+
+	d := schema.TestResourceDataRaw(t, resourceNamecheapDomainContacts().Schema, registrantRaw())
+	diags := resourceContactsCreate(context.Background(), d, client)
+
+	assert.True(t, diags.HasError(), "IsSuccess=false should surface as an error")
+}
+
 // TestResourceContactsDelete asserts the API-free destroy: it clears the ID and
 // returns a warning explaining contacts cannot actually be deleted.
 func TestResourceContactsDelete(t *testing.T) {
