@@ -1,0 +1,202 @@
+package namecheap_provider
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
+)
+
+// nameserverIDSeparator joins the domain and nameserver host into the resource
+// ID. Neither a domain nor a nameserver hostname may contain a slash, so it is
+// an unambiguous separator for both composition and import parsing.
+const nameserverIDSeparator = "/"
+
+// resourceNamecheapNameserver manages a personal (glue/vanity) nameserver such
+// as ns1.example.com registered against a domain on the account via the
+// namecheap.domains.ns.* API family. This is distinct from assigning custom
+// nameservers to a domain (namecheap_domain_records' nameservers argument, which
+// calls domains.dns.setCustom): this resource registers the nameserver host and
+// its glue IP so it can itself be used as a nameserver.
+func resourceNamecheapNameserver() *schema.Resource {
+	return &schema.Resource{
+		CreateContext: resourceNameserverCreate,
+		ReadContext:   resourceNameserverRead,
+		UpdateContext: resourceNameserverUpdate,
+		DeleteContext: resourceNameserverDelete,
+
+		Importer: &schema.ResourceImporter{
+			StateContext: resourceNameserverImport,
+		},
+
+		Schema: map[string]*schema.Schema{
+			"domain": {
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				Description:  "The registered domain the personal nameserver belongs to (e.g. \"example.com\"). Must be a root domain present on the account, not a subdomain.",
+				ValidateFunc: validateDomainIsNotSubdomain,
+			},
+			"nameserver": {
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				Description:  "The fully qualified hostname of the personal nameserver to register (e.g. \"ns1.example.com\").",
+				ValidateFunc: validation.StringIsNotEmpty,
+			},
+			"ip": {
+				Type:         schema.TypeString,
+				Required:     true,
+				Description:  "The IP address the personal nameserver resolves to (the glue record's address).",
+				ValidateFunc: validation.IsIPAddress,
+			},
+		},
+	}
+}
+
+// nameserverID composes the stable resource ID "<domain>/<nameserver>".
+func nameserverID(domain, nameserver string) string {
+	return domain + nameserverIDSeparator + nameserver
+}
+
+// nameserverSplitDomain parses a root domain into its SLD/TLD parts, which the
+// Namecheap domains.ns.* API requires as separate parameters.
+func nameserverSplitDomain(domain string) (sld string, tld string, err error) {
+	parsed, err := namecheap.ParseDomain(domain)
+	if err != nil {
+		return "", "", fmt.Errorf("parse domain %q: %w", domain, err)
+	}
+	return parsed.SLD, parsed.TLD, nil
+}
+
+func resourceNameserverCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	client := meta.(*namecheap.Client)
+
+	domain := strings.ToLower(data.Get("domain").(string))
+	nameserver := strings.ToLower(data.Get("nameserver").(string))
+	ip := data.Get("ip").(string)
+
+	sld, tld, err := nameserverSplitDomain(domain)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if _, err := client.DomainsNS.CreateWithContext(ctx, sld, tld, nameserver, ip); err != nil {
+		return diagFromClientError(err)
+	}
+
+	data.SetId(nameserverID(domain, nameserver))
+
+	return nil
+}
+
+func resourceNameserverRead(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	client := meta.(*namecheap.Client)
+
+	domain := strings.ToLower(data.Get("domain").(string))
+	nameserver := strings.ToLower(data.Get("nameserver").(string))
+
+	sld, tld, err := nameserverSplitDomain(domain)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	resp, err := client.DomainsNS.GetInfoWithContext(ctx, sld, tld, nameserver)
+	if err != nil {
+		return diagFromClientError(err)
+	}
+
+	// A nil result means the nameserver is no longer registered; drop it from
+	// state so Terraform plans a recreate instead of erroring.
+	if resp == nil || resp.DomainNameserverInfoResult == nil {
+		data.SetId("")
+		return nil
+	}
+
+	result := resp.DomainNameserverInfoResult
+	if result.IP != nil {
+		if err := data.Set("ip", *result.IP); err != nil {
+			return diag.FromErr(err)
+		}
+	}
+	if err := data.Set("domain", domain); err != nil {
+		return diag.FromErr(err)
+	}
+	if err := data.Set("nameserver", nameserver); err != nil {
+		return diag.FromErr(err)
+	}
+
+	return nil
+}
+
+func resourceNameserverUpdate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	client := meta.(*namecheap.Client)
+
+	domain := strings.ToLower(data.Get("domain").(string))
+	nameserver := strings.ToLower(data.Get("nameserver").(string))
+
+	sld, tld, err := nameserverSplitDomain(domain)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	// domain and nameserver are ForceNew, so only the IP can change here. The
+	// Namecheap ns.update command requires both the previous and the new IP.
+	oldIPRaw, newIPRaw := data.GetChange("ip")
+	oldIP := oldIPRaw.(string)
+	newIP := newIPRaw.(string)
+
+	if _, err := client.DomainsNS.UpdateWithContext(ctx, sld, tld, nameserver, oldIP, newIP); err != nil {
+		return diagFromClientError(err)
+	}
+
+	return nil
+}
+
+func resourceNameserverDelete(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
+	client := meta.(*namecheap.Client)
+
+	domain := strings.ToLower(data.Get("domain").(string))
+	nameserver := strings.ToLower(data.Get("nameserver").(string))
+
+	sld, tld, err := nameserverSplitDomain(domain)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	if _, err := client.DomainsNS.DeleteWithContext(ctx, sld, tld, nameserver); err != nil {
+		return diagFromClientError(err)
+	}
+
+	return nil
+}
+
+// resourceNameserverImport accepts an ID of the form "<domain>/<nameserver>"
+// (e.g. "example.com/ns1.example.com") and seeds domain and nameserver so the
+// subsequent Read can populate the IP.
+func resourceNameserverImport(_ context.Context, data *schema.ResourceData, _ interface{}) ([]*schema.ResourceData, error) {
+	parts := strings.SplitN(data.Id(), nameserverIDSeparator, 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf(
+			"invalid import ID %q: expected format \"<domain>%s<nameserver>\" (e.g. \"example.com%sns1.example.com\")",
+			data.Id(), nameserverIDSeparator, nameserverIDSeparator,
+		)
+	}
+
+	domain := strings.ToLower(parts[0])
+	nameserver := strings.ToLower(parts[1])
+
+	if err := data.Set("domain", domain); err != nil {
+		return nil, err
+	}
+	if err := data.Set("nameserver", nameserver); err != nil {
+		return nil, err
+	}
+	data.SetId(nameserverID(domain, nameserver))
+
+	return []*schema.ResourceData{data}, nil
+}
