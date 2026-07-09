@@ -17,15 +17,17 @@ A personal nameserver is a host you register under one of your domains and point
 resource "namecheap_personal_nameserver" "ns1" {
   domain     = "example.com"
   nameserver = "ns1.example.com"
-  ip         = "10.11.12.13"
+  ip         = "93.184.216.34"
 }
 
 resource "namecheap_personal_nameserver" "ns2" {
   domain     = "example.com"
   nameserver = "ns2.example.com"
-  ip         = "10.11.12.14"
+  ip         = "93.184.216.35"
 }
 ```
+
+~> `ip` must be a real, routable **public** IP address (the glue record for the nameserver host). The Namecheap API rejects reserved ranges — RFC 1918 private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), RFC 5737 documentation (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`), loopback, etc. — with `Parameter value policy error. IP address ... is reserved. (3024278)`. The addresses above are placeholders; use your nameserver host's actual public IP.
 
 ## Argument Reference
 

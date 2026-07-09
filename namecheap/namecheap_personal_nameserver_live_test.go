@@ -32,10 +32,15 @@ func TestAccNamecheapPersonalNameserver(t *testing.T) {
 	ns1 := fmt.Sprintf("ns1-%s.%s", suffix, domain)
 	ns2 := fmt.Sprintf("ns2-%s.%s", suffix, domain)
 
+	// The Namecheap API rejects reserved IP ranges for glue records (RFC 1918
+	// private, RFC 5737 documentation, loopback, ...) with a "IP address ... is
+	// reserved" policy error (3024278), so the glue IPs must be real, routable
+	// public addresses. These are stable public placeholders (the example.com
+	// block); in the sandbox they are only recorded as glue and never used.
 	const (
-		ns1IP        = "192.0.2.10" // RFC 5737 TEST-NET-1 placeholder glue IPs
-		ns1IPUpdated = "192.0.2.20"
-		ns2IP        = "198.51.100.10" // RFC 5737 TEST-NET-2
+		ns1IP        = "93.184.216.34"
+		ns1IPUpdated = "93.184.216.35"
+		ns2IP        = "93.184.216.36"
 	)
 
 	resource.Test(t, resource.TestCase{
