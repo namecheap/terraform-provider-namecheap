@@ -1,0 +1,134 @@
+package namecheap_provider
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
+)
+
+// TestAccNamecheapPersonalNameserver is a live-sandbox acceptance test for the
+// namecheap_personal_nameserver resource. Like the other TestAcc* tests it runs
+// only under `make testacc` (TF_ACC=1) and skips (via testAccPreCheck) when the
+// NAMECHEAP_* credentials / NAMECHEAP_TEST_DOMAIN are absent, so it never touches
+// the real API without explicit opt-in.
+//
+// It delivers the headline use case end-to-end against the live API: registering
+// a pair of personal (glue/vanity) nameservers — ns1/ns2 under the test domain —
+// so the domain can run on its own nameservers, then changing a glue IP in
+// place, importing, and tearing them down. Every step is asserted both in
+// Terraform state and against the live API via domains.ns.getInfo. The
+// nameserver hosts carry a random label so a crashed prior run can never collide
+// with a fresh one, and the glue IPs are RFC 5737 documentation addresses.
+func TestAccNamecheapPersonalNameserver(t *testing.T) {
+	domain := *testAccDomain
+	suffix := strings.ToLower(acctest.RandString(8))
+	ns1 := fmt.Sprintf("ns1-%s.%s", suffix, domain)
+	ns2 := fmt.Sprintf("ns2-%s.%s", suffix, domain)
+
+	const (
+		ns1IP        = "192.0.2.10" // RFC 5737 TEST-NET-1 placeholder glue IPs
+		ns1IPUpdated = "192.0.2.20"
+		ns2IP        = "198.51.100.10" // RFC 5737 TEST-NET-2
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: testAccProviderFactories,
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			testAccCheckPersonalNameserverAbsent(domain, ns1),
+			testAccCheckPersonalNameserverAbsent(domain, ns2),
+		),
+		Steps: []resource.TestStep{
+			{
+				// Register a vanity nameserver pair for the domain.
+				Config: testAccPersonalNameserverPairConfig(domain, ns1, ns1IP, ns2, ns2IP),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns1", "ip", ns1IP),
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns1", "id", domain+"/"+ns1),
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns2", "ip", ns2IP),
+					testAccCheckPersonalNameserverIP(domain, ns1, ns1IP),
+					testAccCheckPersonalNameserverIP(domain, ns2, ns2IP),
+				),
+			},
+			{
+				// Change ns1's glue IP in place (issues domains.ns.update).
+				Config: testAccPersonalNameserverPairConfig(domain, ns1, ns1IPUpdated, ns2, ns2IP),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns1", "ip", ns1IPUpdated),
+					testAccCheckPersonalNameserverIP(domain, ns1, ns1IPUpdated),
+				),
+			},
+			{
+				// Import ns1 by its "<domain>/<nameserver>" composite ID.
+				ResourceName:      "namecheap_personal_nameserver.ns1",
+				ImportState:       true,
+				ImportStateId:     domain + "/" + ns1,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func testAccPersonalNameserverPairConfig(domain, ns1, ns1IP, ns2, ns2IP string) string {
+	return fmt.Sprintf(`
+resource "namecheap_personal_nameserver" "ns1" {
+  domain     = %[1]q
+  nameserver = %[2]q
+  ip         = %[3]q
+}
+
+resource "namecheap_personal_nameserver" "ns2" {
+  domain     = %[1]q
+  nameserver = %[4]q
+  ip         = %[5]q
+}
+`, domain, ns1, ns1IP, ns2, ns2IP)
+}
+
+// testAccCheckPersonalNameserverIP asserts, through the live SDK client, that the
+// personal nameserver is registered with the expected glue IP (domains.ns.getInfo).
+func testAccCheckPersonalNameserverIP(domain, nameserver, wantIP string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		sld, tld, err := nameserverSplitDomain(domain)
+		if err != nil {
+			return err
+		}
+		resp, err := namecheapSDKClient.DomainsNS.GetInfoWithContext(context.Background(), sld, tld, nameserver)
+		if err != nil {
+			return fmt.Errorf("ns.getInfo for %q failed: %w", nameserver, err)
+		}
+		if resp == nil || resp.DomainNameserverInfoResult == nil || resp.DomainNameserverInfoResult.IP == nil {
+			return fmt.Errorf("ns.getInfo returned no IP for %q", nameserver)
+		}
+		if got := *resp.DomainNameserverInfoResult.IP; got != wantIP {
+			return fmt.Errorf("personal nameserver %q IP = %q, want %q", nameserver, got, wantIP)
+		}
+		return nil
+	}
+}
+
+// testAccCheckPersonalNameserverAbsent is a CheckDestroy that asserts the personal
+// nameserver is no longer registered after the resources are destroyed. The
+// Namecheap API returns an error for an unknown nameserver, which is the expected
+// post-destroy state.
+func testAccCheckPersonalNameserverAbsent(domain, nameserver string) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		sld, tld, err := nameserverSplitDomain(domain)
+		if err != nil {
+			return err
+		}
+		resp, err := namecheapSDKClient.DomainsNS.GetInfoWithContext(context.Background(), sld, tld, nameserver)
+		if err != nil {
+			return nil
+		}
+		if resp != nil && resp.DomainNameserverInfoResult != nil {
+			return fmt.Errorf("personal nameserver %q still registered after destroy", nameserver)
+		}
+		return nil
+	}
+}

@@ -94,3 +94,48 @@ resource "namecheap_personal_nameserver" "test" {
 		},
 	})
 }
+
+// TestAccMockPersonalNameserverPair covers the headline use case — registering a
+// pair of personal (vanity) nameservers (ns1/ns2) under a single domain so the
+// domain can run on its own nameservers. It asserts both hosts are persisted
+// with their glue IPs and both are removed on destroy, against the stateful
+// mock.
+func TestAccMockPersonalNameserverPair(t *testing.T) {
+	m := newNamecheapMock(t)
+	const domain = "mock-example.com"
+	const ns1 = "ns1.mock-example.com"
+	const ns2 = "ns2.mock-example.com"
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		CheckDestroy: resource.ComposeTestCheckFunc(
+			mockCheckNameserverAbsent(m, domain, ns1),
+			mockCheckNameserverAbsent(m, domain, ns2),
+		),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "namecheap_personal_nameserver" "ns1" {
+  domain     = %[1]q
+  nameserver = %[2]q
+  ip         = "192.0.2.1"
+}
+
+resource "namecheap_personal_nameserver" "ns2" {
+  domain     = %[1]q
+  nameserver = %[3]q
+  ip         = "192.0.2.2"
+}
+`, domain, ns1, ns2),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns1", "ip", "192.0.2.1"),
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns1", "id", domain+"/"+ns1),
+					resource.TestCheckResourceAttr("namecheap_personal_nameserver.ns2", "ip", "192.0.2.2"),
+					mockCheckNameserverIP(m, domain, ns1, "192.0.2.1"),
+					mockCheckNameserverIP(m, domain, ns2, "192.0.2.2"),
+				),
+			},
+		},
+	})
+}
