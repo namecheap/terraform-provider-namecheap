@@ -17,6 +17,15 @@ import (
 // NAMECHEAP_* credentials / NAMECHEAP_TEST_DOMAIN are absent, so it never
 // touches the real API without explicit opt-in.
 //
+// The config also sets email_type = "FWD" via a namecheap_domain_records
+// helper resource (depends_on ensures it applies first): the shared sandbox
+// domain is left with email_type = "NONE" by earlier tests in the suite, and
+// the live API appears not to persist forwarding rules queryably until FWD is
+// set (getEmailForwarding otherwise returns no result even right after a
+// successful setEmailForwarding) - matching this resource's own documented
+// precondition. namecheap_domain_records' own destroy resets email_type back
+// to "NONE", so no extra cleanup is needed for it.
+//
 // setEmailForwarding is a full-table replace against the shared sandbox test
 // domain, and destroy clears the table entirely (unlike namecheap_domain_contacts,
 // whose destroy is state-only). To leave the domain as this test found it, it
@@ -31,12 +40,20 @@ func TestAccNamecheapEmailForwarding(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: fmt.Sprintf(`
+resource "namecheap_domain_records" "fwd_precondition" {
+  domain     = %[1]q
+  mode       = "OVERWRITE"
+  email_type = "FWD"
+}
+
 resource "namecheap_email_forwarding" "test" {
   domain = %[1]q
 
   forwards = {
     info = "info-dest@example.com"
   }
+
+  depends_on = [namecheap_domain_records.fwd_precondition]
 }
 `, *testAccDomain),
 				Check: resource.ComposeTestCheckFunc(
@@ -50,6 +67,12 @@ resource "namecheap_email_forwarding" "test" {
 				// proves the full-table replace round-trips more than one
 				// entry and that mailboxN/ForwardToN ordering is stable.
 				Config: fmt.Sprintf(`
+resource "namecheap_domain_records" "fwd_precondition" {
+  domain     = %[1]q
+  mode       = "OVERWRITE"
+  email_type = "FWD"
+}
+
 resource "namecheap_email_forwarding" "test" {
   domain = %[1]q
 
@@ -57,6 +80,8 @@ resource "namecheap_email_forwarding" "test" {
     info  = "changed-dest@example.com"
     sales = "sales-dest@example.com"
   }
+
+  depends_on = [namecheap_domain_records.fwd_precondition]
 }
 `, *testAccDomain),
 				Check: resource.ComposeTestCheckFunc(
