@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -154,30 +155,50 @@ func captureAndRestoreEmailForwarding(t *testing.T) {
 
 // testAccCheckEmailForwardingAPI fetches the domain's email forwarding table
 // through the live SDK client and asserts it exactly matches want.
+//
+// It retries on a mismatch (including "no result") for up to ~20s: the
+// sandbox has been observed to briefly return an empty/no-result
+// getEmailForwarding immediately after a successful setEmailForwarding, which
+// looks like an eventual-consistency lag on the backend rather than the
+// forwards never having been stored.
 func testAccCheckEmailForwardingAPI(want map[string]string) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		resp, err := namecheapSDKClient.DomainsDNS.GetEmailForwardingWithContext(context.Background(), *testAccDomain)
-		if err != nil {
-			return fmt.Errorf("getEmailForwarding failed: %w", err)
-		}
-		if resp == nil || resp.DomainDNSGetEmailForwardingResult == nil {
-			return fmt.Errorf("getEmailForwarding returned no result for %q", *testAccDomain)
-		}
+		var lastErr error
+		for attempt := 0; attempt < 8; attempt++ {
+			if attempt > 0 {
+				time.Sleep(3 * time.Second)
+			}
 
-		var forwards []namecheap.EmailForward
-		if resp.DomainDNSGetEmailForwardingResult.Forwards != nil {
-			forwards = *resp.DomainDNSGetEmailForwardingResult.Forwards
-		}
-		got := forwardsSliceToMap(forwards)
+			lastErr = func() error {
+				resp, err := namecheapSDKClient.DomainsDNS.GetEmailForwardingWithContext(context.Background(), *testAccDomain)
+				if err != nil {
+					return fmt.Errorf("getEmailForwarding failed: %w", err)
+				}
+				if resp == nil || resp.DomainDNSGetEmailForwardingResult == nil {
+					return fmt.Errorf("getEmailForwarding returned no result for %q", *testAccDomain)
+				}
 
-		if len(got) != len(want) {
-			return fmt.Errorf("email forwarding table for %q = %+v, want %+v", *testAccDomain, got, want)
-		}
-		for mailbox, wantDest := range want {
-			if got[mailbox] != wantDest {
-				return fmt.Errorf("email forwarding %q for %q = %q, want %q", mailbox, *testAccDomain, got[mailbox], wantDest)
+				var forwards []namecheap.EmailForward
+				if resp.DomainDNSGetEmailForwardingResult.Forwards != nil {
+					forwards = *resp.DomainDNSGetEmailForwardingResult.Forwards
+				}
+				got := forwardsSliceToMap(forwards)
+
+				if len(got) != len(want) {
+					return fmt.Errorf("email forwarding table for %q = %+v, want %+v", *testAccDomain, got, want)
+				}
+				for mailbox, wantDest := range want {
+					if got[mailbox] != wantDest {
+						return fmt.Errorf("email forwarding %q for %q = %q, want %q", mailbox, *testAccDomain, got[mailbox], wantDest)
+					}
+				}
+				return nil
+			}()
+
+			if lastErr == nil {
+				return nil
 			}
 		}
-		return nil
+		return fmt.Errorf("after retrying: %w", lastErr)
 	}
 }
