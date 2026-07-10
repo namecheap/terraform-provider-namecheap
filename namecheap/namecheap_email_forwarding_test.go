@@ -299,6 +299,31 @@ func TestResourceEmailForwardingRead(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{"info": "me@example.com"}, d.Get("forwards"))
 }
 
+// TestResourceEmailForwardingRead_EmptyResultKeepsID covers a Status=OK
+// response carrying no DomainEmailForwardingResult element at all - the
+// observed real-API shape for a domain with zero forwarding rules. This must
+// NOT be treated as "the domain is gone" (only an actual API error does
+// that): the ID must be kept and forwards set to an empty map.
+func TestResourceEmailForwardingRead_EmptyResultKeepsID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse />
+</ApiResponse>`)
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	d := emailForwardingTestData(t, "example.com", map[string]interface{}{"info": "me@example.com"})
+	d.SetId("example.com")
+
+	diags := resourceEmailForwardingRead(context.Background(), d, client)
+	assert.False(t, diags.HasError(), "unexpected diags: %v", diags)
+	assert.Equal(t, "example.com", d.Id(), "a domain with zero forwards must not be treated as gone")
+	assert.Equal(t, map[string]interface{}{}, d.Get("forwards"))
+}
+
 func TestResourceEmailForwardingRead_DomainGone(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, apiErrorXML("2019166", "Domain not found"))

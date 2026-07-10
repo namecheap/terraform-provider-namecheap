@@ -245,13 +245,14 @@ func resourceEmailForwardingRead(ctx context.Context, data *schema.ResourceData,
 		return diagFromClientError(err)
 	}
 
-	if resp == nil || resp.DomainDNSGetEmailForwardingResult == nil {
-		data.SetId("")
-		return nil
-	}
-
+	// Unlike namecheap_domain_contacts/namecheap_personal_nameserver (where a
+	// nil result reliably means the resource is gone), a nil
+	// DomainDNSGetEmailForwardingResult here is the observed shape for a
+	// domain with zero forwarding rules configured - a normal, non-deleted
+	// state for a full-table resource, not evidence the domain disappeared.
+	// Do not clear the ID on this path; only an actual API error does that.
 	var forwards []namecheap.EmailForward
-	if resp.DomainDNSGetEmailForwardingResult.Forwards != nil {
+	if resp != nil && resp.DomainDNSGetEmailForwardingResult != nil && resp.DomainDNSGetEmailForwardingResult.Forwards != nil {
 		forwards = *resp.DomainDNSGetEmailForwardingResult.Forwards
 	}
 
