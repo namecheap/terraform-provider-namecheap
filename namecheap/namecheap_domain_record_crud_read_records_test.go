@@ -136,11 +136,13 @@ func TestReadRecordsOverwrite_ReturnsAllRecords(t *testing.T) {
 		},
 	}
 
-	foundRecords, emailType, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
+	foundRecords, emailType, unmanaged, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 2)
 	assert.Equal(t, "NONE", *emailType)
+	assert.Len(t, unmanaged, 1, "the api record is live but not in currentRecords, so it is unmanaged")
+	assert.Equal(t, "api", *unmanaged[0].Name)
 }
 
 func TestReadRecordsOverwrite_EmptyRemote(t *testing.T) {
@@ -150,10 +152,11 @@ func TestReadRecordsOverwrite_EmptyRemote(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
+	foundRecords, _, unmanaged, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 0)
+	assert.Empty(t, unmanaged)
 }
 
 func TestReadRecordsOverwrite_CNAMEDotFix(t *testing.T) {
@@ -176,11 +179,12 @@ func TestReadRecordsOverwrite_CNAMEDotFix(t *testing.T) {
 		},
 	}
 
-	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
+	foundRecords, _, unmanaged, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 1)
 	assert.Equal(t, "example.com", (*foundRecords)[0]["address"])
+	assert.Empty(t, unmanaged)
 }
 
 func TestReadRecordsOverwrite_FiltersDefaultParkingRecords(t *testing.T) {
@@ -197,12 +201,14 @@ func TestReadRecordsOverwrite_FiltersDefaultParkingRecords(t *testing.T) {
 
 	// With no records configured, OVERWRITE read must still drop Namecheap's
 	// default parking records so they don't surface as spurious drift (issue #260).
-	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
+	foundRecords, _, unmanaged, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 1)
 	assert.Equal(t, "blog", (*foundRecords)[0]["hostname"])
 	assert.Equal(t, "A", (*foundRecords)[0]["type"])
+	assert.Len(t, unmanaged, 1, "only the ordinary unmanaged record counts - default parking records must not")
+	assert.Equal(t, "blog", *unmanaged[0].Name)
 }
 
 func TestReadRecordsOverwrite_KeepsUserManagedParkingRecord(t *testing.T) {
@@ -227,7 +233,7 @@ func TestReadRecordsOverwrite_KeepsUserManagedParkingRecord(t *testing.T) {
 		map[string]interface{}{"hostname": "@", "type": "URL", "address": "http://www.test.com", "mx_pref": 10, "ttl": 1800},
 	}
 
-	foundRecords, _, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
+	foundRecords, _, unmanaged, diags := readRecordsOverwrite(context.Background(), "test.com", currentRecords, client)
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, foundRecords)
 	assert.Len(t, *foundRecords, 2)
@@ -239,6 +245,9 @@ func TestReadRecordsOverwrite_KeepsUserManagedParkingRecord(t *testing.T) {
 	assert.True(t, hostnames["@/URL"], "user-managed parking-lookalike record must be preserved")
 	assert.True(t, hostnames["blog/A"], "ordinary record must be preserved")
 	assert.False(t, hostnames["www/CNAME"], "unmanaged default parking record must be filtered")
+
+	assert.Len(t, unmanaged, 1, "only the ordinary unmanaged record counts - default parking records must not")
+	assert.Equal(t, "blog", *unmanaged[0].Name)
 }
 
 func TestReadRecordsOverwrite_GetHostsAPIError(t *testing.T) {
@@ -249,8 +258,9 @@ func TestReadRecordsOverwrite_GetHostsAPIError(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	result, _, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
+	result, _, unmanaged, diags := readRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
 	assert.Nil(t, result)
+	assert.Nil(t, unmanaged)
 	assert.True(t, diags.HasError())
 }
 

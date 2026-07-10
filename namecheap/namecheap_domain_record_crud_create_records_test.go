@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
@@ -215,11 +216,17 @@ func TestCreateRecordsMerge_GetHostsAPIError(t *testing.T) {
 func TestCreateRecordsOverwrite_Simple(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		assert.Equal(t, "namecheap.domains.dns.setHosts", r.FormValue("Command"))
-		assert.Equal(t, "NONE", r.FormValue("EmailType"))
-		assert.Equal(t, "www", r.FormValue("HostName1"))
-		assert.Equal(t, "A", r.FormValue("RecordType1"))
-		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "NONE", r.FormValue("EmailType"))
+			assert.Equal(t, "www", r.FormValue("HostName1"))
+			assert.Equal(t, "A", r.FormValue("RecordType1"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		default:
+			t.Fatalf("unexpected command: %s", r.FormValue("Command"))
+		}
 	}))
 	defer server.Close()
 
@@ -236,13 +243,21 @@ func TestCreateRecordsOverwrite_Simple(t *testing.T) {
 
 	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
+	assert.Empty(t, diags, "no unmanaged records on the remote, so no warning is expected")
 }
 
 func TestCreateRecordsOverwrite_WithEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		assert.Equal(t, "MX", r.FormValue("EmailType"))
-		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "MX", r.FormValue("EmailType"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		default:
+			t.Fatalf("unexpected command: %s", r.FormValue("Command"))
+		}
 	}))
 	defer server.Close()
 
@@ -264,7 +279,15 @@ func TestCreateRecordsOverwrite_WithEmailType(t *testing.T) {
 
 func TestCreateRecordsOverwrite_EmptyRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		default:
+			t.Fatalf("unexpected command: %s", r.FormValue("Command"))
+		}
 	}))
 	defer server.Close()
 
@@ -273,6 +296,67 @@ func TestCreateRecordsOverwrite_EmptyRecords(t *testing.T) {
 
 	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
 	assert.False(t, diags.HasError())
+}
+
+func TestCreateRecordsOverwrite_WarnsAboutUnmanagedRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			// Remote has a record not present in the incoming config - the
+			// upcoming SetHosts below will silently delete it (#65, #250).
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		default:
+			t.Fatalf("unexpected command: %s", r.FormValue("Command"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	records := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
+	assert.False(t, diags.HasError())
+	if assert.Len(t, diags, 1) {
+		assert.Equal(t, diag.Warning, diags[0].Severity)
+		assert.Contains(t, diags[0].Summary, "will delete 1 record(s)")
+		assert.Contains(t, diags[0].Detail, "api")
+	}
+}
+
+func TestCreateRecordsOverwrite_PreflightGetHostsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, apiErrorXML("123456", "GetHosts failed"))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	records := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	// The pre-flight read must fail closed: SetHosts is never reached, so
+	// nothing is destroyed on a transient API error.
+	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, client)
+	assert.True(t, diags.HasError())
 }
 
 func TestCreateRecordsMerge_SetHostsAPIError(t *testing.T) {
@@ -412,7 +496,13 @@ func TestCreateRecordsMerge_ResolvesEmailTypeWhenNil(t *testing.T) {
 
 func TestCreateRecordsOverwrite_SetHostsAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, apiErrorXML("500", "SetHosts failed"))
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		default:
+			_, _ = fmt.Fprint(w, apiErrorXML("500", "SetHosts failed"))
+		}
 	}))
 	defer server.Close()
 

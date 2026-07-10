@@ -333,6 +333,20 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 func createRecordsOverwrite(ctx context.Context, domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	domainRecords := convertRecordTypeSetToDomainRecords(&records)
 
+	var diags diag.Diagnostics
+
+	// Pre-flight read: enumerate live records that are about to be wiped by
+	// the destructive SetHosts below because they aren't in the incoming
+	// config, so the caller can warn before data loss instead of after (#65).
+	unmanaged, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, records, client)
+	if preflightDiags.HasError() {
+		return preflightDiags
+	}
+	diags = append(diags, preflightDiags...)
+	if len(unmanaged) > 0 {
+		diags = append(diags, buildUnmanagedDeletionWarning(domain, unmanaged, "will delete"))
+	}
+
 	emailTypeValue := namecheap.String(namecheap.EmailTypeNone)
 	if emailType != nil {
 		emailTypeValue = emailType
@@ -349,7 +363,7 @@ func createRecordsOverwrite(ctx context.Context, domain string, emailType *strin
 		return diagFromClientError(err)
 	}
 
-	return diag.Diagnostics{}
+	return diags
 }
 
 // readRecordsMerge reads all remote records, return only the currentRecords that are exist in remote records
@@ -390,21 +404,25 @@ func readRecordsMerge(ctx context.Context, domain string, currentRecords []inter
 	return &foundRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType, nil
 }
 
-// readRecordsOverwrite returns the records that are exist on Namecheap
+// readRecordsOverwrite returns the records that are exist on Namecheap, plus
+// the subset of live records that are unmanaged (not present in
+// currentRecords and not a default parking record) - i.e. what OVERWRITE
+// mode would delete on the next apply (#65, #250).
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
-func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, diag.Diagnostics) {
+func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []interface{}, client *namecheap.Client) (*[]map[string]interface{}, *string, []namecheap.DomainsDNSHostRecordDetailed, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return nil, nil, diagFromClientError(err)
+		return nil, nil, nil, diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return nil, nil, diagFromClientError(err)
+		return nil, nil, nil, diagFromClientError(err)
 	}
 
 	currentRecordsConverted := convertRecordTypeSetToDomainRecords(&currentRecords)
 
 	var remoteRecords []map[string]interface{}
+	var unmanagedRecords []namecheap.DomainsDNSHostRecordDetailed
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
@@ -414,7 +432,7 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 			for _, currentRecord := range *currentRecordsConverted {
 				currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
 				if err != nil {
-					return nil, nil, diagFromClientError(err)
+					return nil, nil, nil, diagFromClientError(err)
 				}
 
 				currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
@@ -434,11 +452,68 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 				continue
 			}
 
+			if !managed {
+				unmanagedRecords = append(unmanagedRecords, remoteRecord)
+			}
+
 			remoteRecords = append(remoteRecords, *convertDomainRecordDetailedToTypeSetRecord(&remoteRecord))
 		}
 	}
 
-	return &remoteRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType, nil
+	return &remoteRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType, unmanagedRecords, nil
+}
+
+// unmanagedRecordsOverwrite fetches the live DNS records for domain and
+// returns the subset that are neither present in referenceRecords (in the
+// Terraform config's raw *schema.Set form) nor a default parking record.
+// Used as the apply-time pre-flight for OVERWRITE create/update/delete so
+// callers can warn before a destructive SetHosts (#65, #250). Callers pass
+// the incoming config records for create/update, or the prior-state records
+// for delete (state-tracked records are consented deletions; anything else
+// live is the surprise worth warning about).
+func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceRecords []interface{}, client *namecheap.Client) ([]namecheap.DomainsDNSHostRecordDetailed, diag.Diagnostics) {
+	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
+	if err != nil {
+		return nil, diagFromClientError(err)
+	}
+
+	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
+		return nil, diagFromClientError(err)
+	}
+
+	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts == nil {
+		return nil, nil
+	}
+
+	referenceRecordsConverted := convertRecordTypeSetToDomainRecords(&referenceRecords)
+
+	var unmanagedRecords []namecheap.DomainsDNSHostRecordDetailed
+
+	for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
+		remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
+
+		managed := false
+		for _, referenceRecord := range *referenceRecordsConverted {
+			referenceRecordAddressFixed, err := getFixedAddressOfRecord(&referenceRecord)
+			if err != nil {
+				return nil, diagFromClientError(err)
+			}
+
+			referenceRecordHash := hashRecord(*referenceRecord.HostName, *referenceRecord.RecordType, *referenceRecordAddressFixed)
+			if referenceRecordHash == remoteRecordHash {
+				managed = true
+				break
+			}
+		}
+
+		if managed || isDefaultParkingRecord(&remoteRecord, &domain) {
+			continue
+		}
+
+		unmanagedRecords = append(unmanagedRecords, remoteRecord)
+	}
+
+	return unmanagedRecords, nil
 }
 
 // updateRecordsMerge fetches remote records, remove previousRecords from remote, add currentRecords and return the final list
@@ -566,8 +641,24 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 	return nil
 }
 
-// deleteRecordsOverwrite removes all records
-func deleteRecordsOverwrite(ctx context.Context, domain string, client *namecheap.Client) diag.Diagnostics {
+// deleteRecordsOverwrite removes all records. priorStateRecords is the set of
+// records Terraform had in state for this resource (raw *schema.Set form);
+// it is used only to compute the unmanaged-deletion pre-flight warning below,
+// not to scope the deletion itself - destroy always wipes the whole zone.
+func deleteRecordsOverwrite(ctx context.Context, domain string, priorStateRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	// Pre-flight read: anything live that isn't in priorStateRecords is a
+	// surprise deletion Terraform never consented to (#65, #250).
+	unmanaged, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, priorStateRecords, client)
+	if preflightDiags.HasError() {
+		return preflightDiags
+	}
+	diags = append(diags, preflightDiags...)
+	if len(unmanaged) > 0 {
+		diags = append(diags, buildUnmanagedDeletionWarning(domain, unmanaged, "will delete"))
+	}
+
 	var records []namecheap.DomainsDNSHostRecord
 
 	_, err := client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
@@ -581,7 +672,7 @@ func deleteRecordsOverwrite(ctx context.Context, domain string, client *namechea
 		return diagFromClientError(err)
 	}
 
-	return nil
+	return diags
 }
 
 // hashRecord creates a hash for record by hostname, recordType, and address
@@ -708,6 +799,84 @@ func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetail
 	}
 
 	return &filteredRecords
+}
+
+// buildUnmanagedDeletionWarning builds a single warning diagnostic enumerating
+// DNS records that OVERWRITE mode will delete (or has deleted) because they
+// are not present in the Terraform configuration. tense is the verb used in
+// the summary/detail text (e.g. "will delete", "deleted").
+func buildUnmanagedDeletionWarning(domain string, unmanaged []namecheap.DomainsDNSHostRecordDetailed, tense string) diag.Diagnostic {
+	var detail strings.Builder
+
+	for _, record := range unmanaged {
+		detail.WriteString(formatRecordSummaryLine(&record))
+		detail.WriteString("\n")
+	}
+
+	detail.WriteString("\nTo keep these records, add them to your configuration:\n\n")
+	for _, record := range unmanaged {
+		detail.WriteString(formatRecordHCL(&record))
+		detail.WriteString("\n\n")
+	}
+
+	detail.WriteString("See the OVERWRITE mode safety notes in the namecheap_domain_records resource docs, " +
+		"or switch to MERGE mode if this domain's DNS is shared with other tools or Terraform configurations.")
+
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("OVERWRITE mode %s %d record(s) not present in the configuration for %s", tense, len(unmanaged), domain),
+		Detail:   detail.String(),
+	}
+}
+
+// formatRecordSummaryLine renders one human-readable line for a live DNS
+// record, used in the unmanaged-deletion warning detail.
+func formatRecordSummaryLine(record *namecheap.DomainsDNSHostRecordDetailed) string {
+	line := fmt.Sprintf("  %s %s → %s", derefStr(record.Type), derefStr(record.Name), derefStr(record.Address))
+
+	if record.Type != nil && *record.Type == namecheap.RecordTypeMX && record.MXPref != nil {
+		line += fmt.Sprintf(" (mx_pref %d)", *record.MXPref)
+	}
+	if record.TTL != nil {
+		line += fmt.Sprintf(" (ttl %d)", *record.TTL)
+	}
+
+	return line
+}
+
+// formatRecordHCL renders a record as a paste-ready HCL `record { ... }`
+// block. Values are emitted verbatim (live TTL, dotted CNAME targets, quoted
+// CAA values) so that pasting the block into a namecheap_domain_records
+// resource produces an empty diff against this exact live record - the
+// address-fix normalization in getFixedAddressOfRecord makes equivalent
+// pasted forms hash-equal even when the printed form differs. mx_pref is
+// only emitted when it differs from the record schema's default (10), and
+// ttl is always emitted because the live default (1799) differs from the
+// schema default (1800).
+func formatRecordHCL(record *namecheap.DomainsDNSHostRecordDetailed) string {
+	var b strings.Builder
+
+	b.WriteString("  record {\n")
+	fmt.Fprintf(&b, "    hostname = %q\n", derefStr(record.Name))
+	fmt.Fprintf(&b, "    type = %q\n", derefStr(record.Type))
+	fmt.Fprintf(&b, "    address = %q\n", derefStr(record.Address))
+	if record.Type != nil && *record.Type == namecheap.RecordTypeMX && record.MXPref != nil && *record.MXPref != 10 {
+		fmt.Fprintf(&b, "    mx_pref = %d\n", *record.MXPref)
+	}
+	if record.TTL != nil {
+		fmt.Fprintf(&b, "    ttl = %d\n", *record.TTL)
+	}
+	b.WriteString("  }")
+
+	return b.String()
+}
+
+// derefStr safely dereferences a possibly-nil string pointer.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // stringifyNCRecord returns a string with hostname, record type and address of the record

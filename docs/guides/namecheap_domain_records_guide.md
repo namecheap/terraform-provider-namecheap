@@ -93,6 +93,19 @@ nameservers will be set.
 
 ~> **Before using `OVERWRITE` mode**, verify that your Terraform configuration contains **all** DNS records you want to keep for the domain. Any records missing from the config will be deleted on the next `terraform apply`.
 
+#### Unmanaged-deletion warnings
+
+The provider cannot make `OVERWRITE` safe by itself — deleting anything not in your config is the mode's entire purpose — but since v2.5.0 it warns before every deletion instead of doing it silently:
+
+- **At `terraform plan`:** if a live record on the domain isn't in your configuration, refresh emits a warning listing it. This catches drift on a domain `terraform` already manages (e.g., someone added a record through the Namecheap dashboard).
+- **At `terraform apply`:** immediately before the destructive write, the provider re-checks and warns again. This is the only warning you get the *first* time you point `OVERWRITE` at a domain that already has other records — a brand-new resource has no prior state to diff against, so there is nothing for `plan` to compare.
+
+Each warning lists every record about to be deleted (type, host, address, TTL, MX preference where relevant) and includes a ready-to-paste `record { ... }` block per record. Paste the blocks you want to keep into your configuration and re-run `terraform plan` — it should come back empty, confirming those records are now adopted rather than pending deletion.
+
+Both warnings only ever run against data the read step already fetched, so they add at most one extra API call (the apply-time re-check) — never anything during `plan`/refresh beyond the read `OVERWRITE` already performs.
+
+If you'd rather not review this list every time a shared domain drifts, use [`MERGE`](#merge) mode instead — it only ever touches the records it manages.
+
 ## Email type
 
 Please check our
