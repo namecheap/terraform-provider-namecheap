@@ -52,12 +52,52 @@ type namecheapMock struct {
 	mu      sync.Mutex
 	domains map[string]*mockDomainState
 
+	// Portfolio (namecheap.domains.getList) state. portfolio holds the domains
+	// the account "owns"; pageSizeCap, when >0, caps the effective page size so
+	// a test can force multi-page pagination with a small seed; getListCalls
+	// counts getList requests so a test can prove full pagination.
+	portfolio    []mockPortfolioDomain
+	pageSizeCap  int
+	getListCalls int
+
+	// getInfo (namecheap.domains.getInfo) state, keyed by domain name. A getInfo
+	// request for a domain absent from this map returns a "Domain not found"
+	// API error, exercising the not-found diagnostic.
+	infos map[string]mockDomainInfo
+
 	// Optional fault injection: when failCommand is set, any request whose
 	// Command equals it returns an API error with failCode/failMessage instead
 	// of the normal response. Used to exercise the provider's error-surfacing.
 	failCommand string
 	failCode    string
 	failMessage string
+}
+
+// mockPortfolioDomain is one entry of the account portfolio returned by the
+// stateful mock's namecheap.domains.getList handler. Created/Expires use the
+// Namecheap "MM/DD/YYYY" wire format.
+type mockPortfolioDomain struct {
+	ID         string
+	Name       string
+	User       string
+	Created    string
+	Expires    string
+	WhoisGuard string
+	IsExpired  bool
+	IsLocked   bool
+	AutoRenew  bool
+	IsPremium  bool
+	IsOurDNS   bool
+}
+
+// mockDomainInfo is the per-domain response of the mock's
+// namecheap.domains.getInfo handler.
+type mockDomainInfo struct {
+	IsPremium     bool
+	IsPremiumDNS  bool
+	ProviderType  string
+	IsUsingOurDNS bool
+	Nameservers   []string
 }
 
 // newNamecheapMock starts a stateful mock server and registers its shutdown
@@ -118,6 +158,33 @@ func (m *namecheapMock) seed(domain string, hosts []hostEntry, emailType string,
 	}
 }
 
+// seedPortfolio sets the account portfolio returned by getList. cap, when >0,
+// caps the per-page size so a small seed still spans multiple pages (used to
+// exercise pagination end-to-end).
+func (m *namecheapMock) seedPortfolio(cap int, domains ...mockPortfolioDomain) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.portfolio = domains
+	m.pageSizeCap = cap
+}
+
+// seedInfo registers the getInfo response for a domain.
+func (m *namecheapMock) seedInfo(domain string, info mockDomainInfo) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.infos == nil {
+		m.infos = map[string]mockDomainInfo{}
+	}
+	m.infos[domain] = info
+}
+
+// getListCallCount returns how many getList requests the mock has served.
+func (m *namecheapMock) getListCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getListCalls
+}
+
 func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -140,6 +207,26 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 	// Fault injection: return an API error for the configured command.
 	if m.failCommand != "" && command == m.failCommand {
 		_, _ = io.WriteString(w, apiErrorXML(m.failCode, m.failMessage))
+		return
+	}
+
+	// Portfolio and getInfo commands are account-/domain-scoped rather than
+	// keyed on the DNS SLD.TLD state, so handle them before touching st.
+	switch command {
+	case "namecheap.domains.getList":
+		m.getListCalls++
+		page, _ := strconv.Atoi(r.FormValue("Page"))
+		if page < 1 {
+			page = 1
+		}
+		pageSize, _ := strconv.Atoi(r.FormValue("PageSize"))
+		if pageSize <= 0 {
+			pageSize = 20
+		}
+		_, _ = io.WriteString(w, m.renderGetPortfolioXML(page, pageSize))
+		return
+	case "namecheap.domains.getInfo":
+		_, _ = io.WriteString(w, m.renderGetInfoXML(r.FormValue("DomainName")))
 		return
 	}
 
@@ -327,6 +414,78 @@ func renderNSInfoXML(domain, nameserver, ip string) string {
     </DomainNSInfoResult>
   </CommandResponse>
 </ApiResponse>`, domain, nameserver, ip)
+}
+
+// renderGetPortfolioXML renders a namecheap.domains.getList response for the
+// requested page. It honors pageSizeCap (when set) to force multi-page results
+// from a small seed, and reports TotalItems/CurrentPage/PageSize so the provider
+// can paginate to completion.
+func (m *namecheapMock) renderGetPortfolioXML(page, pageSize int) string {
+	eff := pageSize
+	if m.pageSizeCap > 0 && m.pageSizeCap < eff {
+		eff = m.pageSizeCap
+	}
+	total := len(m.portfolio)
+	start := (page - 1) * eff
+	if start > total {
+		start = total
+	}
+	end := start + eff
+	if end > total {
+		end = total
+	}
+
+	var lines []string
+	for _, d := range m.portfolio[start:end] {
+		lines = append(lines, fmt.Sprintf(
+			`<Domain ID="%s" Name="%s" User="%s" Created="%s" Expires="%s" IsExpired="%t" IsLocked="%t" AutoRenew="%t" WhoisGuard="%s" IsPremium="%t" IsOurDNS="%t" />`,
+			d.ID, mockXMLAttrEscaper.Replace(d.Name), d.User, d.Created, d.Expires,
+			d.IsExpired, d.IsLocked, d.AutoRenew, d.WhoisGuard, d.IsPremium, d.IsOurDNS))
+	}
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.domains.getList">
+    <DomainGetListResult>
+      %s
+    </DomainGetListResult>
+    <Paging>
+      <TotalItems>%d</TotalItems>
+      <CurrentPage>%d</CurrentPage>
+      <PageSize>%d</PageSize>
+    </Paging>
+  </CommandResponse>
+</ApiResponse>`, strings.Join(lines, "\n      "), total, page, eff)
+}
+
+// renderGetInfoXML renders a namecheap.domains.getInfo response for the given
+// domain, or a "Domain not found" API error when the domain was not seeded.
+func (m *namecheapMock) renderGetInfoXML(domain string) string {
+	info, ok := m.infos[domain]
+	if !ok {
+		return apiErrorXML("2019166", fmt.Sprintf("Domain %q not found", domain))
+	}
+
+	var nsLines []string
+	for _, ns := range info.Nameservers {
+		nsLines = append(nsLines, fmt.Sprintf(`<Nameserver>%s</Nameserver>`, ns))
+	}
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.domains.getInfo">
+    <DomainGetInfoResult DomainName="%s" IsPremium="%t">
+      <PremiumDnsSubscription>
+        <IsActive>%t</IsActive>
+      </PremiumDnsSubscription>
+      <DnsDetails ProviderType="%s" IsUsingOurDNS="%t">
+        %s
+      </DnsDetails>
+    </DomainGetInfoResult>
+  </CommandResponse>
+</ApiResponse>`, domain, info.IsPremium, info.IsPremiumDNS, info.ProviderType, info.IsUsingOurDNS, strings.Join(nsLines, "\n        "))
 }
 
 // renderResultXML renders a generic success CommandResponse for write commands
