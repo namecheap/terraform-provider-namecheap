@@ -26,6 +26,15 @@ import (
 // precondition. namecheap_domain_records' own destroy resets email_type back
 // to "NONE", so no extra cleanup is needed for it.
 //
+// The helper resource must configure at least one `record` block:
+// resourceRecordCreate only threads email_type through to the API as a side
+// effect of a records/nameservers SetHosts call (namecheap_domain_record.go)
+// - with zero records and zero nameservers, Create sends nothing to the API
+// at all (email_type is silently dropped, though Terraform state still shows
+// it, since Create returns success without ever reading it back). A
+// throwaway TXT record is enough to force the SetHosts call that actually
+// carries email_type = "FWD" to the domain.
+//
 // setEmailForwarding is a full-table replace against the shared sandbox test
 // domain, and destroy clears the table entirely (unlike namecheap_domain_contacts,
 // whose destroy is state-only). To leave the domain as this test found it, it
@@ -44,6 +53,12 @@ resource "namecheap_domain_records" "fwd_precondition" {
   domain     = %[1]q
   mode       = "OVERWRITE"
   email_type = "FWD"
+
+  record {
+    hostname = "_tf-email-forwarding-test"
+    type     = "TXT"
+    address  = "managed-by-terraform-acceptance-test"
+  }
 }
 
 resource "namecheap_email_forwarding" "test" {
@@ -71,6 +86,12 @@ resource "namecheap_domain_records" "fwd_precondition" {
   domain     = %[1]q
   mode       = "OVERWRITE"
   email_type = "FWD"
+
+  record {
+    hostname = "_tf-email-forwarding-test"
+    type     = "TXT"
+    address  = "managed-by-terraform-acceptance-test"
+  }
 }
 
 resource "namecheap_email_forwarding" "test" {
