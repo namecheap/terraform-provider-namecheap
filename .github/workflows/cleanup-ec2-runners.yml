@@ -113,7 +113,7 @@ jobs:
         # reaper-stopped-max-age is deliberately tiny (1) so the day's pool
         # instance -- stopped anywhere from seconds to ~24h earlier -- is
         # always older than the threshold and gets terminated.
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}
@@ -129,7 +129,7 @@ jobs:
         # threshold applies, per the issue's "default thresholds" requirement
         # for this pass.
         if: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'leak-reap' }}
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}

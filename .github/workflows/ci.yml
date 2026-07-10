@@ -504,7 +504,7 @@ jobs:
           echo "Pre-attached ${SANDBOX_EIP_ALLOCATION_ID} to stopped warm-pool instance ${target}."
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
         with:
           mode: start
           github-token: ${{ steps.app-token.outputs.token }}
@@ -769,7 +769,7 @@ jobs:
         # "Configure AWS credentials" above doesn't skip stopping the
         # instance.
         if: always()
-        uses: namecheap/ec2-github-runner@65fbe4f0c1181c60d4df2bd3b33b8893e21fbb43 # v4.0.1 @ 2026-07-08: warm-pool reuse:stop registration fixes (#62/#64/#65/#66)
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
         with:
           mode: stop
           reuse: stop
