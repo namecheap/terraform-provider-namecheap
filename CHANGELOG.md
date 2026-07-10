@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.5.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.4.0...v2.5.0) (2026-07-10)
+
+
+### Features
+
+* add namecheap_domain_contacts resource (WHOIS contact management) ([#285](https://github.com/namecheap/terraform-provider-namecheap/issues/285)) ([2006dc9](https://github.com/namecheap/terraform-provider-namecheap/commit/2006dc9cde922d646548b76803de1502178ae76d))
+* add namecheap_domain, namecheap_domains, namecheap_domain_records data sources ([#286](https://github.com/namecheap/terraform-provider-namecheap/issues/286)) ([517b525](https://github.com/namecheap/terraform-provider-namecheap/commit/517b52573e79813d649d906362782394b1618eda))
+* add namecheap_nameserver resource (register personal nameservers) ([#284](https://github.com/namecheap/terraform-provider-namecheap/issues/284)) ([47a251f](https://github.com/namecheap/terraform-provider-namecheap/commit/47a251ff28e10f8bb1e75150fcb1f735b6fd9200))
+
 ## [2.4.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.3.5...v2.4.0) (2026-07-08)
 
 
