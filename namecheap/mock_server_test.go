@@ -179,11 +179,32 @@ func (m *namecheapMock) seed(domain string, hosts []hostEntry, emailType string,
 // seedForwards sets the initial email forwarding table for a domain,
 // simulating rules that already exist before Terraform manages them. Call it
 // before the provider issues any request (e.g. in a PreConfig/PreCheck).
+// forwards is copied, so later mutation of the caller's map (or of the
+// mock's own state) cannot alias the other.
 func (m *namecheapMock) seedForwards(domain string, forwards map[string]string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := m.stateFor(domain)
-	st.forwards = forwards
+	copied := make(map[string]string, len(forwards))
+	for mailbox, dest := range forwards {
+		copied[mailbox] = dest
+	}
+	st.forwards = copied
+}
+
+// addForward adds or overwrites a single forwarding rule for a domain,
+// simulating an out-of-band change (e.g. made through the dashboard) after
+// Terraform has already taken ownership of the resource. Safe to call
+// concurrently with the mock server handling requests, unlike mutating the
+// pointer returned by state() directly.
+func (m *namecheapMock) addForward(domain, mailbox, destination string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.stateFor(domain)
+	if st.forwards == nil {
+		st.forwards = map[string]string{}
+	}
+	st.forwards[mailbox] = destination
 }
 
 // seedPortfolio sets the account portfolio returned by getList. cap, when >0,

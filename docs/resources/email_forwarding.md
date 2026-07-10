@@ -17,10 +17,19 @@ API.
 
 ## Example Usage
 
+~> `namecheap_domain_records` only sends `email_type` to the API as a side effect of writing at least one `record` or `nameservers` entry — a `namecheap_domain_records` resource with `email_type` set but no `record`/`nameservers` sends nothing to the API on create, so the domain's real `email_type` would silently stay unchanged. Include at least one `record` block, as below, so `email_type = "FWD"` actually reaches the domain.
+
 ```terraform
 resource "namecheap_domain_records" "example-com" {
   domain     = "example.com"
+  mode       = "OVERWRITE"
   email_type = "FWD"
+
+  record {
+    hostname = "@"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
 }
 
 resource "namecheap_email_forwarding" "example-com" {
@@ -32,6 +41,8 @@ resource "namecheap_email_forwarding" "example-com" {
     # "*" is the catch-all alias
     "*" = "catchall@example.com"
   }
+
+  depends_on = [namecheap_domain_records.example-com]
 }
 ```
 

@@ -3,15 +3,29 @@
 package namecheap_provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 const mockEmailForwardingDomain = "mock-forwarding-example.com"
+
+// planCheckFunc adapts a plain func to plancheck.PlanCheck, so a call-count
+// assertion can run via ConfigPlanChecks - the mechanism that actually
+// executes for a PlanOnly step. TestStep.Check does not: it is only invoked
+// for non-PlanOnly steps (terraform-plugin-testing v1.16.0,
+// helper/resource/testing_new_config.go), so a Check on a PlanOnly step is
+// silently skipped and never asserts anything.
+type planCheckFunc func(context.Context, plancheck.CheckPlanRequest, *plancheck.CheckPlanResponse)
+
+func (f planCheckFunc) CheckPlan(ctx context.Context, req plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+	f(ctx, req, resp)
+}
 
 // mockCheckForward asserts the mock persisted the given destination for a
 // mailbox alias on the domain.
@@ -165,8 +179,7 @@ func TestAccMockEmailForwardingFullOwnershipAndDrift(t *testing.T) {
 				// An out-of-band rule appears after Terraform has taken
 				// ownership - the next refresh must surface it as drift.
 				PreConfig: func() {
-					st := m.state(mockEmailForwardingDomain)
-					st.forwards["extra"] = "extra-dest@example.com"
+					m.addForward(mockEmailForwardingDomain, "extra", "extra-dest@example.com")
 				},
 				Config:             config,
 				PlanOnly:           true,
@@ -184,6 +197,8 @@ func TestAccMockEmailForwardingCallCounts(t *testing.T) {
 	config := emailForwardingConfig(mockEmailForwardingDomain, map[string]string{
 		"info": "info-dest@example.com",
 	})
+
+	var getEmailForwardingBeforePlan, getHostsBeforePlan int
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { mockPreCheck(t, m) },
@@ -205,17 +220,29 @@ func TestAccMockEmailForwardingCallCounts(t *testing.T) {
 			{
 				// A plan-only step against the unchanged config must issue
 				// exactly one more getEmailForwarding (the refresh read) and
-				// no getHosts at all - the conflict check only runs on apply.
+				// no getHosts at all - the conflict check only runs on
+				// apply. Asserted via ConfigPlanChecks.PostApplyPostRefresh
+				// (which does run for PlanOnly steps) against a baseline
+				// snapshotted in PreConfig, rather than Check (which does
+				// not run for PlanOnly steps at all).
+				PreConfig: func() {
+					getEmailForwardingBeforePlan = m.commandCount("namecheap.domains.dns.getEmailForwarding")
+					getHostsBeforePlan = m.commandCount("namecheap.domains.dns.getHosts")
+				},
 				Config:   config,
 				PlanOnly: true,
-				Check: func(*terraform.State) error {
-					if got := m.commandCount("namecheap.domains.dns.getEmailForwarding"); got != 1 {
-						return fmt.Errorf("plan issued %d getEmailForwarding call(s), want exactly 1", got)
-					}
-					if got := m.commandCount("namecheap.domains.dns.getHosts"); got != 1 {
-						return fmt.Errorf("plan must add zero getHosts calls; total is %d, want still 1 (from create)", got)
-					}
-					return nil
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						planCheckFunc(func(_ context.Context, _ plancheck.CheckPlanRequest, resp *plancheck.CheckPlanResponse) {
+							if got := m.commandCount("namecheap.domains.dns.getEmailForwarding") - getEmailForwardingBeforePlan; got != 1 {
+								resp.Error = fmt.Errorf("plan issued %d getEmailForwarding call(s), want exactly 1", got)
+								return
+							}
+							if got := m.commandCount("namecheap.domains.dns.getHosts") - getHostsBeforePlan; got != 0 {
+								resp.Error = fmt.Errorf("plan added %d getHosts call(s), want exactly 0 - the conflict check must only run on apply", got)
+							}
+						}),
+					},
 				},
 			},
 		},
