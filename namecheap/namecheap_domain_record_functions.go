@@ -329,16 +329,27 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 	return nil
 }
 
-// createRecordsOverwrite overwrites existing records with provided new ones
-func createRecordsOverwrite(ctx context.Context, domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
+// createRecordsOverwrite overwrites existing records with provided new ones.
+// priorRecords additionally counts as "consented" for the unmanaged-deletion
+// pre-flight below, on top of records itself: pass the prior state's records
+// on update so a record the user just deliberately removed from config isn't
+// misreported as a surprise deletion (it's still live at pre-flight time,
+// but its removal was consented via the config diff, not out-of-band
+// drift). Pass nil on create, where there is no prior state to consult.
+func createRecordsOverwrite(ctx context.Context, domain string, emailType *string, records []interface{}, priorRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	domainRecords := convertRecordTypeSetToDomainRecords(&records)
 
 	var diags diag.Diagnostics
 
 	// Pre-flight read: enumerate live records that are about to be wiped by
 	// the destructive SetHosts below because they aren't in the incoming
-	// config, so the caller can warn before data loss instead of after (#65).
-	unmanaged, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, records, client)
+	// config (or, on update, in the prior state either), so the caller can
+	// warn before data loss instead of after (#65).
+	preflightReference := records
+	if len(priorRecords) > 0 {
+		preflightReference = append(append([]interface{}{}, records...), priorRecords...)
+	}
+	unmanaged, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, preflightReference, client)
 	if preflightDiags.HasError() {
 		return preflightDiags
 	}

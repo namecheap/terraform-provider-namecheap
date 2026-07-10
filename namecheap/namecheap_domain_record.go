@@ -170,7 +170,7 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeOverwrite && records != nil {
-		recordDiags := createRecordsOverwrite(ctx, domain, emailType, records, client)
+		recordDiags := createRecordsOverwrite(ctx, domain, emailType, records, nil, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
@@ -379,7 +379,11 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeOverwrite && (newRecordsLen != 0 || oldRecordsLen != 0) {
-		recordDiags := createRecordsOverwrite(ctx, domain, emailType, newRecords, client)
+		// oldRecords is passed as the pre-flight's prior-state reference so a
+		// record the user just deliberately removed from config (still live
+		// at pre-flight time, since SetHosts hasn't run yet) is treated as a
+		// consented removal rather than a surprise deletion warning.
+		recordDiags := createRecordsOverwrite(ctx, domain, emailType, newRecords, oldRecords, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
@@ -406,7 +410,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	// then we have to update just an email status
 	if emailType != nil && oldNameserversLen == 0 && newNameserversLen == 0 && oldRecordsLen == 0 && newRecordsLen == 0 {
 		if mode == ncModeOverwrite {
-			recordDiags := createRecordsOverwrite(ctx, domain, emailType, []interface{}{}, client)
+			recordDiags := createRecordsOverwrite(ctx, domain, emailType, []interface{}{}, nil, client)
 			if recordDiags.HasError() {
 				return recordDiags
 			}
@@ -423,7 +427,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 
 	// For overwrite mode, when no nameservers and records, and email type is not set, then we have to reset it to NONE
 	if emailType == nil && mode == ncModeOverwrite && oldNameserversLen == 0 && newNameserversLen == 0 && oldRecordsLen == 0 && newRecordsLen == 0 {
-		recordDiags := createRecordsOverwrite(ctx, domain, nil, []interface{}{}, client)
+		recordDiags := createRecordsOverwrite(ctx, domain, nil, []interface{}{}, nil, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
