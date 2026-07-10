@@ -232,7 +232,7 @@ below for the reuse/cleanup/EIP mechanics:
     output — the exact symptom seen earlier in this PR).
 - **Nightly drain and leak reaper.**
   [`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml) runs
-  `mode: cleanup` on two schedules: a nightly full drain at `37 2 * * *` UTC
+  `mode: cleanup` on two schedules: a nightly full drain at `7 23 * * *` UTC
   with a deliberately tiny `reaper-stopped-max-age` so the day's pool
   instance always ages past the threshold and is terminated, and a
   `7,37 * * * *` UTC leak-reaper pass at the action's own default threshold

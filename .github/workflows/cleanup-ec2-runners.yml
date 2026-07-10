@@ -15,9 +15,14 @@ name: Cleanup EC2 runners
 # the EIP directly.
 #
 # Two passes share this one workflow:
-#   - nightly full drain (37 2 * * * UTC): tiny reaper-stopped-max-age so the
-#     day's pool instance -- stopped anywhere from seconds to ~24h earlier --
-#     is always past the threshold and gets terminated.
+#   - nightly full drain (7 23 * * * UTC, i.e. right after the working day
+#     ends; :07 offset from the top of the hour per the same GitHub
+#     scheduling-congestion advice as the leak reaper below -- and observed
+#     schedule delays run to hours, so an early-off-peak slot keeps the drain
+#     landing well before the next workday starts): tiny
+#     reaper-stopped-max-age so the day's pool instance -- stopped anywhere
+#     from seconds to ~24h earlier -- is always past the threshold and gets
+#     terminated.
 #   - leak reaper (7,37 * * * * UTC, i.e. every 30 min offset from :00/:30 per
 #     GitHub's documented advice on avoiding top-of-hour/half-hour scheduling
 #     congestion): the action's own default reaper-stopped-max-age, catching
@@ -28,7 +33,7 @@ name: Cleanup EC2 runners
 # the schedules (see the issue's verification plan).
 on:
   schedule:
-    - cron: "37 2 * * *" # nightly full drain, UTC
+    - cron: "7 23 * * *" # nightly full drain, UTC (end of workday)
     - cron: "7,37 * * * *" # leak reaper, every 30 min, UTC
   workflow_dispatch:
     inputs:
@@ -88,7 +93,7 @@ jobs:
           EVENT_SCHEDULE: ${{ github.event.schedule }}
           DISPATCH_MODE: ${{ inputs.mode }}
         run: |
-          if [ "${EVENT_SCHEDULE}" = "37 2 * * *" ]; then
+          if [ "${EVENT_SCHEDULE}" = "7 23 * * *" ]; then
             echo "kind=nightly-drain" >> "$GITHUB_OUTPUT"
           elif [ "${EVENT_SCHEDULE}" = "7,37 * * * *" ]; then
             echo "kind=leak-reap" >> "$GITHUB_OUTPUT"
