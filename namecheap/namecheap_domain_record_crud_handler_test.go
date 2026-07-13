@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/assert"
 )
@@ -90,7 +91,13 @@ func TestResourceRecordCreate_MergeWithRecords(t *testing.T) {
 
 func TestResourceRecordCreate_OverwriteWithRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		default:
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
 	}))
 	defer server.Close()
 
@@ -186,8 +193,13 @@ func TestResourceRecordCreate_OverwriteRecordsAPIError(t *testing.T) {
 func TestResourceRecordCreate_WithEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		assert.Equal(t, "MX", r.FormValue("EmailType"))
-		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "MX", r.FormValue("EmailType"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
 	}))
 	defer server.Close()
 
@@ -234,7 +246,15 @@ func TestResourceRecordDelete_MergeWithRecords(t *testing.T) {
 
 func TestResourceRecordDelete_OverwriteWithRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		default:
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
 	}))
 	defer server.Close()
 
@@ -360,6 +380,70 @@ func TestResourceRecordRead_OverwriteWithRecords(t *testing.T) {
 	assert.Len(t, records, 1)
 }
 
+func TestResourceRecordRead_OverwriteWarnsAboutUnmanagedRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	// Refresh (the terraform plan path) must surface the warning even though
+	// there is no error - this is the plan-time visibility #250 asks for.
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	if assert.Len(t, diags, 1) {
+		assert.Equal(t, diag.Warning, diags[0].Severity)
+		assert.Contains(t, diags[0].Summary, "will delete 1 record(s)")
+		assert.Contains(t, diags[0].Detail, "api")
+	}
+}
+
+func TestResourceRecordRead_ImportDoesNotWarnAboutUnmanagedRecords(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	// Mimic `terraform import`: the importer only sets domain and mode; there
+	// are no prior-state records to compare against, and import is adopting
+	// everything it finds, not about to delete it.
+	_ = data.Set("mode", ncModeImport)
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Empty(t, diags, "IMPORT must never warn about unmanaged deletion")
+}
+
 func TestResourceRecordRead_MergeWithCustomNameservers(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
@@ -441,6 +525,10 @@ func TestResourceRecordUpdate_OverwriteWithRecords(t *testing.T) {
 		switch r.FormValue("Command") {
 		case "namecheap.domains.dns.getList":
 			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
 		case "namecheap.domains.dns.setHosts":
 			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
@@ -552,6 +640,8 @@ func TestResourceRecordUpdate_OverwriteNoEmailNoRecordsResetsToNone(t *testing.T
 		switch r.FormValue("Command") {
 		case "namecheap.domains.dns.getList":
 			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 		case "namecheap.domains.dns.setHosts":
 			assert.Equal(t, "NONE", r.FormValue("EmailType"))
 			_, _ = fmt.Fprint(w, setHostsSuccessXML())
@@ -580,6 +670,10 @@ func TestResourceRecordUpdate_OverwriteResetNameserversBeforeRecords(t *testing.
 			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
 		case "namecheap.domains.dns.setDefault":
 			_, _ = fmt.Fprint(w, setDefaultSuccessXML())
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
 		case "namecheap.domains.dns.setHosts":
 			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}

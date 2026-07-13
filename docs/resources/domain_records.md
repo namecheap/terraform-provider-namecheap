@@ -45,6 +45,8 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 - `domain` - (Required) Purchased available domain name on your account. Must be a registered root domain (e.g., `example.com`), not a subdomain. To manage subdomain records, use the root domain and set the subdomain as `hostname` in the `record` block.
 - `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`. **Warning: `OVERWRITE` mode replaces the entire DNS zone — all existing records not present in the Terraform configuration will be permanently deleted, including records created manually, by other tools, or by other Terraform resources.** Use `MERGE` mode if you only want to manage a subset of records.
+
+  Since v2.5.0, the provider warns before this happens: `terraform plan` shows a warning enumerating any live record that isn't in your configuration, and `terraform apply` warns again immediately before deleting them (covering the case where the record only appeared after your last refresh). Each warning includes ready-to-paste `record { ... }` blocks — add them to your configuration to adopt those records instead of losing them, and the next plan will be empty. See the [OVERWRITE safety guide](../guides/namecheap_domain_records_guide.md#overwrite) for details.
 - `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`
 - `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record`
   records. Conflicts with `nameservers`

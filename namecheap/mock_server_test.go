@@ -71,6 +71,11 @@ type namecheapMock struct {
 	failCommand string
 	failCode    string
 	failMessage string
+
+	// commandCounts tracks how many times each Command has been received,
+	// so tests can assert call-count invariants (e.g. "no extra API calls
+	// during plan/refresh", "exactly one added GetHosts per OVERWRITE apply").
+	commandCounts map[string]int
 }
 
 // mockPortfolioDomain is one entry of the account portfolio returned by the
@@ -132,6 +137,14 @@ func (m *namecheapMock) state(domain string) *mockDomainState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.domains[domain]
+}
+
+// commandCount returns how many requests the mock has received for the given
+// Command since it was created.
+func (m *namecheapMock) commandCount(command string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.commandCounts[command]
 }
 
 // stateFor returns the state for a domain, creating it on first use.
@@ -201,6 +214,11 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.commandCounts == nil {
+		m.commandCounts = map[string]int{}
+	}
+	m.commandCounts[command]++
 
 	w.Header().Set("Content-Type", "text/xml")
 
