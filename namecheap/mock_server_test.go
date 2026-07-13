@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ type mockDomainState struct {
 	// fieldName -> value (e.g. "FirstName" -> "Jane"). nil until setContacts
 	// is called.
 	contacts map[string]map[string]string
+	// forwards holds the domain's email forwarding table (mailbox alias ->
+	// destination address), keyed exactly as setEmailForwarding received it.
+	// nil until setEmailForwarding is called.
+	forwards map[string]string
 }
 
 // namecheapMock is a minimal STATEFUL mock of the Namecheap DNS API, sufficient
@@ -171,6 +176,37 @@ func (m *namecheapMock) seed(domain string, hosts []hostEntry, emailType string,
 	}
 }
 
+// seedForwards sets the initial email forwarding table for a domain,
+// simulating rules that already exist before Terraform manages them. Call it
+// before the provider issues any request (e.g. in a PreConfig/PreCheck).
+// forwards is copied, so later mutation of the caller's map (or of the
+// mock's own state) cannot alias the other.
+func (m *namecheapMock) seedForwards(domain string, forwards map[string]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.stateFor(domain)
+	copied := make(map[string]string, len(forwards))
+	for mailbox, dest := range forwards {
+		copied[mailbox] = dest
+	}
+	st.forwards = copied
+}
+
+// addForward adds or overwrites a single forwarding rule for a domain,
+// simulating an out-of-band change (e.g. made through the dashboard) after
+// Terraform has already taken ownership of the resource. Safe to call
+// concurrently with the mock server handling requests, unlike mutating the
+// pointer returned by state() directly.
+func (m *namecheapMock) addForward(domain, mailbox, destination string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.stateFor(domain)
+	if st.forwards == nil {
+		st.forwards = map[string]string{}
+	}
+	st.forwards[mailbox] = destination
+}
+
 // seedPortfolio sets the account portfolio returned by getList. cap, when >0,
 // caps the per-page size so a small seed still spans multiple pages (used to
 // exercise pagination end-to-end).
@@ -300,6 +336,11 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 	case "namecheap.domains.setContacts":
 		st.contacts = parseSetContactsRequest(r)
 		resp = renderResultXML("DomainSetContactResult", domain, `IsSuccess="true"`)
+	case "namecheap.domains.dns.getEmailForwarding":
+		resp = renderGetEmailForwardingXML(domain, st)
+	case "namecheap.domains.dns.setEmailForwarding":
+		st.forwards = parseSetEmailForwardingRequest(r)
+		resp = renderResultXML("DomainEmailForwardingResult", domain, `IsSuccess="true"`)
 	default:
 		resp = apiErrorXML("1010101", "mock: unsupported command "+command)
 	}
@@ -573,4 +614,50 @@ func renderGetContactsXML(domain string, st *mockDomainState) string {
     </DomainContactsResult>
   </CommandResponse>
 </ApiResponse>`, domain, strings.Join(blocks, "\n      "))
+}
+
+// parseSetEmailForwardingRequest extracts the 1-indexed mailboxN/ForwardToN
+// parameters the SDK's SetEmailForwardingWithContext sends.
+func parseSetEmailForwardingRequest(r *http.Request) map[string]string {
+	forwards := map[string]string{}
+	for i := 1; ; i++ {
+		idx := strconv.Itoa(i)
+		mailbox := r.FormValue("mailbox" + idx)
+		forwardTo := r.FormValue("ForwardTo" + idx)
+		if mailbox == "" && forwardTo == "" {
+			break
+		}
+		forwards[mailbox] = forwardTo
+	}
+	return forwards
+}
+
+// renderGetEmailForwardingXML renders a getEmailForwarding response from the
+// persisted forwarding table. Attribute casing matches the SDK's EmailForward
+// struct exactly (lowercase "mailbox", capitalized "ForwardTo") - a mismatch
+// would make the SDK's XML unmarshalling silently return an empty result.
+func renderGetEmailForwardingXML(domain string, st *mockDomainState) string {
+	mailboxes := make([]string, 0, len(st.forwards))
+	for mailbox := range st.forwards {
+		mailboxes = append(mailboxes, mailbox)
+	}
+	sort.Strings(mailboxes)
+
+	var lines []string
+	for _, mailbox := range mailboxes {
+		lines = append(lines, fmt.Sprintf(
+			`<Forward mailbox="%s" ForwardTo="%s" />`,
+			mockXMLAttrEscaper.Replace(mailbox), mockXMLAttrEscaper.Replace(st.forwards[mailbox]),
+		))
+	}
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse>
+    <DomainEmailForwardingResult Domain="%s">
+      %s
+    </DomainEmailForwardingResult>
+  </CommandResponse>
+</ApiResponse>`, domain, strings.Join(lines, "\n      "))
 }
