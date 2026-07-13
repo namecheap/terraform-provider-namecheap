@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.6.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.5.0...v2.6.0) (2026-07-13)
+
+
+### Features
+
+* add namecheap_email_forwarding resource ([#289](https://github.com/namecheap/terraform-provider-namecheap/issues/289)) ([66c8e65](https://github.com/namecheap/terraform-provider-namecheap/commit/66c8e65e4f23fe59b906381532c4d8b298342480))
+* warn before OVERWRITE mode deletes unmanaged DNS records ([#288](https://github.com/namecheap/terraform-provider-namecheap/issues/288)) ([825256a](https://github.com/namecheap/terraform-provider-namecheap/commit/825256a2caf948a964f731a3508a68a9f603ca9d))
+
 ## [2.5.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.4.0...v2.5.0) (2026-07-10)
 
 
