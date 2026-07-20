@@ -51,7 +51,7 @@ jobs:
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           # Latest patch of go.mod's Go minor (e.g. 1.26 -> 1.26.4) rather than
           # a cached or exact-pinned patch, so the check job tests the newest.
@@ -192,7 +192,7 @@ jobs:
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           # Latest patch of go.mod's Go minor (matches the check job) so stdlib
           # advisories already fixed in a newer patch aren't reported against us.
@@ -357,7 +357,7 @@ jobs:
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.gomod.outputs.minor }}
           check-latest: true
