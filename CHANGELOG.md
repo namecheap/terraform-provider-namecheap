@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.1](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.6.0...v2.6.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **deps:** bump golang.org/x/text to 0.39.0 and google.golang.org/grpc to 1.82.1 ([#296](https://github.com/namecheap/terraform-provider-namecheap/issues/296)) ([cffc8c5](https://github.com/namecheap/terraform-provider-namecheap/commit/cffc8c52283f5589f08e73a8832789093790c5b5))
+
 ## [2.6.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.5.0...v2.6.0) (2026-07-13)
 
 
