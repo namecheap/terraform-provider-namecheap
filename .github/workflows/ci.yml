@@ -1,18 +1,17 @@
 name: CI
 
 on:
+  # Post-merge run only: PR branches are covered by pull_request, so each PR
+  # runs CI once. Pre-PR branches: use workflow_dispatch.
   push:
     branches:
-      - "**"
-  # pull_request enables CI on PRs FROM FORKS, which the push trigger never fires
-  # for. This is what lets external contributors' PRs run the required checks
-  # (Check, Trivy, govulncheck) and the credential-free mock acceptance job. The
-  # secret-bound EC2 sandbox jobs are explicitly guarded to `push` only (see
-  # start-runner / acceptance_test below) so untrusted fork code never reaches
-  # the self-hosted runner or the whitelisted-IP secrets. Uses `pull_request`
-  # (NOT pull_request_target) so fork PRs run with a read-only token and no
-  # secrets — the safe model.
+      - master
+  # Primary CI trigger for all PRs, forks included. NOT pull_request_target, so
+  # fork PRs run with a read-only token and no secrets; the EC2 sandbox jobs
+  # additionally require a same-repo PR (see start-runner below).
   pull_request:
+  # Manual run on any ref under the dispatcher's identity — the path for live
+  # acceptance on Dependabot branches (see CLAUDE.md).
   workflow_dispatch:
 
 permissions:
@@ -295,19 +294,23 @@ jobs:
 
       - name: Post or update PR comment
         # Skip whenever the token is read-only and commenting would 403:
-        #  - Dependabot pushes (secrets redacted), and
-        #  - fork pull_requests (fork head repo != this repo), which get a
-        #    read-only GITHUB_TOKEN.
-        # Push runs and same-repo (internal) PRs keep a writable token and post
-        # the sticky summary. The job summary + artifact are produced regardless.
+        # Dependabot events (secrets redacted) and fork pull_requests (read-only
+        # GITHUB_TOKEN). Same-repo PRs and manual dispatch runs post the sticky
+        # summary. The job summary + artifact are produced regardless.
         if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           GH_TOKEN: ${{ github.token }}
+          # Empty except on pull_request events, where GITHUB_REF_NAME is
+          # "<N>/merge" and the branch lookup below would find nothing.
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -uo pipefail
           marker='<!-- security-scan-summary -->'
-          pr="$(gh pr list --head "${GITHUB_REF_NAME}" --state open \
-                  --json number --jq '.[0].number // empty')"
+          pr="${EVENT_PR_NUMBER:-}"
+          if [ -z "${pr}" ]; then
+            pr="$(gh pr list --head "${GITHUB_REF_NAME}" --state open \
+                    --json number --jq '.[0].number // empty')"
+          fi
           if [ -z "${pr}" ]; then
             echo "No open PR for branch ${GITHUB_REF_NAME}; summary is on the job summary + artifact only."
             exit 0
@@ -398,17 +401,12 @@ jobs:
     name: Start self-hosted EC2 runner
     needs: [check, security, govulncheck]
     # The live-API sandbox pipeline needs secrets.* (AWS creds, whitelisted EIP,
-    # NAMECHEAP_API_KEY), so it only runs where secrets are available AND the code
-    # is trusted:
-    #   * same-repo pull requests (head repo == this repo) — this is what makes
-    #     the real acceptance suite run on EVERY maintainer PR; and
-    #   * pushes to master (the post-merge run).
-    # It must NEVER run for fork PRs (secrets are redacted; pull_request_target is
-    # deliberately not used) — those are served by acceptance_mock instead — nor
-    # for Dependabot (no secrets). Gating pushes to master (not every branch)
-    # means a same-repo PR gets exactly one live run (from its pull_request
-    # event), never a duplicate from the branch push.
-    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+    # NAMECHEAP_API_KEY), so it only runs where secrets are available AND the
+    # code is trusted: same-repo PRs, pushes to master (post-merge), and manual
+    # workflow_dispatch (write access required, so always a maintainer). Never
+    # fork PRs (redacted secrets; served by acceptance_mock instead) nor
+    # Dependabot events (same).
+    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -572,10 +570,9 @@ jobs:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: start-runner
-    # Same gate as start-runner (the live-API sandbox run on the self-hosted EC2
-    # runner): same-repo PRs + pushes to master, never forks/Dependabot. Fork and
-    # Dependabot PRs are served by acceptance_mock instead.
-    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master')) }}
+    # Same gate as start-runner: same-repo PRs + pushes to master + manual
+    # dispatch, never forks/Dependabot (those get acceptance_mock instead).
+    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
     steps:
       # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
       # Runs before our own scripts exist on disk, so it — not a custom
