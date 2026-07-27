@@ -37,9 +37,32 @@ release-please parses to compute the version bump.
 > `GITHUB_TOKEN` — only App-authored events re-trigger `release.yml`. The App
 > must grant `contents: write` and `pull-requests: write`.
 
+## If a release doesn't appear (troubleshooting)
+
+`versioning.yml` only runs after a successful CI run on `master`, and
+release-please state is **cumulative** — every run re-scans all commits since
+the last tag, so a missed trigger delays a release rather than losing it.
+Known cases:
+
+- **CI failed or was flaky on a merge commit** (including the Release PR's
+  own merge commit): re-run the failed CI run — `workflow_run` fires again
+  when a re-run completes — or trigger versioning manually (Actions →
+  Versioning → Run workflow). A merged Release PR whose tag was never created
+  is reconciled the same way on the next successful run.
+- **GoReleaser failed after the tag was created** (bad GPG key, upload
+  error): the GitHub Release exists without binaries. The Terraform Registry
+  will not ingest an artifact-less version, so nothing broken is served —
+  fix the cause and re-run the failed `release.yml` run for the tag.
+
 ## Manual / emergency release
 
 If release-please is unavailable, bump `.release-please-manifest.json` and
-`CHANGELOG.md`, commit to `master`, then tag and push:
+`CHANGELOG.md`, merge to `master` **before tagging** (a tag pushed against a
+stale manifest makes the next release-please run recompute the same version
+and fail on the existing tag), re-sync (`git checkout master && git pull`),
+then tag and push:
 `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`. `release.yml`
-runs on the tag; the next release-please run reconciles its state.
+runs on the tag; the next release-please run reconciles its state. Caveat: in
+this path GoReleaser creates the GitHub Release with an **empty body** (its
+changelog is disabled — release-please owns release notes in the normal flow);
+edit the Release afterwards and paste the CHANGELOG entry in by hand.
