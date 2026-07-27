@@ -13,15 +13,26 @@ on:
       - master
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
+# Serialize release-please runs: back-to-back merges to master produce
+# overlapping CI successes that would otherwise race on the same release PR.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+# The default GITHUB_TOKEN needs nothing — every write goes through the App
+# token generated below.
+permissions: {}
 
 jobs:
   release-please:
     # Only act on a green master (or a manual dispatch). workflow_run fires for
-    # failed CI runs too, so the conclusion guard is required.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # failed CI runs too, so the conclusion guard is required. The branch filter
+    # matches the run's HEAD branch name, which a fork PR can spoof by naming
+    # its branch "master" — hence the head_repository guard.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       # A GitHub App token (not the default GITHUB_TOKEN) is mandatory here:
