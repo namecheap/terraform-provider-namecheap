@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.2](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.6.1...v2.6.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/namecheap/go-namecheap-sdk/v2 from 2.7.0 to 2.7.1 ([#301](https://github.com/namecheap/terraform-provider-namecheap/issues/301)) ([be35f2b](https://github.com/namecheap/terraform-provider-namecheap/commit/be35f2b6ab825d67a2fe409472bd325c6c599798))
+
 ## [2.6.1](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.6.0...v2.6.1) (2026-07-22)
 
 
