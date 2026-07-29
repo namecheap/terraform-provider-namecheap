@@ -23,13 +23,6 @@ concurrency:
 # token generated below.
 permissions: {}
 
-# Two quick merges to master each complete CI and would run release-please
-# concurrently, racing on the release branch/tag. Serialize; never cancel a
-# running release job.
-concurrency:
-  group: release-please-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release-please:
     # Only act on a green master (or a manual dispatch). workflow_run fires for
