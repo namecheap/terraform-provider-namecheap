@@ -721,13 +721,27 @@ jobs:
           # Half the quota each keeps the account total inside it. The helper
           # client reads the same variable (see provider_test.go).
           NAMECHEAP_REQUESTS_PER_MINUTE: 10
-          # Halving each client's rate makes requests wait longer for a token,
-          # and that wait counts against the retry budget — so the stock 4
-          # attempts / 2 minutes can expire on a healthy but throttled call,
-          # especially in the deliberately parallel DNS tests. Give retries room
-          # to outlast the rolling window rather than failing inside it.
-          NAMECHEAP_MAX_RETRIES: 8
-          NAMECHEAP_RETRY_MAX_ELAPSED: 5m
+          # Every retry is itself a request, so retrying quickly makes throttling
+          # worse: it spends quota without waiting out the window that rejected
+          # the call. Retry FEWER times, spaced FURTHER apart.
+          #
+          # The SDK doubles each delay from the base, clamps it to the cap, then
+          # jitters it to 50-100% of that value, so the figure that matters is the
+          # jittered MINIMUM. At 5 attempts with a 10s base and 60s cap the four
+          # delays are 10/20/40/60s nominal, so the minimum total is
+          # 5+10+20+30 = 65s — past the one-minute window on every run, for five
+          # requests. (A 5s base gives a 32.5s minimum and clears the window only
+          # about a third of the time; the stock 500ms/30s backoff spends eight
+          # requests and still averages under a minute.)
+          #
+          # Elapsed must cover the whole schedule or the last attempts never
+          # happen: 130s of backoff + 5x30s request timeout + limiter waits is
+          # ~310s, so 8m leaves headroom while staying well inside the suite's
+          # 30m go-test timeout.
+          NAMECHEAP_MAX_RETRIES: 5
+          NAMECHEAP_RETRY_BASE_DELAY: 10s
+          NAMECHEAP_RETRY_MAX_DELAY: 60s
+          NAMECHEAP_RETRY_MAX_ELAPSED: 8m
 
       - name: Post-job hygiene sweep
         # Last step, if: always() — this is what actually satisfies G6 ("no

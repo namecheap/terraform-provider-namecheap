@@ -74,7 +74,7 @@ honored unchanged; the provider never overrides it with a detected address.
 Namecheap enforces a documented primary quota (per-minute request limit) at the
 account level. When several CI jobs — or several `terraform apply` runs — hit
 the API for the **same account** concurrently, their requests are counted
-together and can trip the limit. Four provider arguments control how the client
+together and can trip the limit. Six provider arguments control how the client
 paces and recovers from this:
 
 - `requests_per_minute` (default `20`, valid range `1`–`20`) — the client-side
@@ -88,16 +88,40 @@ paces and recovers from this:
   retrying a single call, as a [Go duration string](https://pkg.go.dev/time#ParseDuration).
   Keep this comfortably under your CI step timeout so a retry storm does not
   cause the job to be killed mid-call.
+- `retry_base_delay` (default `"500ms"`) — the first backoff delay, as a Go
+  duration string. Each subsequent delay doubles, is capped by `retry_max_delay`,
+  and is then **jittered to between 50% and 100%** of that value. Must not exceed
+  `retry_max_delay`.
+- `retry_max_delay` (default `"30s"`) — the cap on any single backoff delay, as a
+  Go duration string. Must be at least `retry_base_delay`.
 - `request_timeout` (default `"30s"`) — the per-request HTTP timeout, as a Go
   duration string.
+
+!> **Every retry is itself a request.** When the API is rate-limiting you,
+retrying quickly makes it worse: the retries are counted against the same quota
+that rejected the original call. Under a rate limit you want *fewer* attempts
+spaced *further apart* — raise `retry_base_delay` and `retry_max_delay` rather
+than `max_retries`.
+
+Because delays are jittered down to as little as half, size the backoff by its
+**minimum**, not its nominal schedule. With the stock `500ms` base, four attempts
+sleep at most 3.5s — and at least 1.75s — so they are exhausted well inside a
+one-minute rate window. A `10s` base with a `60s` cap over five attempts sleeps
+between 65s and 130s, clearing the window on every run for five requests. A `5s`
+base looks close on paper (75s nominal) but its minimum is 32.5s, so it clears a
+one-minute window only about a third of the time.
 
 ```terraform
 # Example: four parallel pipelines sharing one Namecheap account.
 provider "namecheap" {
-  requests_per_minute = 5     # 20 / 4 jobs
-  max_retries         = 6     # ride out brief bursts from sibling jobs
-  retry_max_elapsed   = "3m"  # keep below the CI step timeout
-  request_timeout     = "30s"
+  requests_per_minute = 5 # 20 / 4 jobs
+  max_retries         = 5 # few attempts, because each one costs quota
+  # ...spaced far enough apart that even the jittered minimum (65s) outlasts a
+  # one-minute rate window.
+  retry_base_delay  = "10s"
+  retry_max_delay   = "60s"
+  retry_max_elapsed = "8m" # must cover the whole schedule; keep below the CI step timeout
+  request_timeout   = "30s"
 }
 ```
 
@@ -107,7 +131,8 @@ safety net rather than the only defense.
 
 Each argument also has a `NAMECHEAP_*` environment variable
 (`NAMECHEAP_REQUESTS_PER_MINUTE`, `NAMECHEAP_MAX_RETRIES`,
-`NAMECHEAP_RETRY_MAX_ELAPSED`, `NAMECHEAP_REQUEST_TIMEOUT`), which is often more
+`NAMECHEAP_RETRY_MAX_ELAPSED`, `NAMECHEAP_RETRY_BASE_DELAY`,
+`NAMECHEAP_RETRY_MAX_DELAY`, `NAMECHEAP_REQUEST_TIMEOUT`), which is often more
 convenient to set per pipeline.
 
 ## Debug logging
