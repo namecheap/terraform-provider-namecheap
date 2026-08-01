@@ -5,6 +5,10 @@ description: |-
   
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_personal_nameserver (Resource)
 
 Registers and manages a personal (glue/vanity) nameserver — such as `ns1.example.com` — for a domain on your Namecheap account, using the [Namecheap `domains.ns` API](https://www.namecheap.com/support/api/methods/domains-ns/create/).
@@ -13,19 +17,7 @@ A personal nameserver is a host you register under one of your domains and point
 
 ## Example Usage
 
-```terraform
-resource "namecheap_personal_nameserver" "ns1" {
-  domain     = "example.com"
-  nameserver = "ns1.example.com"
-  ip         = "93.184.216.34"
-}
-
-resource "namecheap_personal_nameserver" "ns2" {
-  domain     = "example.com"
-  nameserver = "ns2.example.com"
-  ip         = "93.184.216.35"
-}
-```
+{{tffile "examples/resources/personal_nameserver/example_1.tf"}}
 
 ~> `ip` must be a real, routable **public** IP address (the glue record for the nameserver host). The Namecheap API rejects reserved ranges — RFC 1918 private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), RFC 5737 documentation (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`), loopback, etc. — with `Parameter value policy error. IP address ... is reserved. (3024278)`. The addresses above are placeholders; use your nameserver host's actual public IP.
 
@@ -41,6 +33,4 @@ resource "namecheap_personal_nameserver" "ns2" {
 
 Personal nameservers can be imported using the composite ID `<domain>/<nameserver>`, e.g.,
 
-```shell
-terraform import namecheap_personal_nameserver.ns1 example.com/ns1.example.com
-```
+{{codefile "shell" "examples/resources/personal_nameserver/import.sh"}}

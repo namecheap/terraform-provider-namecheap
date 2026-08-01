@@ -5,6 +5,10 @@ description: |-
   Manages a domain's entire email forwarding table (mailbox alias -> destination address).
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_email_forwarding (Resource)
 
 Manages a domain's email forwarding rules via the Namecheap [`domains.dns.getEmailForwarding` / `domains.dns.setEmailForwarding`](https://www.namecheap.com/support/api/methods/domains-dns/set-email-forwarding/) API.
@@ -17,32 +21,7 @@ Manages a domain's email forwarding rules via the Namecheap [`domains.dns.getEma
 
 ~> `namecheap_domain_records` only sends `email_type` to the API as a side effect of writing at least one `record` or `nameservers` entry — a `namecheap_domain_records` resource with `email_type` set but no `record`/`nameservers` sends nothing to the API on create, so the domain's real `email_type` would silently stay unchanged. Include at least one `record` block, as below, so `email_type = "FWD"` actually reaches the domain.
 
-```terraform
-resource "namecheap_domain_records" "example-com" {
-  domain     = "example.com"
-  mode       = "OVERWRITE"
-  email_type = "FWD"
-
-  record {
-    hostname = "@"
-    type     = "A"
-    address  = "203.0.113.10"
-  }
-}
-
-resource "namecheap_email_forwarding" "example-com" {
-  domain = "example.com"
-
-  forwards = {
-    info  = "me@example.com"
-    sales = "sales-team@example.com"
-    # "*" is the catch-all alias
-    "*" = "catchall@example.com"
-  }
-
-  depends_on = [namecheap_domain_records.example-com]
-}
-```
+{{tffile "examples/resources/email_forwarding/example_1.tf"}}
 
 ## Argument Reference
 
@@ -53,6 +32,4 @@ resource "namecheap_email_forwarding" "example-com" {
 
 Email forwarding can be imported by domain name, e.g.,
 
-```shell
-terraform import namecheap_email_forwarding.example-com example.com
-```
+{{codefile "shell" "examples/resources/email_forwarding/import.sh"}}

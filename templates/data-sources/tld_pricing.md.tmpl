@@ -5,50 +5,23 @@ description: |-
   The published Namecheap price for one TLD, action and term.
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_tld_pricing (Data Source)
 
 Looks up what Namecheap charges for one TLD, one action (register, renew or transfer) and one term, via the `namecheap.users.getPricing` API command. The request is narrowed server-side, so each read is exactly one API call rather than a walk of the full price sheet. Terraform reads a data source once per plan and again per apply, so a plan-then-apply cycle makes two calls per instance.
 
 ## Example Usage
 
-```terraform
-data "namecheap_tld_pricing" "com" {
-  tld    = "com"
-  action = "REGISTER"
-  years  = 1
-}
-
-output "com_price" {
-  value = "${data.namecheap_tld_pricing.com.price} ${data.namecheap_tld_pricing.com.currency}"
-}
-```
+{{tffile "examples/data-sources/tld_pricing/example_1.tf"}}
 
 ## Comparing TLDs
 
 Use `for_each` to price several TLDs, then pick with ordinary HCL. Compare with `tonumber()`, never as strings — `"8.88" < "10.50"` is false lexicographically:
 
-```terraform
-data "namecheap_tld_pricing" "candidates" {
-  for_each = toset(["com", "net", "org"])
-
-  tld    = each.key
-  action = "REGISTER"
-  years  = 1
-}
-
-locals {
-  prices         = { for tld, p in data.namecheap_tld_pricing.candidates : tld => tonumber(p.price) }
-  cheapest_price = min(values(local.prices)...)
-
-  # sort() makes the tie-break deterministic: promotions routinely price several
-  # TLDs identically, and picking "the" cheapest one would otherwise fail.
-  cheapest_tlds = sort([for tld, price in local.prices : tld if price == local.cheapest_price])
-}
-
-output "cheapest_tld" {
-  value = local.cheapest_tlds[0]
-}
-```
+{{tffile "examples/data-sources/tld_pricing/example_2.tf"}}
 
 Each element of a `for_each` is its own read, so pricing three TLDs is three API calls.
 

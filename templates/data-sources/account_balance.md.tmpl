@@ -5,6 +5,10 @@ description: |-
   The funds available in the Namecheap account the provider is authenticated as.
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_account_balance (Data Source)
 
 Reads the funds in the account the provider is authenticated as, via the Namecheap `namecheap.users.getBalances` API command. It takes no arguments — the account is the one the provider credentials belong to.
@@ -13,35 +17,13 @@ Its purpose is to make money visible to a plan: registrations, renewals and tran
 
 ## Example Usage
 
-```terraform
-data "namecheap_account_balance" "current" {}
-
-output "funds" {
-  value = "${data.namecheap_account_balance.current.available_balance} ${data.namecheap_account_balance.current.currency}"
-}
-```
+{{tffile "examples/data-sources/account_balance/example_1.tf"}}
 
 ## Cost-aware applies
 
 Pair the balance with a `precondition` so a charge-bearing apply fails at plan time — with your message — instead of part-way through a batch:
 
-```terraform
-data "namecheap_account_balance" "current" {}
-
-data "namecheap_tld_pricing" "com" {
-  tld    = "com"
-  action = "REGISTER"
-}
-
-output "planned_registration" {
-  value = data.namecheap_tld_pricing.com.price
-
-  precondition {
-    condition     = tonumber(data.namecheap_account_balance.current.available_balance) >= tonumber(data.namecheap_tld_pricing.com.price)
-    error_message = "Insufficient Namecheap balance for registration."
-  }
-}
-```
+{{tffile "examples/data-sources/account_balance/example_2.tf"}}
 
 The same `precondition` block works inside a `lifecycle` block on a charge-bearing resource, which is where you usually want it.
 

@@ -60,8 +60,56 @@ install_linux_amd64: build
 lint:
 	golangci-lint run
 
-# Make sure you have installed https://github.com/hashicorp/terraform-plugin-docs
+# Registry documentation. tfplugindocs is pinned as a Go tool dependency (see the
+# `tool` directive in go.mod), so these targets need no separately installed
+# binary and CI runs exactly what contributors run. Generation reads the schema
+# from a freshly built provider, so it needs a `terraform` binary on PATH.
 docs:
-	tfplugindocs
+	go tool tfplugindocs generate --provider-name ${NAME}
 
-.PHONY: format check test testacc testacc-sandbox testacc-mock build release install_darwin_amd64 install_linux_amd64 lint docs
+# docs-check regenerates and fails if the committed tree differs — the gate that
+# stops code and its published documentation drifting apart. Untracked files
+# count too: a new resource whose page was never generated must not pass.
+docs-check: docs
+	@git diff --exit-code -- docs/ || { echo "::error::docs/ is stale — run 'make docs' and commit the result"; exit 1; }
+	@test -z "$$(git ls-files --others --exclude-standard -- docs/)" || { \
+		echo "::error::untracked generated docs:"; \
+		git ls-files --others --exclude-standard -- docs/; exit 1; }
+	go tool tfplugindocs validate --provider-name ${NAME}
+
+# examples-validate type-checks every example against the provider built from
+# this tree, via a dev_overrides CLI config. Overrides skip `terraform init`
+# entirely, so validation needs no network and no credentials — and it checks the
+# examples against THIS provider rather than whatever is published.
+#
+# Each .tf file is validated as its own module. Documentation snippets are
+# alternatives to each other, not one composed configuration: two snippets on a
+# page routinely declare the same resource name to show two ways of doing the
+# same thing, which is a duplicate declaration if they share a module.
+#
+# The required_providers shim is injected into the throwaway module rather than
+# into the examples, because published snippets should show the user's resource,
+# not boilerplate. Without it Terraform resolves the bare name to
+# hashicorp/namecheap and the dev override never matches.
+examples-validate: build
+	@set -e; \
+	bin_dir="$$(pwd)"; \
+	work="$$(mktemp -d -t namecheap-examples.XXXXXX)"; \
+	trap 'rm -rf "$$work"' EXIT; \
+	printf 'provider_installation {\n  dev_overrides {\n    "namecheap/namecheap" = "%s"\n  }\n  direct {}\n}\n' "$$bin_dir" > "$$work/tfrc"; \
+	found=0; \
+	for tf in $$(find examples -name '*.tf' | sort); do \
+		found=$$((found + 1)); \
+		module="$$work/module"; \
+		rm -rf "$$module"; mkdir -p "$$module"; \
+		cp "$$tf" "$$module/main.tf"; \
+		printf 'terraform {\n  required_providers {\n    namecheap = {\n      source = "namecheap/namecheap"\n    }\n  }\n}\n' > "$$module/versions.tf"; \
+		echo "validating $$tf"; \
+		TF_CLI_CONFIG_FILE="$$work/tfrc" terraform -chdir="$$module" validate >/dev/null \
+			|| { echo "::error file=$$tf::terraform validate failed"; \
+			     TF_CLI_CONFIG_FILE="$$work/tfrc" terraform -chdir="$$module" validate; exit 1; }; \
+	done; \
+	test "$$found" -gt 0 || { echo "::error::no examples found to validate"; exit 1; }; \
+	echo "validated $$found example files"
+
+.PHONY: format check test testacc testacc-sandbox testacc-mock build release install_darwin_amd64 install_linux_amd64 lint docs docs-check examples-validate

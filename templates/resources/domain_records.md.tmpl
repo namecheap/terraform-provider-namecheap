@@ -5,40 +5,17 @@ description: |-
   
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_domain_records (Resource)
 
 Follow [Namecheap domain records guide](../guides/namecheap_domain_records_guide.md) to get detailed information about each argument and usage examples.
 
 ## Example Usage
 
-```terraform
-resource "namecheap_domain_records" "my-domain-com" {
-  domain = "my-domain.com"
-  email_type = "NONE"
-
-  record {
-    hostname = "blog"
-    type = "A"
-    address = "10.11.12.13"
-  }
-
-  record {
-    hostname = "@"
-    type = "ALIAS"
-    address = "www.testdomain.com"
-  }
-}
-
-resource "namecheap_domain_records" "my-domain2-com" {
-  domain = "my-domain2.com"
-  mode = "OVERWRITE" // WARNING: this will DELETE all records not defined in this block
-
-  nameservers = [
-    "ns1.some-domain.com",
-    "ns2.some-domain.com"
-  ]
-}
-```
+{{tffile "examples/resources/domain_records/example_1.tf"}}
 
 ## Argument Reference
 
@@ -66,6 +43,4 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 Domain records can be imported by domain name, e.g.,
 
-```shell
-terraform import namecheap_domain_records.main example.com
-```
+{{codefile "shell" "examples/resources/domain_records/import.sh"}}

@@ -1,0 +1,1 @@
+terraform import namecheap_domain_contacts.main example.com

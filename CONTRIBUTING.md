@@ -107,14 +107,52 @@ $ git push --force-with-lease
 - Include both unit tests and [Terraform acceptance tests](https://developer.hashicorp.com/terraform/plugin/testing/acceptance-tests)
   where applicable. Acceptance tests should use `resource.Test()` with `TestStep`.
 - Keep PRs focused — one logical change per PR.
+- Adding a resource or data source? See [Definition of done](#definition-of-done-for-a-new-resource-or-data-source) — the registry page is generated, so documentation is part of the change, not a follow-up.
 - Familiarize yourself with [`SECURITY_COMPLIANCE.md`](SECURITY_COMPLIANCE.md) for the compliance gates your PR will be checked against (dependency drift, vulnerability and license scans, SBOM publication, etc.).
+
+### Definition of done for a new resource or data source
+
+Registry documentation is generated from the provider schema by
+[tfplugindocs](https://github.com/hashicorp/terraform-plugin-docs), which is
+pinned as a Go tool dependency — no separate install. A new surface is finished
+when all of the following are true, and CI's `docs` job enforces every one:
+
+1. **Every attribute has a `Description`.** The published page is generated from
+   these, so an empty one ships as a blank cell. `TestSchemaDescriptionsArePresent`
+   fails on any attribute without one — nested blocks included — and
+   `TestSchemaDescriptionsAreUsable` rejects text that merely restates the
+   attribute name. Put the nuance in the description itself: whether a change
+   forces replacement, what an empty value means, which other attribute it
+   conflicts with.
+2. **There is an example.** Add `examples/resources/<name>/resource.tf` (or
+   `examples/data-sources/<name>/data-source.tf`) and reference it from the
+   template. Every `.tf` under `examples/` is type-checked against the provider
+   built from your branch, so an example that no longer compiles fails CI.
+3. **Importable resources ship an `import.sh`** showing the ID format, and the
+   page has an `## Import` section. Add the ID to the table in the
+   [importing guide](docs/guides/importing.md).
+4. **There is a template** at `templates/resources/<name>.md.tmpl`, and
+   `make docs` has been run and the regenerated `docs/` committed.
+
+Locally:
+
+```shell
+make docs               # regenerate docs/ from templates + schema
+make docs-check         # fail if the committed tree is stale, then validate it
+make examples-validate  # type-check every example against this provider
+```
+
+Edit `templates/`, never `docs/` — `docs/` is generated output and any hand-edit
+is reverted by the next `make docs` (and caught by `make docs-check` before
+that).
 
 ### What runs on your PR
 
 Every pull request — **including PRs from forks** — runs, on GitHub-hosted
 runners with no secrets:
 
-- the `check` job (unit tests, lint, coverage), and
+- the `check` job (unit tests, lint, coverage),
+- the `docs` job (documentation is current, examples type-check), and
 - `acceptance_mock`: the credential-free mock acceptance suite (`make
   testacc-mock`) across a Terraform + OpenTofu version matrix.
 

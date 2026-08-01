@@ -5,6 +5,10 @@ description: |-
   Read-only information about a single domain in the account.
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_domain (Data Source)
 
 Looks up read-only information about a single domain. Use it to reference an existing (non-Terraform-managed) domain's DNS provider, nameservers or expiry in other resources, or to gate logic on domain properties (is it expiring? locked? which DNS type is active?).
@@ -13,23 +17,7 @@ Looks up read-only information about a single domain. Use it to reference an exi
 
 ## Example Usage
 
-```terraform
-data "namecheap_domain" "main" {
-  domain = "example.com"
-}
-
-output "uses_namecheap_dns" {
-  value = data.namecheap_domain.main.is_our_dns
-}
-
-output "nameservers" {
-  value = data.namecheap_domain.main.nameservers
-}
-
-output "expires" {
-  value = data.namecheap_domain.main.expires
-}
-```
+{{tffile "examples/data-sources/domain/example_1.tf"}}
 
 ## Argument Reference
 

@@ -5,6 +5,10 @@ description: |-
   A read-only view of a domain's live DNS records.
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_domain_records (Data Source)
 
 Reads a domain's live DNS record set via `namecheap.domains.dns.getHosts`, along with its nameservers (`namecheap.domains.dns.getList`) and email routing type.
@@ -13,45 +17,11 @@ The `records` object shape mirrors the [`namecheap_domain_records`](../resources
 
 ## Example Usage
 
-```terraform
-data "namecheap_domain_records" "current" {
-  domain = "example.com"
-}
-
-output "record_hostnames" {
-  value = [for r in data.namecheap_domain_records.current.records : r.hostname]
-}
-```
+{{tffile "examples/data-sources/domain_records/example_1.tf"}}
 
 Merge/augment an existing zone by feeding the live records into a resource `dynamic` block:
 
-```terraform
-data "namecheap_domain_records" "current" {
-  domain = "example.com"
-}
-
-resource "namecheap_domain_records" "managed" {
-  domain = "example.com"
-  mode   = "OVERWRITE"
-
-  dynamic "record" {
-    for_each = data.namecheap_domain_records.current.records
-    content {
-      hostname = record.value.hostname
-      type     = record.value.type
-      address  = record.value.address
-      mx_pref  = record.value.mx_pref
-      ttl      = record.value.ttl
-    }
-  }
-
-  record {
-    hostname = "new"
-    type     = "A"
-    address  = "10.0.0.9"
-  }
-}
-```
+{{tffile "examples/data-sources/domain_records/example_2.tf"}}
 
 ## Argument Reference
 

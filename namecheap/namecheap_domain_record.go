@@ -63,6 +63,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"nameservers"},
 				Type:          schema.TypeSet,
 				Optional:      true,
+				Description:   "One or more DNS host records for the domain. Conflicts with `nameservers`, since a domain either uses Namecheap DNS with these records or delegates to custom nameservers.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"hostname": {
@@ -100,6 +101,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"email_type", "record"},
 				Type:          schema.TypeSet,
 				Optional:      true,
+				Description:   "Custom nameservers to delegate the domain to. Conflicts with `email_type` and `record`, which only apply while the domain uses Namecheap DNS.",
 				Elem: &schema.Schema{
 					Type:         schema.TypeString,
 					ValidateFunc: validation.StringIsNotEmpty,

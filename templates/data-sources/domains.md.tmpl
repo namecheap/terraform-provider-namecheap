@@ -5,45 +5,23 @@ description: |-
   The account's domain portfolio, with optional filtering.
 ---
 
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
 # namecheap_domains (Data Source)
 
 Lists the account's domain portfolio via the Namecheap `namecheap.domains.getList` API command. The data source **auto-paginates** across all result pages, so the `domains` attribute always reflects the complete result set for the given filters.
 
 ## Example Usage
 
-```terraform
-data "namecheap_domains" "all" {
-  search_term = ""    # optional keyword filter
-  list_type   = "ALL" # ALL | EXPIRING | EXPIRED
-}
-
-output "domain_names" {
-  value = [for d in data.namecheap_domains.all.domains : d.name]
-}
-```
+{{tffile "examples/data-sources/domains/example_1.tf"}}
 
 ## Portfolio-wide composition pattern
 
 The portfolio pairs naturally with `for_each` to apply uniform policy (SPF, DMARC, verification records, ...) across every domain in the account in a few lines:
 
-```terraform
-data "namecheap_domains" "all" {
-  list_type = "ALL"
-}
-
-resource "namecheap_domain_records" "spf" {
-  for_each = { for d in data.namecheap_domains.all.domains : d.name => d }
-
-  domain = each.value.name
-  mode   = "MERGE"
-
-  record {
-    hostname = "@"
-    type     = "TXT"
-    address  = "v=spf1 include:spf.example.com -all"
-  }
-}
-```
+{{tffile "examples/data-sources/domains/example_2.tf"}}
 
 ## Argument Reference
 
