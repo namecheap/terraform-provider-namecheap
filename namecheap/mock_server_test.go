@@ -235,6 +235,24 @@ func (m *namecheapMock) addForward(domain, mailbox, destination string) {
 	st.forwards[mailbox] = destination
 }
 
+// removeHost deletes a record from a domain's zone, simulating an out-of-band
+// deletion (someone using the dashboard) after Terraform has taken ownership of
+// it. Safe to call while the server is handling requests, unlike mutating the
+// pointer returned by state().
+func (m *namecheapMock) removeHost(domain, host, recordType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := m.stateFor(domain)
+	kept := st.hosts[:0]
+	for _, h := range st.hosts {
+		if h.Name == host && h.Type == recordType {
+			continue
+		}
+		kept = append(kept, h)
+	}
+	st.hosts = kept
+}
+
 // seedPortfolio sets the account portfolio returned by getList. cap, when >0,
 // caps the per-page size so a small seed still spans multiple pages (used to
 // exercise pagination end-to-end).
