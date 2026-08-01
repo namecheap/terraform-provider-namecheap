@@ -131,9 +131,11 @@ func Provider() *schema.Provider {
 			"namecheap_email_forwarding":    resourceNamecheapEmailForwarding(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"namecheap_domain":         dataSourceNamecheapDomain(),
-			"namecheap_domains":        dataSourceNamecheapDomains(),
-			"namecheap_domain_records": dataSourceNamecheapDomainRecords(),
+			"namecheap_domain":          dataSourceNamecheapDomain(),
+			"namecheap_domains":         dataSourceNamecheapDomains(),
+			"namecheap_domain_records":  dataSourceNamecheapDomainRecords(),
+			"namecheap_account_balance": dataSourceNamecheapAccountBalance(),
+			"namecheap_tld_pricing":     dataSourceNamecheapTldPricing(),
 		},
 		ConfigureContextFunc: configureContext,
 	}

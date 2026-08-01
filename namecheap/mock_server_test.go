@@ -70,6 +70,13 @@ type namecheapMock struct {
 	// API error, exercising the not-found diagnostic.
 	infos map[string]mockDomainInfo
 
+	// Account-scoped money state. balances backs namecheap.users.getBalances
+	// (nil until seeded, so an unseeded read surfaces an API error rather than
+	// silently reporting zero funds); pricing backs namecheap.users.getPricing,
+	// keyed by the lower-cased "action/product" pair the request narrows on.
+	balances *mockAccountBalance
+	pricing  map[string][]mockPriceTier
+
 	// Optional fault injection: when failCommand is set, any request whose
 	// Command equals it returns an API error with failCode/failMessage instead
 	// of the normal response. Used to exercise the provider's error-surfacing.
@@ -98,6 +105,27 @@ type mockPortfolioDomain struct {
 	AutoRenew  bool
 	IsPremium  bool
 	IsOurDNS   bool
+}
+
+// mockAccountBalance is the account funds returned by the mock's
+// namecheap.users.getBalances handler. Amounts are the exact decimal strings the
+// API sends, so a test can assert that the provider never reformats them.
+type mockAccountBalance struct {
+	Currency                  string
+	AvailableBalance          string
+	AccountBalance            string
+	EarnedAmount              string
+	WithdrawableAmount        string
+	FundsRequiredForAutoRenew string
+}
+
+// mockPriceTier is one <Price> node of the mock's namecheap.users.getPricing
+// response. Currency and Promotion are rendered only when non-empty, mirroring
+// the live API's habit of omitting them entirely rather than sending "".
+type mockPriceTier struct {
+	Duration                                            int
+	DurationType                                        string
+	Price, RegularPrice, YourPrice, Currency, Promotion string
 }
 
 // mockDomainInfo is the per-domain response of the mock's
@@ -227,6 +255,32 @@ func (m *namecheapMock) seedInfo(domain string, info mockDomainInfo) {
 	m.infos[domain] = info
 }
 
+// seedBalances registers the account funds returned by users.getBalances. Until
+// it is called, a balance read returns an API error rather than zero funds, so a
+// test cannot accidentally assert against an implicit empty account.
+func (m *namecheapMock) seedBalances(b mockAccountBalance) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.balances = &b
+}
+
+// seedPricing registers the price tiers users.getPricing returns for one
+// (action, product) pair, e.g. seedPricing("REGISTER", "com", tiers...). Both
+// keys are matched case-insensitively, as the real API does.
+func (m *namecheapMock) seedPricing(action, product string, tiers ...mockPriceTier) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pricing == nil {
+		m.pricing = map[string][]mockPriceTier{}
+	}
+	m.pricing[pricingKey(action, product)] = tiers
+}
+
+// pricingKey builds the lookup key for the seeded pricing map.
+func pricingKey(action, product string) string {
+	return strings.ToLower(action) + "/" + strings.ToLower(product)
+}
+
 // getListCallCount returns how many getList requests the mock has served.
 func (m *namecheapMock) getListCallCount() int {
 	m.mu.Lock()
@@ -281,6 +335,12 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	case "namecheap.domains.getInfo":
 		_, _ = io.WriteString(w, m.renderGetInfoXML(r.FormValue("DomainName")))
+		return
+	case "namecheap.users.getBalances":
+		_, _ = io.WriteString(w, m.renderGetBalancesXML())
+		return
+	case "namecheap.users.getPricing":
+		_, _ = io.WriteString(w, m.renderGetPricingXML(r.FormValue("ActionName"), r.FormValue("ProductName")))
 		return
 	}
 
@@ -545,6 +605,60 @@ func (m *namecheapMock) renderGetInfoXML(domain string) string {
     </DomainGetInfoResult>
   </CommandResponse>
 </ApiResponse>`, domain, info.IsPremium, info.IsPremiumDNS, info.ProviderType, info.IsUsingOurDNS, strings.Join(nsLines, "\n        "))
+}
+
+// renderGetBalancesXML renders the account funds for namecheap.users.getBalances.
+// An unseeded account returns the API's "not enough privileges" style error so a
+// test that forgets to seed fails loudly instead of reading zeros.
+func (m *namecheapMock) renderGetBalancesXML() string {
+	if m.balances == nil {
+		return apiErrorXML("2011150", "Account balances are not available for this user")
+	}
+	b := m.balances
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.users.getBalances">
+    <UserGetBalancesResult Currency="%s" AvailableBalance="%s" AccountBalance="%s" EarnedAmount="%s" WithdrawableAmount="%s" FundsRequiredForAutoRenew="%s" />
+  </CommandResponse>
+</ApiResponse>`, b.Currency, b.AvailableBalance, b.AccountBalance, b.EarnedAmount, b.WithdrawableAmount, b.FundsRequiredForAutoRenew)
+}
+
+// renderGetPricingXML renders the price sheet for one (action, product) pair.
+// The real API narrows server-side on ActionName/ProductName, so the mock keys
+// on exactly those parameters; an unseeded pair returns an empty (but valid)
+// sheet, which is how the API answers for a TLD it does not sell.
+func (m *namecheapMock) renderGetPricingXML(action, product string) string {
+	tiers := m.pricing[pricingKey(action, product)]
+
+	var prices []string
+	for _, t := range tiers {
+		attrs := fmt.Sprintf(`Duration="%d" DurationType="%s" Price="%s" RegularPrice="%s" YourPrice="%s"`,
+			t.Duration, t.DurationType, t.Price, t.RegularPrice, t.YourPrice)
+		if t.Currency != "" {
+			attrs += fmt.Sprintf(` Currency="%s"`, t.Currency)
+		}
+		if t.Promotion != "" {
+			attrs += fmt.Sprintf(` PromotionPrice="%s"`, t.Promotion)
+		}
+		prices = append(prices, fmt.Sprintf(`<Price %s />`, attrs))
+	}
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.users.getPricing">
+    <UserGetPricingResult>
+      <ProductType Name="domains">
+        <ProductCategory Name="%s">
+          <Product Name="%s">
+            %s
+          </Product>
+        </ProductCategory>
+      </ProductType>
+    </UserGetPricingResult>
+  </CommandResponse>
+</ApiResponse>`, strings.ToLower(action), strings.ToLower(product), strings.Join(prices, "\n            "))
 }
 
 // renderResultXML renders a generic success CommandResponse for write commands
