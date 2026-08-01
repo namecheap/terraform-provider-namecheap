@@ -721,6 +721,13 @@ jobs:
           # Half the quota each keeps the account total inside it. The helper
           # client reads the same variable (see provider_test.go).
           NAMECHEAP_REQUESTS_PER_MINUTE: 10
+          # Halving each client's rate makes requests wait longer for a token,
+          # and that wait counts against the retry budget — so the stock 4
+          # attempts / 2 minutes can expire on a healthy but throttled call,
+          # especially in the deliberately parallel DNS tests. Give retries room
+          # to outlast the rolling window rather than failing inside it.
+          NAMECHEAP_MAX_RETRIES: 8
+          NAMECHEAP_RETRY_MAX_ELAPSED: 5m
 
       - name: Post-job hygiene sweep
         # Last step, if: always() — this is what actually satisfies G6 ("no

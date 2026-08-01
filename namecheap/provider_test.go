@@ -55,6 +55,37 @@ func acceptanceRequestsPerMinute() int {
 	return n
 }
 
+// acceptanceMaxRetries returns the retry-attempt budget for the live suite,
+// read from the same NAMECHEAP_MAX_RETRIES variable the provider honours.
+// Anything unusable falls back to the provider's own default.
+func acceptanceMaxRetries() int {
+	raw := os.Getenv("NAMECHEAP_MAX_RETRIES")
+	if raw == "" {
+		return defaultMaxRetries
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return defaultMaxRetries
+	}
+	return n
+}
+
+// acceptanceRetryMaxElapsed returns the wall-clock retry budget for the live
+// suite, read from the same NAMECHEAP_RETRY_MAX_ELAPSED variable the provider
+// honours. Anything unusable falls back to the provider's own default.
+func acceptanceRetryMaxElapsed() time.Duration {
+	fallback, _ := time.ParseDuration(defaultRetryMaxElapsed)
+	raw := os.Getenv("NAMECHEAP_RETRY_MAX_ELAPSED")
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
 func init() {
 	testAccNamecheapProvider = Provider()
 	testAccProviderFactories = map[string]func() (*schema.Provider, error){
@@ -77,6 +108,14 @@ func init() {
 		// provider is given (NAMECHEAP_REQUESTS_PER_MINUTE), so the two together
 		// stay inside the quota.
 		RateLimit: &namecheap.RateLimitOptions{PerMinute: acceptanceRequestsPerMinute()},
+		// Sharing the quota makes each request wait longer for a token, and that
+		// wait counts against the retry budget. The helper client therefore takes
+		// the same enlarged budget the provider is given, so a throttled call is
+		// retried until the window reopens instead of giving up mid-suite.
+		Retry: &namecheap.RetryOptions{
+			MaxAttempts: acceptanceMaxRetries(),
+			MaxElapsed:  acceptanceRetryMaxElapsed(),
+		},
 	})
 
 	testDomain := os.Getenv("NAMECHEAP_TEST_DOMAIN")
@@ -675,4 +714,51 @@ func TestAcceptanceClientBudgetFitsQuota(t *testing.T) {
 	perClient := acceptanceRequestsPerMinute()
 	assert.LessOrEqual(t, perClient*2, maxRequestsPerMinute,
 		"helper client + provider must stay within the %d/min account quota", maxRequestsPerMinute)
+}
+
+// TestAcceptanceRetryBudget pins the retry budget the live suite runs with.
+// Sharing the account quota lengthens the wait for a rate-limit token, and that
+// wait is charged against the retry budget, so the budget has to be able to
+// outlast the rolling window rather than expiring inside it.
+func TestAcceptanceRetryBudget(t *testing.T) {
+	defaultElapsed, err := time.ParseDuration(defaultRetryMaxElapsed)
+	assert.NoError(t, err)
+
+	t.Run("attempts", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			env  string
+			want int
+		}{
+			{"unset uses the provider default", "", defaultMaxRetries},
+			{"override honoured", "8", 8},
+			{"zero falls back", "0", defaultMaxRetries},
+			{"negative falls back", "-1", defaultMaxRetries},
+			{"non-numeric falls back", "lots", defaultMaxRetries},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("NAMECHEAP_MAX_RETRIES", tc.env)
+				assert.Equal(t, tc.want, acceptanceMaxRetries())
+			})
+		}
+	})
+
+	t.Run("elapsed", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			env  string
+			want time.Duration
+		}{
+			{"unset uses the provider default", "", defaultElapsed},
+			{"override honoured", "5m", 5 * time.Minute},
+			{"zero falls back", "0s", defaultElapsed},
+			{"negative falls back", "-1m", defaultElapsed},
+			{"unparsable falls back", "five minutes", defaultElapsed},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("NAMECHEAP_RETRY_MAX_ELAPSED", tc.env)
+				assert.Equal(t, tc.want, acceptanceRetryMaxElapsed())
+			})
+		}
+	})
 }
