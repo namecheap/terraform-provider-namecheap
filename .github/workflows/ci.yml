@@ -712,6 +712,15 @@ jobs:
           NAMECHEAP_TEST_DOMAIN: terraform-provider-test.net
           NAMECHEAP_USE_SANDBOX: true
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          # The suite drives two independent clients against one account: the
+          # provider under test, and the bare SDK client the test helpers use for
+          # setup/teardown. Each carries its own limiter, so leaving both at the
+          # default 20/min lets the suite emit up to 40/min against Namecheap's
+          # 20/min quota — the API answers 405, the SDK retries four times, and
+          # a healthy test fails as "after 4 attempts: retryable HTTP status".
+          # Half the quota each keeps the account total inside it. The helper
+          # client reads the same variable (see provider_test.go).
+          NAMECHEAP_REQUESTS_PER_MINUTE: 10
 
       - name: Post-job hygiene sweep
         # Last step, if: always() — this is what actually satisfies G6 ("no
