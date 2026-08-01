@@ -44,11 +44,16 @@ func TestAccDataSourceAccountBalance(t *testing.T) {
 	})
 }
 
-// TestAccDataSourceTldPricing prices .com for all three actions against the live
-// API. It is the only test in the suite that observes the real getPricing
-// response shape, so it is what confirms the SDK's attribute names still match
-// the server: a renamed or dropped Price attribute shows up here as an empty
-// exported value, not as a passing test.
+// TestAccDataSourceTldPricing prices .com against the live API. It is the only
+// test in the suite that observes the real getPricing response shape, so it is
+// what confirms the SDK's attribute names still match the server: a renamed or
+// dropped Price attribute shows up here as an empty exported value, not as a
+// passing test.
+//
+// It deliberately reads a single tier. The sandbox rate-limits the whole
+// package's run (the DNS suites answer HTTP 405 once the rolling window is
+// exhausted), so every live call added here is taken from a shared budget;
+// action and TLD coverage therefore lives in the mock suite, where it is free.
 func TestAccDataSourceTldPricing(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { testAccPreCheck(t) },
@@ -61,62 +66,24 @@ data "namecheap_tld_pricing" "register" {
   action = "REGISTER"
   years  = 1
 }
-
-data "namecheap_tld_pricing" "renew" {
-  tld    = "com"
-  action = "RENEW"
-  years  = 1
-}
-
-data "namecheap_tld_pricing" "transfer" {
-  tld    = "com"
-  action = "TRANSFER"
-  years  = 1
-}
 `,
 				Check: resource.ComposeTestCheckFunc(
-					// Every action publishes a 1-year .com tier with a real price.
 					testAccCheckIsDecimalString("data.namecheap_tld_pricing.register", "price"),
 					testAccCheckIsDecimalString("data.namecheap_tld_pricing.register", "regular_price"),
-					testAccCheckIsDecimalString("data.namecheap_tld_pricing.renew", "price"),
-					testAccCheckIsDecimalString("data.namecheap_tld_pricing.transfer", "price"),
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.register", "duration_type", "YEAR"),
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.register", "id", "pricing:com:REGISTER:1"),
-					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.renew", "id", "pricing:com:RENEW:1"),
-					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.transfer", "id", "pricing:com:TRANSFER:1"),
 					// Currency is optional per tier, so its absence is not a failure —
 					// but when the server does send it, it must be a currency code.
 					testAccCheckOptionalPattern("data.namecheap_tld_pricing.register", "currency", regexp.MustCompile(`^[A-Z]{3}$`)),
-					// Same for the promotional price: absent is fine, malformed is not.
-					// This is the only place the real PromotionPrice shape is observed.
-					testAccCheckOptionalPattern("data.namecheap_tld_pricing.register", "promo_price", regexp.MustCompile(`^-?\d+(\.\d+)?$`)),
+					// promo_price is empty unless the server quoted a positive
+					// promotion; .com is normally un-promoted (the API says so with
+					// "0.0"), and anything non-empty must still be a bare decimal.
+					testAccCheckOptionalPattern("data.namecheap_tld_pricing.register", "promo_price", regexp.MustCompile(`^\d+(\.\d+)?$`)),
 					// Log what the live API actually returned for the optional
 					// attributes, so a sandbox run leaves evidence of the response
 					// shape rather than only a pass/fail.
 					testAccLogAttrs("data.namecheap_tld_pricing.register", "price", "regular_price", "your_price", "promo_price", "currency"),
 				),
-			},
-		},
-	})
-}
-
-// TestAccDataSourceTldPricingUnknownTld asserts the live API's answer for a TLD
-// Namecheap does not sell surfaces as a diagnostic naming it, rather than an
-// empty price. It is the live counterpart of the mock's not-found case, and
-// guards against the API changing an unknown product from "empty sheet" to
-// something the provider would misread as a valid tier.
-func TestAccDataSourceTldPricingUnknownTld(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		PreCheck:          func() { testAccPreCheck(t) },
-		ProviderFactories: testAccProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: `
-data "namecheap_tld_pricing" "nope" {
-  tld = "invalidtldxyz"
-}
-`,
-				ExpectError: regexp.MustCompile(`invalidtldxyz`),
 			},
 		},
 	})
