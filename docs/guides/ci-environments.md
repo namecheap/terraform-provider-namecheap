@@ -89,10 +89,11 @@ paces and recovers from this:
   Keep this comfortably under your CI step timeout so a retry storm does not
   cause the job to be killed mid-call.
 - `retry_base_delay` (default `"500ms"`) — the first backoff delay, as a Go
-  duration string. Subsequent delays grow exponentially, capped by
+  duration string. Each subsequent delay doubles, is capped by `retry_max_delay`,
+  and is then **jittered to between 50% and 100%** of that value. Must not exceed
   `retry_max_delay`.
 - `retry_max_delay` (default `"30s"`) — the cap on any single backoff delay, as a
-  Go duration string.
+  Go duration string. Must be at least `retry_base_delay`.
 - `request_timeout` (default `"30s"`) — the per-request HTTP timeout, as a Go
   duration string.
 
@@ -100,20 +101,27 @@ paces and recovers from this:
 retrying quickly makes it worse: the retries are counted against the same quota
 that rejected the original call. Under a rate limit you want *fewer* attempts
 spaced *further apart* — raise `retry_base_delay` and `retry_max_delay` rather
-than `max_retries`. The stock `500ms` base exhausts four attempts in about
-3 seconds, well inside a one-minute rate window; a `5s` base with a `60s` cap
-waits roughly two minutes across five attempts, outlasting the window while
-spending a fraction of the quota.
+than `max_retries`.
+
+Because delays are jittered down to as little as half, size the backoff by its
+**minimum**, not its nominal schedule. With the stock `500ms` base, four attempts
+sleep at most 3.5s — and at least 1.75s — so they are exhausted well inside a
+one-minute rate window. A `10s` base with a `60s` cap over five attempts sleeps
+between 65s and 130s, clearing the window on every run for five requests. A `5s`
+base looks close on paper (75s nominal) but its minimum is 32.5s, so it clears a
+one-minute window only about a third of the time.
 
 ```terraform
 # Example: four parallel pipelines sharing one Namecheap account.
 provider "namecheap" {
-  requests_per_minute = 5      # 20 / 4 jobs
-  max_retries         = 5      # few attempts, because each one costs quota
-  retry_base_delay    = "5s"   # ...spaced far enough apart to outlast the window
-  retry_max_delay     = "60s"
-  retry_max_elapsed   = "3m"   # keep below the CI step timeout
-  request_timeout     = "30s"
+  requests_per_minute = 5 # 20 / 4 jobs
+  max_retries         = 5 # few attempts, because each one costs quota
+  # ...spaced far enough apart that even the jittered minimum (65s) outlasts a
+  # one-minute rate window.
+  retry_base_delay  = "10s"
+  retry_max_delay   = "60s"
+  retry_max_elapsed = "8m" # must cover the whole schedule; keep below the CI step timeout
+  request_timeout   = "30s"
 }
 ```
 

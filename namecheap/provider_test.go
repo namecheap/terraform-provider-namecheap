@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -414,6 +415,11 @@ func TestProviderResilienceFieldsAreOptional(t *testing.T) {
 		assert.True(t, ok, "field %s should exist", field)
 		assert.True(t, s.Optional, "field %s should be Optional", field)
 		assert.False(t, s.Required, "field %s should not be Required", field)
+		// Without these, deleting a validator or an env default would leave the
+		// suite green — the invalid-input tests reach the validators by other
+		// routes, and nothing else checks the env plumbing exists.
+		assert.NotNil(t, s.ValidateDiagFunc, "field %s should validate its input", field)
+		assert.NotNil(t, s.DefaultFunc, "field %s should have an env-backed default", field)
 	}
 }
 
@@ -805,9 +811,12 @@ func TestProviderRetryBackoffFromEnvVars(t *testing.T) {
 	assert.Equal(t, time.Minute, client.ClientOptions.Retry.MaxDelay)
 }
 
-// TestProviderRetryBackoffInvalid covers the rejections: an unparsable or
-// non-positive duration, and a base delay above the cap — which the SDK would
-// silently clamp, making the configuration mean something other than it reads.
+// TestProviderRetryBackoffInvalid covers the rejections, driving each case
+// through Configure so the schema validators and the configure-time ordering
+// rule are both exercised on the path a real provider takes. An earlier version
+// of this test called validatePositiveDuration directly and concatenated its
+// diagnostics with Configure's, which hid the fact that Configure itself
+// accepted a zero or negative duration.
 func TestProviderRetryBackoffInvalid(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -817,8 +826,12 @@ func TestProviderRetryBackoffInvalid(t *testing.T) {
 	}{
 		{"unparsable base", "soon", "30s", "retry_base_delay"},
 		{"unparsable max", "500ms", "eventually", "retry_max_delay"},
-		{"zero base", "0s", "30s", "Invalid duration"},
-		{"negative max", "500ms", "-1s", "Invalid duration"},
+		{"zero base", "0s", "30s", "retry_base_delay"},
+		{"negative base", "-5s", "30s", "retry_base_delay"},
+		{"zero max", "500ms", "0s", "retry_max_delay"},
+		// The cap is the one at fault here, so the diagnostic must name it rather
+		// than blaming the base delay for being "too large".
+		{"negative max", "500ms", "-1s", "retry_max_delay"},
 		{"base above cap", "45s", "30s", "exceeds retry_max_delay"},
 	}
 	for _, tc := range tests {
@@ -829,56 +842,157 @@ func TestProviderRetryBackoffInvalid(t *testing.T) {
 			raw["retry_max_delay"] = tc.max
 
 			rawProvider := Provider()
-			// Validators run through the schema, so exercise both paths: validation
-			// diagnostics for the duration shape, and Configure for the ordering
-			// rule that only makes sense once both values are known.
-			var summaries string
-			for field, value := range map[string]string{"retry_base_delay": tc.base, "retry_max_delay": tc.max} {
-				for _, d := range validatePositiveDuration(value, cty.Path{cty.GetAttrStep{Name: field}}) {
-					summaries += d.Summary + " "
-				}
+			diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+			assert.True(t, diags.HasError(), "expected Configure to reject base=%q max=%q", tc.base, tc.max)
+
+			var text string
+			for _, d := range diags {
+				text += d.Summary + " " + d.Detail + " "
 			}
-			for _, d := range rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw)) {
-				summaries += d.Summary + " "
-			}
-			assert.Contains(t, summaries, tc.wantInSum)
+			assert.Contains(t, text, tc.wantInSum)
 		})
 	}
 }
 
-// TestProviderRetryBackoffCostsQuota documents why the knobs exist: every retry
-// is itself an API request, so a rate-limited caller wants few attempts spaced
-// far apart, not many spaced closely. This pins that such a configuration is
-// expressible — 6 attempts with a 5s base and 60s cap can wait out a full
-// rate-limit window while spending 6 requests, where the stock 500ms/30s policy
-// exhausts its attempts in seconds.
-func TestProviderRetryBackoffCostsQuota(t *testing.T) {
+// TestProviderRetryBackoffValidatorsRejectDurations covers the same shapes at the
+// schema-validation layer, which is where a plan surfaces them before Configure
+// ever runs.
+func TestProviderRetryBackoffValidatorsRejectDurations(t *testing.T) {
+	for _, field := range []string{"retry_base_delay", "retry_max_delay"} {
+		validate := Provider().Schema[field].ValidateDiagFunc
+		assert.NotNil(t, validate, "%s must have a validator", field)
+		for _, value := range []string{"", "soon", "0s", "-1s"} {
+			diags := validate(value, cty.Path{cty.GetAttrStep{Name: field}})
+			assert.True(t, diags.HasError(), "%s = %q should be rejected at validate time", field, value)
+		}
+		for _, value := range []string{"500ms", "5s", "1m"} {
+			diags := validate(value, cty.Path{cty.GetAttrStep{Name: field}})
+			assert.False(t, diags.HasError(), "%s = %q should be accepted, got %v", field, value, diags)
+		}
+	}
+}
+
+// ciRetry mirrors the retry policy the live acceptance job configures in
+// .github/workflows/ci.yml. The tests below assert the property those values
+// were chosen for, so changing one without the other fails here rather than
+// silently degrading the sandbox suite.
+var ciRetry = struct {
+	attempts   int
+	baseDelay  time.Duration
+	maxDelay   time.Duration
+	maxElapsed time.Duration
+}{attempts: 5, baseDelay: 10 * time.Second, maxDelay: 60 * time.Second, maxElapsed: 8 * time.Minute}
+
+// backoffBounds returns the minimum and maximum total time a policy can spend
+// sleeping between attempts, mirroring the SDK's schedule: each delay doubles
+// from base, is clamped to maxDelay, and is then jittered to between 50% and
+// 100% of that value ("equal jitter"). The minimum is the figure that matters
+// for "can this outlast a rate-limit window" — the worst case for the property.
+func backoffBounds(base, maxDelay time.Duration, attempts int) (minTotal, maxTotal time.Duration) {
+	delay := base
+	for i := 1; i < attempts; i++ {
+		if delay > maxDelay {
+			delay = maxDelay
+		}
+		minTotal += delay / 2
+		maxTotal += delay
+		delay *= 2
+	}
+	return minTotal, maxTotal
+}
+
+// TestProviderRetryBackoffOutlastsRateWindow is the property the whole change
+// exists for: under a per-minute rate limit, a retry policy is only useful if
+// its backoff can outlast the window — and it must do so on FEW attempts,
+// because every attempt is itself a request counted against the same quota.
+//
+// It asserts the jittered MINIMUM, not the nominal schedule: the SDK jitters
+// every delay down to as little as half, so a policy whose nominal total clears
+// a minute can still fail most of the time. The shipped 5 x 10s/60s policy has a
+// minimum of 65s, so it clears a one-minute window on every run.
+func TestProviderRetryBackoffOutlastsRateWindow(t *testing.T) {
+	const rateWindow = time.Minute
+
+	minTotal, maxTotal := backoffBounds(ciRetry.baseDelay, ciRetry.maxDelay, ciRetry.attempts)
+	assert.Greater(t, minTotal, rateWindow,
+		"even the most heavily jittered run must outlast a %s rate window (min %s, max %s)", rateWindow, minTotal, maxTotal)
+	assert.LessOrEqual(t, maxTotal, ciRetry.maxElapsed,
+		"the whole schedule must fit inside retry_max_elapsed or the last attempts never happen")
+	assert.LessOrEqual(t, ciRetry.attempts, defaultMaxRetries+2,
+		"attempts are requests: prefer waiting longer over retrying more")
+
+	// The pre-change policy is the counter-example: eight attempts spend eight
+	// requests and can still finish inside the window.
+	stockMin, _ := backoffBounds(500*time.Millisecond, 30*time.Second, 8)
+	assert.Less(t, stockMin, rateWindow,
+		"the stock backoff can finish inside the window, which is why the knobs are needed")
+}
+
+// TestProviderRetryBackoffConfigMatchesCI pins that the values asserted above are
+// the values a provider actually resolves, so the test cannot drift from the
+// configuration it claims to describe.
+func TestProviderRetryBackoffConfigMatchesCI(t *testing.T) {
 	clearResilienceEnvVars(t)
 	raw := baseProviderConfig(t)
-	raw["max_retries"] = 6
-	raw["retry_base_delay"] = "5s"
-	raw["retry_max_delay"] = "60s"
-	raw["retry_max_elapsed"] = "5m"
+	raw["max_retries"] = ciRetry.attempts
+	raw["retry_base_delay"] = ciRetry.baseDelay.String()
+	raw["retry_max_delay"] = ciRetry.maxDelay.String()
+	raw["retry_max_elapsed"] = ciRetry.maxElapsed.String()
 
 	rawProvider := Provider()
 	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
 	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
 
 	retry := rawProvider.Meta().(*namecheap.Client).ClientOptions.Retry
-	assert.Equal(t, 6, retry.MaxAttempts)
-	assert.Equal(t, 5*time.Second, retry.BaseDelay)
-	assert.Equal(t, 60*time.Second, retry.MaxDelay)
+	assert.Equal(t, ciRetry.attempts, retry.MaxAttempts)
+	assert.Equal(t, ciRetry.baseDelay, retry.BaseDelay)
+	assert.Equal(t, ciRetry.maxDelay, retry.MaxDelay)
+	assert.Equal(t, ciRetry.maxElapsed, retry.MaxElapsed)
+}
 
-	// Exponential growth from the base, capped, must be able to outlast a
-	// one-minute rate window within the elapsed budget.
-	var total, delay time.Duration
-	for i := 1; i < retry.MaxAttempts; i++ {
-		delay = retry.BaseDelay << (i - 1)
-		if delay > retry.MaxDelay {
-			delay = retry.MaxDelay
-		}
-		total += delay
-	}
-	assert.Greater(t, total, time.Minute, "backoff should outlast a one-minute rate window")
-	assert.LessOrEqual(t, total, retry.MaxElapsed, "backoff must fit inside the elapsed budget")
+// TestProviderRetryCostsOneRequestPerAttempt measures the claim rather than
+// modelling it: it drives a real SDK client, configured through the provider,
+// against a server that always answers 405 (the status Namecheap returns when
+// rate-limiting), and counts the requests that actually leave.
+//
+// The delays are scaled down so the test is fast; the property under test is the
+// request count, which is scale-independent. This is what makes "every retry is
+// itself a request" a tested fact rather than a claim in a comment.
+func TestProviderRetryCostsOneRequestPerAttempt(t *testing.T) {
+	const attempts = 5
+
+	var requests int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&requests, 1)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	defer server.Close()
+
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+	raw["max_retries"] = attempts
+	raw["retry_base_delay"] = "20ms"
+	raw["retry_max_delay"] = "100ms"
+	raw["retry_max_elapsed"] = "30s"
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	client.BaseURL = server.URL
+
+	start := time.Now()
+	_, err := client.DomainsDNS.GetHostsWithContext(context.Background(), "example.com")
+	elapsed := time.Since(start)
+
+	assert.Error(t, err, "a persistently throttled call must surface an error, not succeed silently")
+	assert.Equal(t, int32(attempts), atomic.LoadInt32(&requests),
+		"a throttled call costs one request per attempt — this is why fewer attempts spaced further apart is the right response to rate limiting")
+
+	minTotal, maxTotal := backoffBounds(20*time.Millisecond, 100*time.Millisecond, attempts)
+	assert.GreaterOrEqual(t, elapsed, minTotal, "elapsed should be at least the jittered minimum backoff")
+	// Generous upper bound: the assertion of interest is that the SDK sleeps at
+	// all between attempts, not the precise scheduling under a loaded CI box.
+	assert.Less(t, elapsed, maxTotal+10*time.Second, "elapsed should be near the modelled schedule")
 }

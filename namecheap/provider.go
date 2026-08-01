@@ -16,10 +16,13 @@ import (
 	"github.com/namecheap/terraform-provider-namecheap/namecheap/internal/mutexkv"
 )
 
-// Defaults for the client resilience options below. They intentionally match
-// the go-namecheap-sdk v2.7.0 documented defaults (see RateLimitOptions and
-// RetryOptions in that module) so that a provider configuration which does not
-// set any of these four fields behaves exactly as it did before they existed.
+// Defaults for the client resilience options below. They intentionally match the
+// go-namecheap-sdk documented defaults (see RateLimitOptions and RetryOptions in
+// that module) so that a provider configuration which does not set any of these
+// six fields behaves exactly as it did before they existed. Note this pins the
+// values rather than inheriting the SDK's zero-value resolution, so an SDK
+// default change no longer flows through silently — deliberate, and the same
+// choice the first four fields made.
 const (
 	defaultRequestsPerMinute = 20
 	defaultMaxRetries        = 4
@@ -100,7 +103,7 @@ func Provider() *schema.Provider {
 			"retry_base_delay": {
 				Type:             schema.TypeString,
 				Optional:         true,
-				Description:      "First backoff delay before a retried API call, as a Go duration string (e.g. \"500ms\", \"5s\"). Subsequent delays grow exponentially up to retry_max_delay. Must parse and be greater than zero. Defaults to \"500ms\", matching the SDK's built-in retry policy. Raise it when the API is rate-limiting: waiting longer between fewer attempts costs less quota than retrying quickly, because every attempt is itself a request.",
+				Description:      "First backoff delay before a retried API call, as a Go duration string (e.g. \"500ms\", \"5s\"). Subsequent delays double up to retry_max_delay, and each one is then jittered to between 50% and 100% of that value. Must parse, be greater than zero, and not exceed retry_max_delay. Defaults to \"500ms\", matching the SDK's built-in retry policy. Raise it when the API is rate-limiting: waiting longer between fewer attempts costs less quota than retrying quickly, because every attempt is itself a request.",
 				DefaultFunc:      schema.EnvDefaultFunc("NAMECHEAP_RETRY_BASE_DELAY", defaultRetryBaseDelay),
 				ValidateDiagFunc: validatePositiveDuration,
 			},
@@ -108,7 +111,7 @@ func Provider() *schema.Provider {
 			"retry_max_delay": {
 				Type:             schema.TypeString,
 				Optional:         true,
-				Description:      "Cap on any single backoff delay between retried API calls, as a Go duration string (e.g. \"30s\", \"1m\"). Must parse and be greater than zero. Defaults to \"30s\", matching the SDK's built-in retry policy.",
+				Description:      "Cap on any single backoff delay between retried API calls, as a Go duration string (e.g. \"30s\", \"1m\"). Must parse, be greater than zero, and be at least retry_base_delay. Defaults to \"30s\", matching the SDK's built-in retry policy.",
 				DefaultFunc:      schema.EnvDefaultFunc("NAMECHEAP_RETRY_MAX_DELAY", defaultRetryMaxDelay),
 				ValidateDiagFunc: validatePositiveDuration,
 			},
@@ -205,16 +208,44 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 		}
 	}
 
-	// A base delay above the cap would make the cap meaningless, and the SDK
-	// silently clamps rather than complaining, so say so at plan time instead of
-	// letting a config mean something other than it reads.
+	// Positivity is enforced by the schema validators, but a value can still
+	// reach here unvalidated (an unknown at validate time, or a caller invoking
+	// Configure directly), and a non-positive duration silently disables the
+	// policy it configures. Check each on its own before comparing them, so a
+	// bad cap is reported as a bad cap rather than as an oversized base delay.
+	for _, f := range []struct {
+		name  string
+		raw   string
+		value time.Duration
+	}{
+		{"retry_base_delay", retryBaseDelayRaw, retryBaseDelay},
+		{"retry_max_delay", retryMaxDelayRaw, retryMaxDelay},
+	} {
+		if f.value <= 0 {
+			return nil, diag.Diagnostics{
+				{
+					Severity:      diag.Error,
+					Summary:       fmt.Sprintf("Invalid %s", f.name),
+					Detail:        fmt.Sprintf("%s must be greater than zero, got %q", f.name, f.raw),
+					AttributePath: cty.Path{cty.GetAttrStep{Name: f.name}},
+				},
+			}
+		}
+	}
+
+	// A base delay above the cap makes the cap the whole policy: the SDK clamps
+	// every computed delay down to MaxDelay, so the backoff becomes a constant
+	// retry_max_delay (jittered) and retry_base_delay stops meaning anything.
+	// Say so at configure time rather than letting a config read as one policy
+	// and behave as another.
 	if retryBaseDelay > retryMaxDelay {
 		return nil, diag.Diagnostics{
 			{
 				Severity: diag.Error,
 				Summary:  "retry_base_delay exceeds retry_max_delay",
-				Detail: fmt.Sprintf("retry_base_delay %q is longer than retry_max_delay %q, so every backoff would be capped at the first delay. "+
-					"Raise retry_max_delay or lower retry_base_delay.", retryBaseDelayRaw, retryMaxDelayRaw),
+				Detail: fmt.Sprintf("retry_base_delay %q is longer than retry_max_delay %q, so every backoff would be clamped to the cap "+
+					"(%q) and the base delay would have no effect. Raise retry_max_delay or lower retry_base_delay.",
+					retryBaseDelayRaw, retryMaxDelayRaw, retryMaxDelayRaw),
 				AttributePath: cty.Path{cty.GetAttrStep{Name: "retry_base_delay"}},
 			},
 		}
@@ -335,8 +366,8 @@ func validateMaxRetries(v interface{}, _ cty.Path) diag.Diagnostics {
 }
 
 // validatePositiveDuration enforces that a duration-typed string field both
-// parses as a Go duration and is strictly greater than zero. It backs both
-// retry_max_elapsed and request_timeout.
+// parses as a Go duration and is strictly greater than zero. It backs
+// retry_max_elapsed, retry_base_delay, retry_max_delay and request_timeout.
 func validatePositiveDuration(v interface{}, _ cty.Path) diag.Diagnostics {
 	value := v.(string)
 	d, err := time.ParseDuration(value)
