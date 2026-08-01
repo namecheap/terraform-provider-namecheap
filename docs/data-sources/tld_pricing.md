@@ -9,8 +9,9 @@ description: |-
 
 Looks up what Namecheap charges for one TLD, one action (register, renew or
 transfer) and one term, via the `namecheap.users.getPricing` API command. The
-request is narrowed server-side, so each data source instance is exactly one API
-call rather than a walk of the full price sheet.
+request is narrowed server-side, so each read is exactly one API call rather than
+a walk of the full price sheet. Terraform reads a data source once per plan and
+again per apply, so a plan-then-apply cycle makes two calls per instance.
 
 ## Example Usage
 
@@ -40,11 +41,17 @@ data "namecheap_tld_pricing" "candidates" {
   years  = 1
 }
 
+locals {
+  prices         = { for tld, p in data.namecheap_tld_pricing.candidates : tld => tonumber(p.price) }
+  cheapest_price = min(values(local.prices)...)
+
+  # sort() makes the tie-break deterministic: promotions routinely price several
+  # TLDs identically, and picking "the" cheapest one would otherwise fail.
+  cheapest_tlds = sort([for tld, price in local.prices : tld if price == local.cheapest_price])
+}
+
 output "cheapest_tld" {
-  value = one([
-    for tld, p in data.namecheap_tld_pricing.candidates : tld
-    if tonumber(p.price) == min([for q in data.namecheap_tld_pricing.candidates : tonumber(q.price)]...)
-  ])
+  value = local.cheapest_tlds[0]
 }
 ```
 
@@ -65,24 +72,32 @@ Convert with `tonumber()` at the point of comparison.
   Namecheap documents: the server's final price (which already reflects any
   promotion or special), then your account price, then the regular price.
 - `regular_price` is the public list price — use it to show a discount.
-- `promo_price` identifies a promotion when the API reports one. It does **not**
-  add to `price`; an active promotion is already reflected there.
+- `promo_price` is the promotional price when a promotion applies, and empty
+  otherwise. It does **not** add to `price`; an active promotion is already
+  reflected there.
+
+Namecheap reports an un-promoted tier as `PromotionPrice="0.0"` rather than
+omitting it, so this provider exports a non-positive promotional price as
+empty — `promo_price != ""` therefore means "this TLD is on promotion". The
+trade-off is deliberate: a hypothetical genuinely-free promotion priced at
+`0.00` would also read as empty, which is the lesser error against an API that
+sends `0.0` on essentially every ordinary lookup.
 
 ## Argument Reference
 
-- `tld` - (Required) The top-level domain to price, written without a leading dot (`com`, `co.uk`). Validated at plan time.
-- `action` - (Optional) The action to price: `REGISTER` (default), `RENEW` or `TRANSFER`.
+- `tld` - (Required) The top-level domain to price, written without a leading or trailing dot (`com`, `co.uk`). Case-insensitive, validated at plan time. A full domain name (`example.com`) cannot be rejected at plan time — it is structurally identical to a multi-label TLD — and surfaces as a "no published price" error instead.
+- `action` - (Optional) The action to price: `REGISTER` (default), `RENEW` or `TRANSFER`. Case-insensitive.
 - `years` - (Optional) The term length in years to price, 1-10. Defaults to `1`.
 
 ## Attribute Reference
 
-- `price` - The price actually charged for this tier, as an exact decimal string (see above).
+- `price` - The price actually charged for this tier, as an exact decimal string (see above). In the rare case where the API publishes a tier with no positive price at all, this is the (possibly empty) regular price the server sent — `tonumber("")` fails, so guard with `try()` if you price TLDs you have not seen.
 - `regular_price` - The public list price for this tier, as an exact decimal string.
 - `your_price` - The account-specific price for this tier, as an exact decimal string. Empty when the API does not return one.
-- `promo_price` - The promotional price for this tier, as an exact decimal string, or empty when the API reported no promotion. Namecheap does not document what a zero promotional price means, so `"0.00"` is passed through as reported rather than being treated as "no promotion".
-- `currency` - The currency the prices are denominated in (e.g. `USD`). Empty when the API omits it for this tier; `namecheap_account_balance` always reports the account currency.
-- `duration_type` - The unit the term is expressed in, as returned by the API (always `YEAR` for the tiers this data source matches).
-- `id` - `pricing:<tld>:<action>:<years>`.
+- `promo_price` - The promotional price for this tier, as an exact decimal string, or empty when no promotion applies (see above — Namecheap signals "no promotion" with `0.0`, which is exported as empty).
+- `currency` - The currency the prices are denominated in (e.g. `USD`). Empty when the API omits it for this tier; `namecheap_account_balance` reports the currency the account itself is denominated in.
+- `duration_type` - The unit the term is expressed in, verbatim from the API. The data source only matches annual tiers, so this is `YEAR` (in whatever letter case the server used).
+- `id` - `pricing:<tld>:<action>:<years>`, built from the normalized values: `tld = "COM"` yields `pricing:com:REGISTER:1` while the `tld` attribute itself keeps what you wrote.
 
 ## Notes
 

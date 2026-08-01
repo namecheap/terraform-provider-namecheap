@@ -105,7 +105,11 @@ data "namecheap_tld_pricing" "com" {
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.com", "duration_type", "YEAR"),
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.com", "id", "pricing:com:REGISTER:1"),
 					assertNoCommands(m, "namecheap.domains.getList", "namecheap.domains.getInfo", "namecheap.domains.dns.getHosts"),
-					assertCommandCalled(m, "namecheap.users.getPricing"),
+					// Issue #255's acceptance criterion: one narrowed call per read,
+					// not a walk of the price sheet. Checks run after apply and
+					// before the post-apply idempotency plan, so the count is
+					// deterministic here.
+					assertCommandCount(m, "namecheap.users.getPricing", 1),
 				),
 			},
 		},
@@ -139,6 +143,65 @@ data "namecheap_tld_pricing" "shop" {
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.shop", "promo_price", "1.16"),
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.shop", "regular_price", "19.99"),
 					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.shop", "currency", "EUR"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccMockDataSourceTldPricingLowercaseAction drives a lowercase action
+// through real Terraform, which is the only way to exercise the validator and
+// the provider's upper-casing together. The unit test for normalization builds
+// its ResourceData directly and so bypasses ValidateFunc entirely.
+func TestAccMockDataSourceTldPricingLowercaseAction(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seedPricing("TRANSFER", "com",
+		mockPriceTier{Duration: 1, DurationType: "YEAR", Price: "9.06", RegularPrice: "10.87", YourPrice: "9.06", Currency: "USD"},
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+data "namecheap_tld_pricing" "com" {
+  tld    = "COM"
+  action = "transfer"
+}
+`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.com", "price", "9.06"),
+					// The ID carries the normalized values even though the config did not.
+					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.com", "id", "pricing:com:TRANSFER:1"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccMockDataSourceTldPricingZeroPromotion is the live API's actual shape:
+// an un-promoted tier carries PromotionPrice="0.0". Through the full Terraform
+// path, promo_price must come out empty so a config testing it is not misled.
+func TestAccMockDataSourceTldPricingZeroPromotion(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seedPricing("REGISTER", "com",
+		mockPriceTier{Duration: 1, DurationType: "YEAR", Price: "13.98", RegularPrice: "13.98", YourPrice: "13.98", Currency: "USD", Promotion: "0.0"},
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: `
+data "namecheap_tld_pricing" "com" {
+  tld = "com"
+}
+`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.com", "price", "13.98"),
+					resource.TestCheckResourceAttr("data.namecheap_tld_pricing.com", "promo_price", ""),
 				),
 			},
 		},
@@ -288,12 +351,12 @@ output "balance" {
 }
 `
 
-// assertCommandCalled returns a check asserting the mock served at least one
-// request for command.
-func assertCommandCalled(m *namecheapMock, command string) resource.TestCheckFunc {
+// assertCommandCount returns a check asserting the mock served exactly want
+// requests for command.
+func assertCommandCount(m *namecheapMock, command string, want int) resource.TestCheckFunc {
 	return func(*terraform.State) error {
-		if got := m.commandCount(command); got == 0 {
-			return fmt.Errorf("commandCount(%q) = 0, want at least 1", command)
+		if got := m.commandCount(command); got != want {
+			return fmt.Errorf("commandCount(%q) = %d, want %d", command, got, want)
 		}
 		return nil
 	}

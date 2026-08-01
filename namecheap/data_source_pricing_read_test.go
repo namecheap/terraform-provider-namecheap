@@ -45,10 +45,10 @@ func (p dsPriceTier) attrs() string {
 		fmt.Sprintf(`Duration="%d"`, p.Duration),
 		fmt.Sprintf(`DurationType="%s"`, p.DurationType),
 	}
-	for name, value := range map[string]string{
-		"Price": p.Price, "RegularPrice": p.RegularPrice, "YourPrice": p.YourPrice,
+	for _, a := range []struct{ name, value string }{
+		{"Price", p.Price}, {"RegularPrice", p.RegularPrice}, {"YourPrice", p.YourPrice},
 	} {
-		attrs = append(attrs, fmt.Sprintf(`%s="%s"`, name, value))
+		attrs = append(attrs, fmt.Sprintf(`%s="%s"`, a.name, a.value))
 	}
 	if p.Currency != "" {
 		attrs = append(attrs, fmt.Sprintf(`Currency="%s"`, p.Currency))
@@ -103,7 +103,7 @@ func TestDataSourceAccountBalanceRead_Success(t *testing.T) {
 	assert.Equal(t, "15.00", d.Get("earned_amount"))
 	assert.Equal(t, "100.00", d.Get("withdrawable_amount"))
 	assert.Equal(t, "42.50", d.Get("funds_required_for_auto_renew"))
-	assert.Equal(t, accountBalanceID, d.Id())
+	assert.Equal(t, "account_balance", d.Id(), "the ID is part of the data source's contract; changing it moves every consumer's state address")
 }
 
 // TestDataSourceAccountBalanceRead_PrecisionPreserved pins the decimal-safety
@@ -136,6 +136,26 @@ func TestDataSourceAccountBalanceRead_APIError(t *testing.T) {
 	d := schema.TestResourceDataRaw(t, dataSourceNamecheapAccountBalance().Schema, map[string]interface{}{})
 	diags := dataSourceNamecheapAccountBalanceRead(context.Background(), d, client)
 	require.True(t, diags.HasError(), "an API error should surface")
+	assert.Empty(t, d.Id(), "a failed read must not set an ID")
+}
+
+// TestDataSourceAccountBalanceRead_MalformedEnvelope covers a Status=OK response
+// whose CommandResponse carries no result element. The SDK reports no error for
+// it, so the provider's own guard is what stops a nil dereference — and what
+// stops an apparently-successful read of an all-empty balance.
+func TestDataSourceAccountBalanceRead_MalformedEnvelope(t *testing.T) {
+	client := startDataSourceServer(t, func(string, *http.Request) string {
+		return `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.users.getBalances"></CommandResponse>
+</ApiResponse>`
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapAccountBalance().Schema, map[string]interface{}{})
+	diags := dataSourceNamecheapAccountBalanceRead(context.Background(), d, client)
+	require.True(t, diags.HasError(), "a result-less response must not read as a zero balance")
+	assert.Equal(t, "", d.Get("available_balance"))
 	assert.Empty(t, d.Id(), "a failed read must not set an ID")
 }
 
@@ -252,17 +272,19 @@ func TestDataSourceTldPricingRead_OptionalAttributesAbsent(t *testing.T) {
 	assert.Equal(t, "", d.Get("promo_price"))
 }
 
-// TestDataSourceTldPricingRead_ZeroPromotionIsReportedVerbatim guards the case
-// where the attribute is present but zero. Namecheap does not document what that
-// means — a free first year is a real promotion — so the provider reports the
-// value it was given instead of deciding it means "no promotion".
-func TestDataSourceTldPricingRead_ZeroPromotionIsReportedVerbatim(t *testing.T) {
+// TestDataSourceTldPricingRead_ZeroPromotionIsNoPromotion pins the behaviour the
+// live API forced: it answers un-promoted tiers with PromotionPrice="0.0"
+// rather than omitting the attribute (observed for .com REGISTER/RENEW/TRANSFER,
+// all with price == regular_price), so a non-positive promotional price must
+// export as empty. Without this, promo_price would report a promotion on
+// essentially every lookup.
+func TestDataSourceTldPricingRead_ZeroPromotionIsNoPromotion(t *testing.T) {
 	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
 		if command != "namecheap.users.getPricing" {
 			return apiErrorXML("1010101", "unexpected command "+command)
 		}
 		return xmlGetPricing("register", "net",
-			dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "12.00", RegularPrice: "12.00", YourPrice: "12.00", Currency: "USD", Promotion: "0.00"},
+			dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "12.00", RegularPrice: "12.00", YourPrice: "12.00", Currency: "USD", Promotion: "0.0"},
 		)
 	})
 
@@ -271,14 +293,154 @@ func TestDataSourceTldPricingRead_ZeroPromotionIsReportedVerbatim(t *testing.T) 
 	})
 	diags := dataSourceNamecheapTldPricingRead(context.Background(), d, client)
 	require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
-	assert.Equal(t, "0.00", d.Get("promo_price"), "a zero promotion is reported, not swallowed")
+	assert.Equal(t, "", d.Get("promo_price"), "a non-positive promotion is not a promotion")
 	assert.Equal(t, "12.00", d.Get("price"), "the charged price is unaffected by the promotion attribute")
 }
 
-// TestDataSourceTldPricingRead_CaseAndDotNormalization proves the request is
+// TestDataSourceTldPricingRead_PrecedenceRungs walks each rung of the three-level
+// precedence the docs promise. The middle rung — falling through a zero Price to
+// YourPrice — is the one a two-level implementation would still pass without.
+func TestDataSourceTldPricingRead_PrecedenceRungs(t *testing.T) {
+	tests := []struct {
+		name      string
+		tier      dsPriceTier
+		wantPrice string
+	}{
+		{
+			name:      "server price wins",
+			tier:      dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "8.88", RegularPrice: "10.87", YourPrice: "9.99"},
+			wantPrice: "8.88",
+		},
+		{
+			name:      "zero server price falls through to your price",
+			tier:      dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "0.00", RegularPrice: "10.87", YourPrice: "9.99"},
+			wantPrice: "9.99",
+		},
+		{
+			name:      "zero server and account price fall through to regular",
+			tier:      dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "0.00", RegularPrice: "10.87", YourPrice: "0.00"},
+			wantPrice: "10.87",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tier := tc.tier
+			client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+				if command != "namecheap.users.getPricing" {
+					return apiErrorXML("1010101", "unexpected command "+command)
+				}
+				return xmlGetPricing("register", "com", tier)
+			})
+
+			d := schema.TestResourceDataRaw(t, dataSourceNamecheapTldPricing().Schema, map[string]interface{}{
+				"tld": "com", "action": "REGISTER", "years": 1,
+			})
+			diags := dataSourceNamecheapTldPricingRead(context.Background(), d, client)
+			require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
+			assert.Equal(t, tc.wantPrice, d.Get("price"))
+		})
+	}
+}
+
+// TestDataSourceTldPricingRead_DurationTypeVerbatim asserts duration_type is the
+// server's own value rather than a hardcoded "YEAR". The SDK matches the tier
+// case-insensitively, so a server that answers "Year" must export "Year".
+func TestDataSourceTldPricingRead_DurationTypeVerbatim(t *testing.T) {
+	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+		if command != "namecheap.users.getPricing" {
+			return apiErrorXML("1010101", "unexpected command "+command)
+		}
+		return xmlGetPricing("register", "com",
+			dsPriceTier{Duration: 1, DurationType: "Year", Price: "8.88", RegularPrice: "10.87", YourPrice: "8.88", Currency: "USD"},
+		)
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapTldPricing().Schema, map[string]interface{}{
+		"tld": "com", "action": "REGISTER", "years": 1,
+	})
+	diags := dataSourceNamecheapTldPricingRead(context.Background(), d, client)
+	require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
+	assert.Equal(t, "Year", d.Get("duration_type"), "duration_type must be the server's value, not a constant")
+}
+
+// TestDataSourceTldPricingRead_MultiLabelTld covers the dotted product name the
+// docs advertise (co.uk). Nothing else in the suite proves a multi-label TLD
+// resolves, so without this the docs' central example is an untested claim.
+func TestDataSourceTldPricingRead_MultiLabelTld(t *testing.T) {
+	var sentProduct string
+	client := startDataSourceServer(t, func(command string, r *http.Request) string {
+		if command != "namecheap.users.getPricing" {
+			return apiErrorXML("1010101", "unexpected command "+command)
+		}
+		sentProduct = r.FormValue("ProductName")
+		return xmlGetPricing("register", "co.uk",
+			dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "7.48", RegularPrice: "9.98", YourPrice: "7.48", Currency: "GBP"},
+		)
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapTldPricing().Schema, map[string]interface{}{
+		"tld": "co.uk", "action": "REGISTER", "years": 1,
+	})
+	diags := dataSourceNamecheapTldPricingRead(context.Background(), d, client)
+	require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
+	assert.Equal(t, "co.uk", sentProduct)
+	assert.Equal(t, "7.48", d.Get("price"))
+	assert.Equal(t, "GBP", d.Get("currency"))
+	assert.Equal(t, "pricing:co.uk:REGISTER:1", d.Id())
+}
+
+// TestDataSourceTldPricingRead_BlankPromotionIsAbsent covers a promotional
+// attribute the server sends as whitespace. It must read as absent rather than
+// being exported as a blank-looking price, which is the one behaviour that
+// distinguishes going through Promo() from reading the raw field.
+func TestDataSourceTldPricingRead_BlankPromotionIsAbsent(t *testing.T) {
+	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+		if command != "namecheap.users.getPricing" {
+			return apiErrorXML("1010101", "unexpected command "+command)
+		}
+		return xmlGetPricing("register", "info",
+			dsPriceTier{Duration: 1, DurationType: "YEAR", Price: "3.98", RegularPrice: "3.98", YourPrice: "3.98", Currency: "USD", Promotion: "   "},
+		)
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapTldPricing().Schema, map[string]interface{}{
+		"tld": "info", "action": "REGISTER", "years": 1,
+	})
+	diags := dataSourceNamecheapTldPricingRead(context.Background(), d, client)
+	require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
+	assert.Equal(t, "", d.Get("promo_price"), "a whitespace-only promotion is not a promotion")
+	assert.Equal(t, "3.98", d.Get("price"))
+}
+
+// TestDataSourceTldPricingRead_MalformedEnvelope covers a Status=OK response
+// whose CommandResponse carries no result element. The SDK reports no error for
+// it, so without the provider's own guard the read would dereference a nil
+// result; the guard must turn it into a diagnostic instead.
+func TestDataSourceTldPricingRead_MalformedEnvelope(t *testing.T) {
+	client := startDataSourceServer(t, func(string, *http.Request) string {
+		return `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.users.getPricing"></CommandResponse>
+</ApiResponse>`
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapTldPricing().Schema, map[string]interface{}{
+		"tld": "com", "action": "REGISTER", "years": 1,
+	})
+	diags := dataSourceNamecheapTldPricingRead(context.Background(), d, client)
+	require.True(t, diags.HasError(), "a result-less response must not read as a valid price")
+	assert.Contains(t, diags[0].Summary, "com")
+	assert.Empty(t, d.Id(), "a failed read must not set an ID")
+}
+
+// TestDataSourceTldPricingRead_CaseNormalization proves the request is
 // normalized before it reaches the API: an uppercase TLD and a lowercase action
-// resolve, and the ID is built from the normalized values.
-func TestDataSourceTldPricingRead_CaseAndDotNormalization(t *testing.T) {
+// resolve, and the ID is built from the normalized values. The lowercase action
+// is reachable from a real config because the validator ignores case — see
+// TestAccMockDataSourceTldPricingLowercaseAction, which drives it through
+// Terraform rather than around the validator as this test does.
+func TestDataSourceTldPricingRead_CaseNormalization(t *testing.T) {
 	var sentProduct, sentAction string
 	client := startDataSourceServer(t, func(command string, r *http.Request) string {
 		if command != "namecheap.users.getPricing" {
@@ -355,7 +517,13 @@ func TestValidateTld(t *testing.T) {
 		{"leading dot", ".com", true},
 		{"leading whitespace", " com", true},
 		{"trailing whitespace", "com ", true},
-		{"domain name", "example.com/path", true},
+		{"url path", "example.com/path", true},
+		{"trailing dot", "com.", true},
+		{"internal newline", "co\nuk", true},
+		// A bare domain name cannot be rejected: it is structurally identical to a
+		// legitimate multi-label TLD, so it is accepted here and fails later as
+		// "no published price".
+		{"bare domain name is accepted", "example.com", false},
 		{"url", "https://example.com", true},
 		{"space inside", "co uk", true},
 	}

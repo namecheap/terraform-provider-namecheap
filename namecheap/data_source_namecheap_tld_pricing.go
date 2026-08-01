@@ -47,11 +47,13 @@ func dataSourceNamecheapTldPricing() *schema.Resource {
 				ValidateFunc: validateTld,
 			},
 			"action": {
-				Type:         schema.TypeString,
-				Optional:     true,
-				Default:      pricingActionRegister,
-				Description:  "The action to price: REGISTER (default), RENEW or TRANSFER.",
-				ValidateFunc: validation.StringInSlice([]string{pricingActionRegister, pricingActionRenew, pricingActionTransfer}, false),
+				Type:        schema.TypeString,
+				Optional:    true,
+				Default:     pricingActionRegister,
+				Description: "The action to price: REGISTER (default), RENEW or TRANSFER.",
+				// ignoreCase: "renew" is accepted and normalized to RENEW before the
+				// request, so a config is not rejected over letter case.
+				ValidateFunc: validation.StringInSlice([]string{pricingActionRegister, pricingActionRenew, pricingActionTransfer}, true),
 			},
 			"years": {
 				Type:         schema.TypeInt,
@@ -78,9 +80,9 @@ func dataSourceNamecheapTldPricing() *schema.Resource {
 			"promo_price": {
 				Type:     schema.TypeString,
 				Computed: true,
-				Description: "The promotional price for this tier, as an exact decimal string, or empty when the API reported no promotion. " +
-					"An active promotion is already reflected in price, so this attribute identifies the discount rather than adding to it. " +
-					"Namecheap does not document what a zero promotional price means, so a \"0.00\" is passed through as reported rather than being treated as \"no promotion\".",
+				Description: "The promotional price for this tier, as an exact decimal string, or empty when no promotion applies. " +
+					"Namecheap reports an un-promoted tier as \"0.0\" rather than omitting the value, so a non-positive promotional price is exported as empty here and `promo_price != \"\"` is a meaningful test for \"is this TLD on promotion\". " +
+					"An active promotion is already reflected in price, so this attribute identifies the discount rather than adding to it.",
 			},
 			"currency": {
 				Type:        schema.TypeString,
@@ -99,7 +101,9 @@ func dataSourceNamecheapTldPricing() *schema.Resource {
 func dataSourceNamecheapTldPricingRead(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*namecheap.Client)
 
-	tld := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(data.Get("tld").(string)), "."))
+	// validateTld has already rejected a leading dot and surrounding whitespace,
+	// so case is the only normalization left to do.
+	tld := strings.ToLower(data.Get("tld").(string))
 	action := strings.ToUpper(data.Get("action").(string))
 	years := data.Get("years").(int)
 
@@ -124,14 +128,20 @@ func dataSourceNamecheapTldPricingRead(ctx context.Context, data *schema.Resourc
 			Severity: diag.Error,
 			Summary:  fmt.Sprintf("No %s price published for .%s over %d year(s)", action, tld, years),
 			Detail: fmt.Sprintf("Namecheap answered the pricing request but the response contains no %d-year %s tier for .%s. "+
-				"The TLD may not be offered, may not support this action, or may not be sold for this term — "+
-				"check the TLD spelling and try years = 1.", years, action, tld),
+				"The TLD may not be offered, may not support this action, or may not be sold for this term "+
+				"(some TLDs have a multi-year minimum, and some are registry-only). Check the TLD spelling, "+
+				"then try a different years value.", years, action, tld),
 		}}
 	}
 
-	// Promo reports presence, so an absent attribute stays an empty string rather
-	// than becoming a fabricated "0.00".
-	promo, _ := price.Promo()
+	// The live API sends PromotionPrice="0.0" on tiers with no promotion, so
+	// presence is not the question — IsPositive is. A non-positive promotional
+	// price is exported as empty so that promo_price != "" means what a reader
+	// assumes it means.
+	promo := namecheap.Amount("")
+	if price.PromotionPrice.IsPositive() {
+		promo = price.PromotionPrice
+	}
 
 	_ = data.Set("price", price.EffectivePrice().String())
 	_ = data.Set("regular_price", price.RegularPrice.String())
@@ -145,8 +155,12 @@ func dataSourceNamecheapTldPricingRead(ctx context.Context, data *schema.Resourc
 }
 
 // validateTld rejects the shapes that would otherwise reach the API as a silent
-// "no such product": an empty value, a leading dot, a full domain name, or
-// surrounding whitespace.
+// "no such product": an empty value, a leading or trailing dot, surrounding
+// whitespace, and anything carrying URL punctuation.
+//
+// It cannot reject a full domain name: "example.com" is structurally identical
+// to the legitimate multi-label TLD "co.uk", so that mistake surfaces as the
+// read's "no published price" diagnostic instead.
 func validateTld(val interface{}, key string) (warns []string, errs []error) {
 	tld, _ := val.(string)
 	if strings.TrimSpace(tld) != tld {
@@ -161,7 +175,11 @@ func validateTld(val interface{}, key string) (warns []string, errs []error) {
 		errs = append(errs, fmt.Errorf("%s must be written without a leading dot (use \"com\", not \".com\"), got %q", key, tld))
 		return
 	}
-	if strings.ContainsAny(tld, " /:@") {
+	if strings.HasSuffix(tld, ".") {
+		errs = append(errs, fmt.Errorf("%s must not end with a dot, got %q", key, tld))
+		return
+	}
+	if strings.ContainsAny(tld, " /:@\n\t") {
 		errs = append(errs, fmt.Errorf("%s must be a top-level domain such as \"com\" or \"co.uk\", not a domain name or URL, got %q", key, tld))
 	}
 	return

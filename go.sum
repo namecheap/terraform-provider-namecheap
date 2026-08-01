@@ -131,8 +131,8 @@ github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyua
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
 github.com/mitchellh/reflectwalk v1.0.2 h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zxSIeXaQ=
 github.com/mitchellh/reflectwalk v1.0.2/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
-github.com/namecheap/go-namecheap-sdk/v2 v2.8.0 h1:nCJl1FxBnzEwqBOaYodLiNB2PA2FQTaPtnOwXDGagbA=
-github.com/namecheap/go-namecheap-sdk/v2 v2.8.0/go.mod h1:Qlz3X1kDNHJUuDotq6Yo1xQXsxZyM/6BX1/N+zbi5OE=
+github.com/namecheap/go-namecheap-sdk/v2 v2.9.0 h1:eObXmcUonsBUmT1ltTMB0rw0cJG2dHLozofBx4Ia3fo=
+github.com/namecheap/go-namecheap-sdk/v2 v2.9.0/go.mod h1:Qlz3X1kDNHJUuDotq6Yo1xQXsxZyM/6BX1/N+zbi5OE=
 github.com/oklog/run v1.2.0 h1:O8x3yXwah4A73hJdlrwo/2X6J62gE5qTMusH0dvz60E=
 github.com/oklog/run v1.2.0/go.mod h1:mgDbKRSwPhJfesJ4PntqFUbKQRZ50NgmZTSPlFA0YFk=
 github.com/pjbgf/sha1cd v0.6.0 h1:3WJ8Wz8gvDz29quX1OcEmkAlUg9diU4GxJHqs0/XiwU=

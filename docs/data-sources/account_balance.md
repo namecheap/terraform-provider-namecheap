@@ -65,7 +65,7 @@ This data source takes no arguments.
 
 ## Attribute Reference
 
-- `currency` - The currency the amounts are listed in (e.g. `USD`).
+- `currency` - The currency the amounts are listed in (e.g. `USD`), as reported by the API.
 - `available_balance` - Total amount available in the account, as an exact decimal string. This is the figure to gate a charge-bearing apply on.
 - `account_balance` - Total amount in the account, as an exact decimal string. Per the Namecheap API this is the same figure as `available_balance`.
 - `earned_amount` - Amount earned from Marketplace sales, as an exact decimal string.
