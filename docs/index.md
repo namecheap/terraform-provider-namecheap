@@ -1,12 +1,10 @@
 ---
 page_title: "Namecheap provider"
-subcategory: ""
 ---
 
 # Namecheap Provider
 
-The Namecheap Provider can be used to configure domain records. Before moving forward, make sure you have enabled API
-access for your account and whitelisted your static IP address where the terraform will be running.
+The Namecheap Provider can be used to configure domain records. Before moving forward, make sure you have enabled API access for your account and whitelisted your static IP address where the terraform will be running.
 
 **Recommended resources:**
 
@@ -52,9 +50,7 @@ resource "namecheap_domain_records" "domain-com" {
 
 ## Argument Reference
 
-Every argument can be provided inline in the `provider` block or via its
-`NAMECHEAP_*` environment variable. When both are set, the inline value takes
-precedence.
+Every argument can be provided inline in the `provider` block or via its `NAMECHEAP_*` environment variable. When both are set, the inline value takes precedence.
 
 ### Credentials
 
@@ -62,9 +58,7 @@ precedence.
 - `api_user` (`NAMECHEAP_API_USER`) - (Required, Sensitive) A registered API user for Namecheap. Must be supplied inline or via the environment variable.
 - `api_key` (`NAMECHEAP_API_KEY`) - (Required, Sensitive) The Namecheap API key. Must be supplied inline or via the environment variable.
 - `client_ip` (`NAMECHEAP_CLIENT_IP`) - (Optional, String) The public IP address the Namecheap API sees as the caller. It must be whitelisted at the [API access whitelisted IPs page](https://ap.www.namecheap.com/settings/tools/apiaccess/whitelisted-ips). When left unset, the provider auto-detects this machine's public IP via an outbound HTTPS request to `api.ipify.org` (5 second timeout). If detection fails (for example on a host with no outbound network access), provider configuration fails with guidance to set `client_ip` explicitly. An explicitly set value is always honored unchanged. See the [CI and automation environments guide](guides/ci-environments.md) for guidance on when to set this explicitly.
-- `use_sandbox` (`NAMECHEAP_USE_SANDBOX`) - (Optional, Bool) Use sandbox API endpoints. Defaults to `false`. If `true`, all API requests are
-  made through the `sandbox.namecheap.com` endpoint. You can [sign up](https://www.sandbox.namecheap.com/myaccount/signup/)
-  for a free sandbox account.
+- `use_sandbox` (`NAMECHEAP_USE_SANDBOX`) - (Optional, Bool) Use sandbox API endpoints. Defaults to `false`. If `true`, all API requests are made through the `sandbox.namecheap.com` endpoint. You can [sign up](https://www.sandbox.namecheap.com/myaccount/signup/) for a free sandbox account.
 
 ### Client behavior and resilience
 

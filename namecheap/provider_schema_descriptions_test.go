@@ -1,0 +1,171 @@
+package namecheap_provider
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/stretchr/testify/assert"
+)
+
+// The registry pages are generated from the schema, so an attribute with no
+// Description renders as a blank cell on the published documentation. These
+// tests are the enforcement arm of that: they walk every attribute the provider
+// exposes — provider config, every resource, every data source, and every
+// nested block within them — and fail on anything undocumented.
+//
+// This is what stops the generated docs decaying as resources are added: a new
+// attribute without a description cannot reach master.
+
+// schemaWalkResult is one attribute found during the walk, identified by a path
+// like "namecheap_domain_records.record.hostname".
+type schemaWalkResult struct {
+	path        string
+	description string
+}
+
+// walkSchema collects every attribute reachable from s, recursing into nested
+// resources so block attributes are covered too. prefix names the container.
+func walkSchema(prefix string, s map[string]*schema.Schema, out *[]schemaWalkResult) {
+	for name, attr := range s {
+		path := name
+		if prefix != "" {
+			path = prefix + "." + name
+		}
+		*out = append(*out, schemaWalkResult{path: path, description: attr.Description})
+
+		if nested, ok := attr.Elem.(*schema.Resource); ok && nested != nil {
+			walkSchema(path, nested.Schema, out)
+		}
+	}
+}
+
+// providerAttributes returns every attribute of the provider config, all
+// resources and all data sources, sorted for deterministic failure output.
+func providerAttributes(t *testing.T) []schemaWalkResult {
+	t.Helper()
+	p := Provider()
+
+	var found []schemaWalkResult
+	// Resources and data sources share names (namecheap_domain_records is both),
+	// so the prefix has to say which one — otherwise a failure cannot tell you
+	// where to look, and a coverage check is satisfied by either.
+	walkSchema("provider", p.Schema, &found)
+	for name, resource := range p.ResourcesMap {
+		walkSchema("resource."+name, resource.Schema, &found)
+	}
+	for name, dataSource := range p.DataSourcesMap {
+		walkSchema("data."+name, dataSource.Schema, &found)
+	}
+
+	sort.Slice(found, func(i, j int) bool { return found[i].path < found[j].path })
+	return found
+}
+
+// TestSchemaDescriptionsArePresent fails on any attribute the registry would
+// render with an empty description.
+func TestSchemaDescriptionsArePresent(t *testing.T) {
+	var missing []string
+	for _, attr := range providerAttributes(t) {
+		if strings.TrimSpace(attr.description) == "" {
+			missing = append(missing, attr.path)
+		}
+	}
+
+	assert.Empty(t, missing,
+		"every schema attribute needs a Description — the registry page is generated from it, "+
+			"so an empty one publishes a blank cell. Undocumented attributes:\n  %s",
+		strings.Join(missing, "\n  "))
+}
+
+// TestSchemaDescriptionsAreUsable catches descriptions that exist but say
+// nothing — a restatement of the attribute name. Those pass a presence check
+// while leaving the reader with no information they could not read off the name.
+//
+// There is deliberately no minimum length: "The postal/ZIP code." is a complete
+// description, and a word count would reject it while accepting three words of
+// nonsense.
+func TestSchemaDescriptionsAreUsable(t *testing.T) {
+	var weak []string
+	for _, attr := range providerAttributes(t) {
+		description := strings.TrimSpace(attr.description)
+		if description == "" {
+			continue // reported by TestSchemaDescriptionsArePresent
+		}
+
+		// "hostname" described as "Hostname" tells a reader nothing they could
+		// not read off the attribute name.
+		name := attr.path[strings.LastIndex(attr.path, ".")+1:]
+		if strings.EqualFold(strings.TrimSuffix(description, "."), strings.ReplaceAll(name, "_", " ")) {
+			weak = append(weak, fmt.Sprintf("%s: %q merely restates the attribute name", attr.path, description))
+		}
+	}
+
+	assert.Empty(t, weak, "these descriptions are present but uninformative:\n  %s", strings.Join(weak, "\n  "))
+}
+
+// TestResourceDescriptionsArePresent covers the resource- and data-source-level
+// Description, which the attribute walk does not reach. It is what the registry
+// renders as the page summary, and an empty one publishes a blank line under
+// the page title.
+func TestResourceDescriptionsArePresent(t *testing.T) {
+	p := Provider()
+
+	var missing []string
+	for name, resource := range p.ResourcesMap {
+		if strings.TrimSpace(resource.Description) == "" {
+			missing = append(missing, "resource."+name)
+		}
+	}
+	for name, dataSource := range p.DataSourcesMap {
+		if strings.TrimSpace(dataSource.Description) == "" {
+			missing = append(missing, "data."+name)
+		}
+	}
+	sort.Strings(missing)
+
+	assert.Empty(t, missing,
+		"every resource and data source needs a Description — it is the page summary "+
+			"on the registry. Undocumented surfaces:\n  %s", strings.Join(missing, "\n  "))
+}
+
+// TestSchemaDescriptionsCoverEverySurface guards the walk itself: if the walk
+// silently stopped finding attributes — a refactor to how resources register,
+// say — the two tests above would pass vacuously.
+func TestSchemaDescriptionsCoverEverySurface(t *testing.T) {
+	p := Provider()
+	found := providerAttributes(t)
+
+	assert.NotEmpty(t, p.ResourcesMap, "provider should expose resources")
+	assert.NotEmpty(t, p.DataSourcesMap, "provider should expose data sources")
+
+	prefixes := map[string]bool{}
+	for _, attr := range found {
+		// Keep the "resource."/"data." qualifier, which is the first two segments.
+		parts := strings.SplitN(attr.path, ".", 3)
+		if len(parts) >= 2 && (parts[0] == "resource" || parts[0] == "data") {
+			prefixes[parts[0]+"."+parts[1]] = true
+			continue
+		}
+		prefixes[parts[0]] = true
+	}
+	assert.True(t, prefixes["provider"], "walk should cover provider configuration")
+	for name := range p.ResourcesMap {
+		assert.True(t, prefixes["resource."+name], "walk should cover resource %s", name)
+	}
+	for name := range p.DataSourcesMap {
+		assert.True(t, prefixes["data."+name], "walk should cover data source %s", name)
+	}
+
+	// Nested blocks are the easiest thing for a walk to miss, and the records
+	// resource has one, so assert the recursion actually descended into it.
+	var nested bool
+	for _, attr := range found {
+		if attr.path == "resource.namecheap_domain_records.record.hostname" {
+			nested = true
+		}
+	}
+	assert.True(t, nested, "walk should descend into nested blocks (namecheap_domain_records.record)")
+}

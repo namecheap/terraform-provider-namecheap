@@ -83,6 +83,52 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
+  docs:
+    # Registry documentation is assembled by tfplugindocs from templates and
+    # examples, so it can silently drift from either. This job regenerates it and
+    # fails if the committed tree differs, which makes a stale page a merge
+    # blocker rather than something noticed after release. It also type-checks
+    # every example against the provider built from this commit, so a snippet
+    # that no longer compiles cannot reach the registry.
+    #
+    # Note the pages currently hand-write their argument references rather than
+    # rendering them from the schema, so a changed Description does NOT move the
+    # published text — see the deferred migration in #256. What is enforced today
+    # is that every attribute HAS a usable description (unit tests) and that the
+    # committed tree matches what the templates produce.
+    #
+    # No credentials and no network calls to Namecheap: generation reads the
+    # schema from a locally built binary, and `terraform validate` runs behind a
+    # dev_overrides config, so this job is fork-safe.
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve Go minor from go.mod
+        id: gomod
+        run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ steps.gomod.outputs.minor }}
+          check-latest: true
+
+      - name: Set up Terraform
+        # tfplugindocs shells out to `terraform providers schema`, and the
+        # example validation needs the same binary. Wrapper off so the Makefile
+        # sees terraform's real exit codes.
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Docs are generated and current
+        run: make docs-check
+
+      - name: Examples type-check against this provider
+        run: make examples-validate
+
   security:
     # Trivy scan covers three concerns in one job:
     #  - SCA: CVEs in Go dependencies declared by go.mod / go.sum.

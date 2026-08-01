@@ -39,6 +39,7 @@ func isNameserverNotFoundError(err error) bool {
 // nameserver host and its glue IP so it can itself be used as a nameserver.
 func resourceNamecheapPersonalNameserver() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Registers a personal (glue/vanity) nameserver such as ns1.example.com under a domain on your account, and manages the IP address it resolves to.",
 		CreateContext: resourceNameserverCreate,
 		ReadContext:   resourceNameserverRead,
 		UpdateContext: resourceNameserverUpdate,
@@ -53,20 +54,20 @@ func resourceNamecheapPersonalNameserver() *schema.Resource {
 				Type:         schema.TypeString,
 				Required:     true,
 				ForceNew:     true,
-				Description:  "The registered domain the personal nameserver belongs to (e.g. \"example.com\"). Must be a root domain present on the account, not a subdomain.",
+				Description:  "The registered root domain the personal nameserver belongs to (e.g. `example.com`). Must be a root domain present on the account, not a subdomain. Changing this forces a new resource.",
 				ValidateFunc: validateDomainIsNotSubdomain,
 			},
 			"nameserver": {
 				Type:         schema.TypeString,
 				Required:     true,
 				ForceNew:     true,
-				Description:  "The fully qualified hostname of the personal nameserver to register (e.g. \"ns1.example.com\").",
+				Description:  "The fully qualified hostname of the personal nameserver to register (e.g. `ns1.example.com`). Changing this forces a new resource.",
 				ValidateFunc: validation.StringIsNotEmpty,
 			},
 			"ip": {
 				Type:         schema.TypeString,
 				Required:     true,
-				Description:  "The IP address the personal nameserver resolves to (the glue record's address).",
+				Description:  "The IP address the personal nameserver resolves to (the glue record's address). This value can be changed in place, which issues a `domains.ns.update`.",
 				ValidateFunc: validation.IsIPAddress,
 			},
 		},

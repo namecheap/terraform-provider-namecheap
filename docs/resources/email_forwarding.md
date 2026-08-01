@@ -1,15 +1,13 @@
 ---
 page_title: "namecheap_email_forwarding Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
   Manages a domain's entire email forwarding table (mailbox alias -> destination address).
 ---
 
 # namecheap_email_forwarding (Resource)
 
-Manages a domain's email forwarding rules via the Namecheap
-[`domains.dns.getEmailForwarding` / `domains.dns.setEmailForwarding`](https://www.namecheap.com/support/api/methods/domains-dns/set-email-forwarding/)
-API.
+Manages a domain's email forwarding rules via the Namecheap [`domains.dns.getEmailForwarding` / `domains.dns.setEmailForwarding`](https://www.namecheap.com/support/api/methods/domains-dns/set-email-forwarding/) API.
 
 ~> **Full-ownership resource:** `setEmailForwarding` replaces the domain's **entire** forwarding table in one call, so this resource owns every rule for the domain. Forwarding rules created outside Terraform (e.g. through the dashboard) surface as drift on the next refresh and are **replaced** on the next apply. Destroying this resource clears the table entirely.
 
@@ -55,6 +53,6 @@ resource "namecheap_email_forwarding" "example-com" {
 
 Email forwarding can be imported by domain name, e.g.,
 
-```terraform
+```shell
 terraform import namecheap_email_forwarding.example-com example.com
 ```

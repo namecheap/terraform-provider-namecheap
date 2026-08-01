@@ -38,6 +38,7 @@ const (
 // the comparison site when a numeric check is needed.
 func dataSourceNamecheapTldPricing() *schema.Resource {
 	return &schema.Resource{
+		Description: "Reads Namecheap's published price for one TLD, action and term, so a configuration can compare TLDs or assert a cost ceiling.",
 		ReadContext: dataSourceNamecheapTldPricingRead,
 		Schema: map[string]*schema.Schema{
 			"tld": {

@@ -1,19 +1,15 @@
 ---
 page_title: "namecheap_domain_records Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
   A read-only view of a domain's live DNS records.
 ---
 
 # namecheap_domain_records (Data Source)
 
-Reads a domain's live DNS record set via `namecheap.domains.dns.getHosts`, along
-with its nameservers (`namecheap.domains.dns.getList`) and email routing type.
+Reads a domain's live DNS record set via `namecheap.domains.dns.getHosts`, along with its nameservers (`namecheap.domains.dns.getList`) and email routing type.
 
-The `records` object shape mirrors the
-[`namecheap_domain_records`](../resources/domain_records.md) resource `record`
-block attribute-for-attribute, so the output composes into resource inputs
-without any field remapping.
+The `records` object shape mirrors the [`namecheap_domain_records`](../resources/domain_records.md) resource `record` block attribute-for-attribute, so the output composes into resource inputs without any field remapping.
 
 ## Example Usage
 
@@ -27,8 +23,7 @@ output "record_hostnames" {
 }
 ```
 
-Merge/augment an existing zone by feeding the live records into a resource
-`dynamic` block:
+Merge/augment an existing zone by feeding the live records into a resource `dynamic` block:
 
 ```terraform
 data "namecheap_domain_records" "current" {

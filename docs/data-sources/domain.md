@@ -1,25 +1,15 @@
 ---
 page_title: "namecheap_domain Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Domains"
 description: |-
   Read-only information about a single domain in the account.
 ---
 
 # namecheap_domain (Data Source)
 
-Looks up read-only information about a single domain. Use it to reference an
-existing (non-Terraform-managed) domain's DNS provider, nameservers or expiry in
-other resources, or to gate logic on domain properties (is it expiring? locked?
-which DNS type is active?).
+Looks up read-only information about a single domain. Use it to reference an existing (non-Terraform-managed) domain's DNS provider, nameservers or expiry in other resources, or to gate logic on domain properties (is it expiring? locked? which DNS type is active?).
 
-~> This data source performs **two** Namecheap API calls per read:
-`namecheap.domains.getInfo` supplies the DNS-oriented fields (`dns_provider_type`,
-`is_our_dns`, `is_premium`, `is_premium_dns`, `nameservers`), and
-`namecheap.domains.getList` supplies the lifecycle fields (`created`, `expires`,
-`is_expired`, `is_locked`, `auto_renew`, `whois_guard`) that `getInfo` does not
-return. If you only need lifecycle data for many domains at once, prefer the
-[`namecheap_domains`](domains.md) portfolio data source, which returns all of it
-in one paginated listing.
+~> This data source performs **two** Namecheap API calls per read: `namecheap.domains.getInfo` supplies the DNS-oriented fields (`dns_provider_type`, `is_our_dns`, `is_premium`, `is_premium_dns`, `nameservers`), and `namecheap.domains.getList` supplies the lifecycle fields (`created`, `expires`, `is_expired`, `is_locked`, `auto_renew`, `whois_guard`) that `getInfo` does not return. If you only need lifecycle data for many domains at once, prefer the [`namecheap_domains`](domains.md) portfolio data source, which returns all of it in one paginated listing.
 
 ## Example Usage
 

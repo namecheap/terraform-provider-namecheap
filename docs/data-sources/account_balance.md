@@ -1,19 +1,15 @@
 ---
 page_title: "namecheap_account_balance Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Account"
 description: |-
   The funds available in the Namecheap account the provider is authenticated as.
 ---
 
 # namecheap_account_balance (Data Source)
 
-Reads the funds in the account the provider is authenticated as, via the
-Namecheap `namecheap.users.getBalances` API command. It takes no arguments — the
-account is the one the provider credentials belong to.
+Reads the funds in the account the provider is authenticated as, via the Namecheap `namecheap.users.getBalances` API command. It takes no arguments — the account is the one the provider credentials belong to.
 
-Its purpose is to make money visible to a plan: registrations, renewals and
-transfers all draw on this balance, and Terraform has no other way to check
-affordability before an apply starts spending.
+Its purpose is to make money visible to a plan: registrations, renewals and transfers all draw on this balance, and Terraform has no other way to check affordability before an apply starts spending.
 
 ## Example Usage
 
@@ -27,8 +23,7 @@ output "funds" {
 
 ## Cost-aware applies
 
-Pair the balance with a `precondition` so a charge-bearing apply fails at plan
-time — with your message — instead of part-way through a batch:
+Pair the balance with a `precondition` so a charge-bearing apply fails at plan time — with your message — instead of part-way through a batch:
 
 ```terraform
 data "namecheap_account_balance" "current" {}
@@ -48,16 +43,11 @@ output "planned_registration" {
 }
 ```
 
-The same `precondition` block works inside a `lifecycle` block on a
-charge-bearing resource, which is where you usually want it.
+The same `precondition` block works inside a `lifecycle` block on a charge-bearing resource, which is where you usually want it.
 
 ## Money is exported as strings
 
-Every monetary attribute is a **string** holding the exact decimal Namecheap
-returned (`"123.45"`), never a number. Terraform numbers are IEEE-754 floats, and
-a balance or price that round-trips through a float can silently change value —
-not acceptable for a figure that gates a charge. Convert with `tonumber()` at the
-point of comparison, as above, so the rounding is explicit and local.
+Every monetary attribute is a **string** holding the exact decimal Namecheap returned (`"123.45"`), never a number. Terraform numbers are IEEE-754 floats, and a balance or price that round-trips through a float can silently change value — not acceptable for a figure that gates a charge. Convert with `tonumber()` at the point of comparison, as above, so the rounding is explicit and local.
 
 ## Argument Reference
 
@@ -75,8 +65,5 @@ This data source takes no arguments.
 
 ## Notes
 
-- The read is a single API call and is refreshed on every plan, so the value is
-  current as of the plan — but nothing reserves those funds. A concurrent
-  purchase elsewhere can still leave a later apply short.
-- Adding funds is deliberately not supported by this provider: payment flows do
-  not belong in `terraform apply`.
+- The read is a single API call and is refreshed on every plan, so the value is current as of the plan — but nothing reserves those funds. A concurrent purchase elsewhere can still leave a later apply short.
+- Adding funds is deliberately not supported by this provider: payment flows do not belong in `terraform apply`.

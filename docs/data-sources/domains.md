@@ -1,16 +1,13 @@
 ---
 page_title: "namecheap_domains Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Domains"
 description: |-
   The account's domain portfolio, with optional filtering.
 ---
 
 # namecheap_domains (Data Source)
 
-Lists the account's domain portfolio via the Namecheap `namecheap.domains.getList`
-API command. The data source **auto-paginates** across all result pages, so the
-`domains` attribute always reflects the complete result set for the given
-filters.
+Lists the account's domain portfolio via the Namecheap `namecheap.domains.getList` API command. The data source **auto-paginates** across all result pages, so the `domains` attribute always reflects the complete result set for the given filters.
 
 ## Example Usage
 
@@ -27,9 +24,7 @@ output "domain_names" {
 
 ## Portfolio-wide composition pattern
 
-The portfolio pairs naturally with `for_each` to apply uniform policy (SPF,
-DMARC, verification records, ...) across every domain in the account in a few
-lines:
+The portfolio pairs naturally with `for_each` to apply uniform policy (SPF, DMARC, verification records, ...) across every domain in the account in a few lines:
 
 ```terraform
 data "namecheap_domains" "all" {

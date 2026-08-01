@@ -1,8 +1,8 @@
 ---
 page_title: "namecheap_personal_nameserver Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
-  
+  Registers a personal (glue/vanity) nameserver such as ns1.example.com under a domain on your account, and manages the IP address it resolves to.
 ---
 
 # namecheap_personal_nameserver (Resource)
@@ -41,6 +41,6 @@ resource "namecheap_personal_nameserver" "ns2" {
 
 Personal nameservers can be imported using the composite ID `<domain>/<nameserver>`, e.g.,
 
-```terraform
+```shell
 terraform import namecheap_personal_nameserver.ns1 example.com/ns1.example.com
 ```

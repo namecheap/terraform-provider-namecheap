@@ -1,0 +1,39 @@
+---
+page_title: "namecheap_domain_records Data Source - terraform-provider-namecheap"
+subcategory: "DNS"
+description: |-
+  A read-only view of a domain's live DNS records.
+---
+
+{{/* This template serves as a starting point for documentation generation, and can be customized with hardcoded values and/or doc gen templates.
+
+For example, the {{ .SchemaMarkdown }} template can be used to replace manual schema documentation if descriptions of schema attributes are added in the provider source code. */ -}}
+
+# namecheap_domain_records (Data Source)
+
+Reads a domain's live DNS record set via `namecheap.domains.dns.getHosts`, along with its nameservers (`namecheap.domains.dns.getList`) and email routing type.
+
+The `records` object shape mirrors the [`namecheap_domain_records`](../resources/domain_records.md) resource `record` block attribute-for-attribute, so the output composes into resource inputs without any field remapping.
+
+## Example Usage
+
+{{tffile "examples/data-sources/domain_records/example_1.tf"}}
+
+Merge/augment an existing zone by feeding the live records into a resource `dynamic` block:
+
+{{tffile "examples/data-sources/domain_records/example_2.tf"}}
+
+## Argument Reference
+
+- `domain` - (Required) The domain whose DNS records to read (e.g. `example.com`). Must be a registered root domain, not a subdomain.
+
+## Attribute Reference
+
+- `email_type` - The email routing type configured for the domain (e.g. `NONE`, `FWD`, `MXE`, `MX`, `OX`, `GMAIL`).
+- `nameservers` - The custom nameservers configured for the domain; empty when the domain is using Namecheap's DNS.
+- `records` - The live DNS host records for the domain. Each element has the following attributes:
+  - `hostname` - Sub-domain/hostname of the record.
+  - `type` - Record type (e.g. `A`, `AAAA`, `CNAME`, `MX`, `TXT`).
+  - `address` - Record value (URL or IP address, depending on the record type).
+  - `mx_pref` - MX preference for the host. Applicable to MX records only.
+  - `ttl` - Time to live for the record, in seconds.

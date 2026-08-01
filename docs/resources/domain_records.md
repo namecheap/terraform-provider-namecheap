@@ -1,14 +1,13 @@
 ---
 page_title: "namecheap_domain_records Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
-  
+  Manages the DNS host records of a domain, or delegates the domain to custom nameservers. In MERGE mode it manages only the records it declares; in OVERWRITE mode it owns the whole zone and deletes anything absent from the configuration.
 ---
 
 # namecheap_domain_records (Resource)
 
-Follow [Namecheap domain records guide](../guides/namecheap_domain_records_guide.md) to get detailed information about
-each argument and usage examples.
+Follow [Namecheap domain records guide](../guides/namecheap_domain_records_guide.md) to get detailed information about each argument and usage examples.
 
 ## Example Usage
 
@@ -48,8 +47,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
   Since v2.5.0, the provider warns before this happens: `terraform plan` shows a warning enumerating any live record that isn't in your configuration, and `terraform apply` warns again immediately before deleting them (covering the case where the record only appeared after your last refresh). Each warning includes ready-to-paste `record { ... }` blocks — add them to your configuration to adopt those records instead of losing them, and the next plan will be empty. See the [OVERWRITE safety guide](../guides/namecheap_domain_records_guide.md#overwrite) for details.
 - `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`
-- `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record`
-  records. Conflicts with `nameservers`
+- `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record` records. Conflicts with `nameservers`
 - `nameservers` - (Optional) List of nameservers. Conflicts with `email_type` and `record`
 
 <a id="nestedblock--record"></a>
@@ -62,12 +60,12 @@ resource "namecheap_domain_records" "my-domain2-com" {
 - `mx_pref` - (Optional) MX preference for host. Applicable for MX records only
 - `ttl` - (Optional) Time to live for all record types. Possible values: any value between 60 to 60000
 
-~> It is strongly recommended to set `address`, `hostname`, `nameservers` in lower case to prevent undefined behavior!  
+~> It is strongly recommended to set `address`, `hostname`, `nameservers` in lower case to prevent undefined behavior!
 
 ## Import
 
 Domain records can be imported by domain name, e.g.,
 
-```terraform
+```shell
 terraform import namecheap_domain_records.main example.com
 ```
