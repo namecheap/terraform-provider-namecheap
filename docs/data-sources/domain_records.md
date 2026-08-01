@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_domain_records Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
   A read-only view of a domain's live DNS records.
 ---

@@ -63,13 +63,18 @@ lint:
 # Registry documentation. tfplugindocs is pinned as a Go tool dependency (see the
 # `tool` directive in go.mod), so these targets need no separately installed
 # binary and CI runs exactly what contributors run. Generation reads the schema
-# from a freshly built provider, so it needs a `terraform` binary on PATH.
+# through the Terraform CLI: put a `terraform` binary on PATH, or tfplugindocs
+# quietly downloads the latest release instead of the version you pinned.
 docs:
 	go tool tfplugindocs generate --provider-name ${NAME}
 
 # docs-check regenerates and fails if the committed tree differs — the gate that
-# stops code and its published documentation drifting apart. Untracked files
+# stops templates, examples and published output drifting apart. Untracked files
 # count too: a new resource whose page was never generated must not pass.
+#
+# It does not yet detect a changed schema Description, because the pages still
+# hand-write their argument references instead of rendering {{ .SchemaMarkdown }};
+# that migration is tracked in #256.
 docs-check: docs
 	@git diff --exit-code -- docs/ || { echo "::error::docs/ is stale — run 'make docs' and commit the result"; exit 1; }
 	@test -z "$$(git ls-files --others --exclude-standard -- docs/)" || { \
@@ -98,7 +103,8 @@ examples-validate: build
 	trap 'rm -rf "$$work"' EXIT; \
 	printf 'provider_installation {\n  dev_overrides {\n    "namecheap/namecheap" = "%s"\n  }\n  direct {}\n}\n' "$$bin_dir" > "$$work/tfrc"; \
 	found=0; \
-	for tf in $$(find examples -name '*.tf' | sort); do \
+	find examples -name '*.tf' | sort > "$$work/list"; \
+	while IFS= read -r tf; do \
 		found=$$((found + 1)); \
 		module="$$work/module"; \
 		rm -rf "$$module"; mkdir -p "$$module"; \
@@ -108,7 +114,7 @@ examples-validate: build
 		TF_CLI_CONFIG_FILE="$$work/tfrc" terraform -chdir="$$module" validate >/dev/null \
 			|| { echo "::error file=$$tf::terraform validate failed"; \
 			     TF_CLI_CONFIG_FILE="$$work/tfrc" terraform -chdir="$$module" validate; exit 1; }; \
-	done; \
+	done < "$$work/list"; \
 	test "$$found" -gt 0 || { echo "::error::no examples found to validate"; exit 1; }; \
 	echo "validated $$found example files"
 

@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_domain Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Domains"
 description: |-
   Read-only information about a single domain in the account.
 ---

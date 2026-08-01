@@ -39,6 +39,7 @@ func isNameserverNotFoundError(err error) bool {
 // nameserver host and its glue IP so it can itself be used as a nameserver.
 func resourceNamecheapPersonalNameserver() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Registers a personal (glue/vanity) nameserver such as ns1.example.com under a domain on your account, and manages the IP address it resolves to.",
 		CreateContext: resourceNameserverCreate,
 		ReadContext:   resourceNameserverRead,
 		UpdateContext: resourceNameserverUpdate,

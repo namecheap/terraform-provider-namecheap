@@ -22,6 +22,7 @@ import (
 // The two-call cost is documented on the registry page.
 func dataSourceNamecheapDomain() *schema.Resource {
 	return &schema.Resource{
+		Description: "Reads a single domain on the account: its DNS provider and nameservers, plus lifecycle fields such as expiry, registrar lock and auto-renew.",
 		ReadContext: dataSourceNamecheapDomainRead,
 		Schema: map[string]*schema.Schema{
 			"domain": {

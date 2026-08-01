@@ -117,20 +117,31 @@ Registry documentation is generated from the provider schema by
 pinned as a Go tool dependency — no separate install. A new surface is finished
 when all of the following are true, and CI's `docs` job enforces every one:
 
-1. **Every attribute has a `Description`.** The published page is generated from
-   these, so an empty one ships as a blank cell. `TestSchemaDescriptionsArePresent`
-   fails on any attribute without one — nested blocks included — and
+1. **Every attribute has a `Description`, and so does the resource itself.**
+   `TestSchemaDescriptionsArePresent` fails on any attribute without one — nested
+   blocks included — `TestResourceDescriptionsArePresent` covers the
+   resource/data-source summary that becomes the page's frontmatter, and
    `TestSchemaDescriptionsAreUsable` rejects text that merely restates the
    attribute name. Put the nuance in the description itself: whether a change
    forces replacement, what an empty value means, which other attribute it
    conflicts with.
-2. **There is an example.** Add `examples/resources/<name>/resource.tf` (or
-   `examples/data-sources/<name>/data-source.tf`) and reference it from the
-   template. Every `.tf` under `examples/` is type-checked against the provider
+
+   !> Today the pages **hand-write** their argument references; only the
+   frontmatter summary is rendered from the schema. So editing a `Description`
+   does *not* change the published argument text, and `make docs-check` will not
+   notice — you must update `templates/<kind>/<name>.md.tmpl` in the same commit.
+   Migrating those sections to the generated `{{ .SchemaMarkdown }}` is tracked
+   in #256; once it lands, the descriptions become the single source and this
+   caveat goes away.
+2. **There is an example.** Add a `.tf` file under
+   `examples/resources/<name>/` (or `examples/data-sources/<name>/`) and
+   reference it from the template with `{{tffile "..."}}`. Existing pages name
+   these `example_1.tf`, `example_2.tf` and so on, one per snippet on the page. Every `.tf` under `examples/` is type-checked against the provider
    built from your branch, so an example that no longer compiles fails CI.
 3. **Importable resources ship an `import.sh`** showing the ID format, and the
    page has an `## Import` section. Add the ID to the table in the
-   [importing guide](docs/guides/importing.md).
+   [importing guide](templates/guides/importing.md) — the template, not the
+   generated copy under `docs/`.
 4. **There is a template** at `templates/resources/<name>.md.tmpl`, and
    `make docs` has been run and the regenerated `docs/` committed.
 
@@ -143,8 +154,9 @@ make examples-validate  # type-check every example against this provider
 ```
 
 Edit `templates/`, never `docs/` — `docs/` is generated output and any hand-edit
-is reverted by the next `make docs` (and caught by `make docs-check` before
-that).
+is reverted by the next `make docs`. If a generation run fails part-way (a
+template referencing a missing example, say) it can leave a page truncated on
+disk; `git checkout -- docs/` restores it.
 
 ### What runs on your PR
 

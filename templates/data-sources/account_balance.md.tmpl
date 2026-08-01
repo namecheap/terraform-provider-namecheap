@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_account_balance Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Account"
 description: |-
   The funds available in the Namecheap account the provider is authenticated as.
 ---

@@ -47,6 +47,7 @@ func isDomainGoneError(err error) bool {
 // on the domain resource: manage a domain's contacts in exactly one place.
 func resourceNamecheapDomainContacts() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Manages the four WHOIS contact blocks (registrant, tech, admin and aux billing) of a registered domain.",
 		CreateContext: resourceContactsCreate,
 		ReadContext:   resourceContactsRead,
 		UpdateContext: resourceContactsUpdate,

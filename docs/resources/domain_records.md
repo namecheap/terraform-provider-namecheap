@@ -1,8 +1,8 @@
 ---
 page_title: "namecheap_domain_records Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
-  
+  Manages the DNS host records of a domain, or delegates the domain to custom nameservers. In MERGE mode it manages only the records it declares; in OVERWRITE mode it owns the whole zone and deletes anything absent from the configuration.
 ---
 
 # namecheap_domain_records (Resource)

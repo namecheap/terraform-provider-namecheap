@@ -27,6 +27,7 @@ const (
 // the given filters.
 func dataSourceNamecheapDomains() *schema.Resource {
 	return &schema.Resource{
+		Description: "Lists the account's domain portfolio with optional filtering, paginating through every result page.",
 		ReadContext: dataSourceNamecheapDomainsRead,
 		Schema: map[string]*schema.Schema{
 			"search_term": {

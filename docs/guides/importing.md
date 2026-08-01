@@ -63,12 +63,17 @@ terraform import namecheap_domain_records.example example.com
 Each resource's own page documents its ID format too; that page is the
 authority if this table ever falls behind.
 
-## Adopting a whole portfolio
+## Adopting a whole portfolio (Terraform 1.7+)
 
 The `namecheap_domains` data source lists every domain on the account, so a
 portfolio can be adopted with one block per resource type rather than one per
 domain. Terraform evaluates `import` blocks with `for_each`, and the data source
-supplies the keys:
+supplies the keys.
+
+~> `for_each` inside an `import` block requires **Terraform 1.7 or later**. On
+1.5 and 1.6 an `import` block accepts only a literal `to`/`id` pair, so adopt a
+portfolio there by generating one block per domain (or by looping
+`terraform import` in a shell script).
 
 ```terraform
 data "namecheap_domains" "all" {

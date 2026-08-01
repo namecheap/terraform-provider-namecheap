@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_domain_contacts Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Domains"
 description: |-
   Manages a domain's WHOIS contact information (registrant, tech, admin and auxiliary billing contacts).
 ---

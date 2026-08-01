@@ -16,6 +16,7 @@ import (
 // composes into resource inputs without transformation.
 func dataSourceNamecheapDomainRecords() *schema.Resource {
 	return &schema.Resource{
+		Description: "Reads the DNS host records currently published for a domain, in the same shape the namecheap_domain_records resource accepts.",
 		ReadContext: dataSourceNamecheapDomainRecordsRead,
 		Schema: map[string]*schema.Schema{
 			"domain": {

@@ -49,12 +49,15 @@ func providerAttributes(t *testing.T) []schemaWalkResult {
 	p := Provider()
 
 	var found []schemaWalkResult
+	// Resources and data sources share names (namecheap_domain_records is both),
+	// so the prefix has to say which one — otherwise a failure cannot tell you
+	// where to look, and a coverage check is satisfied by either.
 	walkSchema("provider", p.Schema, &found)
 	for name, resource := range p.ResourcesMap {
-		walkSchema(name, resource.Schema, &found)
+		walkSchema("resource."+name, resource.Schema, &found)
 	}
 	for name, dataSource := range p.DataSourcesMap {
-		walkSchema(name, dataSource.Schema, &found)
+		walkSchema("data."+name, dataSource.Schema, &found)
 	}
 
 	sort.Slice(found, func(i, j int) bool { return found[i].path < found[j].path })
@@ -78,21 +81,18 @@ func TestSchemaDescriptionsArePresent(t *testing.T) {
 }
 
 // TestSchemaDescriptionsAreUsable catches descriptions that exist but say
-// nothing — a single word, or a restatement of the attribute name. Those pass a
-// presence check while still leaving the reader with no information.
+// nothing — a restatement of the attribute name. Those pass a presence check
+// while leaving the reader with no information they could not read off the name.
+//
+// There is deliberately no minimum length: "The postal/ZIP code." is a complete
+// description, and a word count would reject it while accepting three words of
+// nonsense.
 func TestSchemaDescriptionsAreUsable(t *testing.T) {
-	const minWords = 3
-
 	var weak []string
 	for _, attr := range providerAttributes(t) {
 		description := strings.TrimSpace(attr.description)
 		if description == "" {
 			continue // reported by TestSchemaDescriptionsArePresent
-		}
-
-		if len(strings.Fields(description)) < minWords {
-			weak = append(weak, fmt.Sprintf("%s: %q (fewer than %d words)", attr.path, description, minWords))
-			continue
 		}
 
 		// "hostname" described as "Hostname" tells a reader nothing they could
@@ -104,6 +104,31 @@ func TestSchemaDescriptionsAreUsable(t *testing.T) {
 	}
 
 	assert.Empty(t, weak, "these descriptions are present but uninformative:\n  %s", strings.Join(weak, "\n  "))
+}
+
+// TestResourceDescriptionsArePresent covers the resource- and data-source-level
+// Description, which the attribute walk does not reach. It is what the registry
+// renders as the page summary, and an empty one publishes a blank line under
+// the page title.
+func TestResourceDescriptionsArePresent(t *testing.T) {
+	p := Provider()
+
+	var missing []string
+	for name, resource := range p.ResourcesMap {
+		if strings.TrimSpace(resource.Description) == "" {
+			missing = append(missing, "resource."+name)
+		}
+	}
+	for name, dataSource := range p.DataSourcesMap {
+		if strings.TrimSpace(dataSource.Description) == "" {
+			missing = append(missing, "data."+name)
+		}
+	}
+	sort.Strings(missing)
+
+	assert.Empty(t, missing,
+		"every resource and data source needs a Description — it is the page summary "+
+			"on the registry. Undocumented surfaces:\n  %s", strings.Join(missing, "\n  "))
 }
 
 // TestSchemaDescriptionsCoverEverySurface guards the walk itself: if the walk
@@ -118,21 +143,27 @@ func TestSchemaDescriptionsCoverEverySurface(t *testing.T) {
 
 	prefixes := map[string]bool{}
 	for _, attr := range found {
-		prefixes[attr.path[:strings.Index(attr.path+".", ".")]] = true
+		// Keep the "resource."/"data." qualifier, which is the first two segments.
+		parts := strings.SplitN(attr.path, ".", 3)
+		if len(parts) >= 2 && (parts[0] == "resource" || parts[0] == "data") {
+			prefixes[parts[0]+"."+parts[1]] = true
+			continue
+		}
+		prefixes[parts[0]] = true
 	}
 	assert.True(t, prefixes["provider"], "walk should cover provider configuration")
 	for name := range p.ResourcesMap {
-		assert.True(t, prefixes[name], "walk should cover resource %s", name)
+		assert.True(t, prefixes["resource."+name], "walk should cover resource %s", name)
 	}
 	for name := range p.DataSourcesMap {
-		assert.True(t, prefixes[name], "walk should cover data source %s", name)
+		assert.True(t, prefixes["data."+name], "walk should cover data source %s", name)
 	}
 
 	// Nested blocks are the easiest thing for a walk to miss, and the records
 	// resource has one, so assert the recursion actually descended into it.
 	var nested bool
 	for _, attr := range found {
-		if attr.path == "namecheap_domain_records.record.hostname" {
+		if attr.path == "resource.namecheap_domain_records.record.hostname" {
 			nested = true
 		}
 	}

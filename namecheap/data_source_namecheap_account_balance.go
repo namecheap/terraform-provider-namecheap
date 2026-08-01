@@ -25,6 +25,7 @@ const accountBalanceID = "account_balance"
 // that rounding is then yours to reason about.
 func dataSourceNamecheapAccountBalance() *schema.Resource {
 	return &schema.Resource{
+		Description: "Reads the funds available in the Namecheap account the provider is authenticated as, so a plan can gate charge-bearing operations on affordability.",
 		ReadContext: dataSourceNamecheapAccountBalanceRead,
 		Schema: map[string]*schema.Schema{
 			"currency": {

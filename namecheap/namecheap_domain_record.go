@@ -19,6 +19,7 @@ const (
 
 func resourceNamecheapDomainRecords() *schema.Resource {
 	return &schema.Resource{
+		Description:   "Manages the DNS host records of a domain, or delegates the domain to custom nameservers. In MERGE mode it manages only the records it declares; in OVERWRITE mode it owns the whole zone and deletes anything absent from the configuration.",
 		CreateContext: resourceRecordCreate,
 		UpdateContext: resourceRecordUpdate,
 		ReadContext:   resourceRecordRead,

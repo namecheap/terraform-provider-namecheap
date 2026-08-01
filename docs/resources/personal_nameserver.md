@@ -1,8 +1,8 @@
 ---
 page_title: "namecheap_personal_nameserver Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
-  
+  Registers a personal (glue/vanity) nameserver such as ns1.example.com under a domain on your account, and manages the IP address it resolves to.
 ---
 
 # namecheap_personal_nameserver (Resource)

@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_domains Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Domains"
 description: |-
   The account's domain portfolio, with optional filtering.
 ---

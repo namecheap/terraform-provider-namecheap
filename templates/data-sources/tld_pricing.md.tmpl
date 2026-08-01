@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_tld_pricing Data Source - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "Account"
 description: |-
   The published Namecheap price for one TLD, action and term.
 ---

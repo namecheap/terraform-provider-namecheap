@@ -1,6 +1,6 @@
 ---
 page_title: "namecheap_email_forwarding Resource - terraform-provider-namecheap"
-subcategory: ""
+subcategory: "DNS"
 description: |-
   Manages a domain's entire email forwarding table (mailbox alias -> destination address).
 ---

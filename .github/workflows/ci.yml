@@ -84,12 +84,18 @@ jobs:
           fail_ci_if_error: false
 
   docs:
-    # Registry documentation is generated from the schema, so it can silently
-    # drift from the code. This job regenerates it and fails if the committed
-    # tree differs, which makes a stale page a merge blocker rather than
-    # something noticed after release. It also type-checks every example against
-    # the provider built from this commit, so a snippet that no longer compiles
-    # cannot reach the registry.
+    # Registry documentation is assembled by tfplugindocs from templates and
+    # examples, so it can silently drift from either. This job regenerates it and
+    # fails if the committed tree differs, which makes a stale page a merge
+    # blocker rather than something noticed after release. It also type-checks
+    # every example against the provider built from this commit, so a snippet
+    # that no longer compiles cannot reach the registry.
+    #
+    # Note the pages currently hand-write their argument references rather than
+    # rendering them from the schema, so a changed Description does NOT move the
+    # published text — see the deferred migration in #256. What is enforced today
+    # is that every attribute HAS a usable description (unit tests) and that the
+    # committed tree matches what the templates produce.
     #
     # No credentials and no network calls to Namecheap: generation reads the
     # schema from a locally built binary, and `terraform validate` runs behind a
