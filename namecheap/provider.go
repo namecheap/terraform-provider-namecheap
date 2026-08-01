@@ -24,6 +24,8 @@ const (
 	defaultRequestsPerMinute = 20
 	defaultMaxRetries        = 4
 	defaultRetryMaxElapsed   = "2m"
+	defaultRetryBaseDelay    = "500ms"
+	defaultRetryMaxDelay     = "30s"
 	defaultRequestTimeout    = "30s"
 
 	minRequestsPerMinute = 1
@@ -95,6 +97,22 @@ func Provider() *schema.Provider {
 				ValidateDiagFunc: validatePositiveDuration,
 			},
 
+			"retry_base_delay": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				Description:      "First backoff delay before a retried API call, as a Go duration string (e.g. \"500ms\", \"5s\"). Subsequent delays grow exponentially up to retry_max_delay. Must parse and be greater than zero. Defaults to \"500ms\", matching the SDK's built-in retry policy. Raise it when the API is rate-limiting: waiting longer between fewer attempts costs less quota than retrying quickly, because every attempt is itself a request.",
+				DefaultFunc:      schema.EnvDefaultFunc("NAMECHEAP_RETRY_BASE_DELAY", defaultRetryBaseDelay),
+				ValidateDiagFunc: validatePositiveDuration,
+			},
+
+			"retry_max_delay": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				Description:      "Cap on any single backoff delay between retried API calls, as a Go duration string (e.g. \"30s\", \"1m\"). Must parse and be greater than zero. Defaults to \"30s\", matching the SDK's built-in retry policy.",
+				DefaultFunc:      schema.EnvDefaultFunc("NAMECHEAP_RETRY_MAX_DELAY", defaultRetryMaxDelay),
+				ValidateDiagFunc: validatePositiveDuration,
+			},
+
 			"request_timeout": {
 				Type:             schema.TypeString,
 				Optional:         true,
@@ -161,6 +179,47 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 		}
 	}
 
+	retryBaseDelayRaw := data.Get("retry_base_delay").(string)
+	retryBaseDelay, err := time.ParseDuration(retryBaseDelayRaw)
+	if err != nil {
+		return nil, diag.Diagnostics{
+			{
+				Severity:      diag.Error,
+				Summary:       "Invalid retry_base_delay",
+				Detail:        fmt.Sprintf("retry_base_delay %q is not a valid Go duration string: %s", retryBaseDelayRaw, err),
+				AttributePath: cty.Path{cty.GetAttrStep{Name: "retry_base_delay"}},
+			},
+		}
+	}
+
+	retryMaxDelayRaw := data.Get("retry_max_delay").(string)
+	retryMaxDelay, err := time.ParseDuration(retryMaxDelayRaw)
+	if err != nil {
+		return nil, diag.Diagnostics{
+			{
+				Severity:      diag.Error,
+				Summary:       "Invalid retry_max_delay",
+				Detail:        fmt.Sprintf("retry_max_delay %q is not a valid Go duration string: %s", retryMaxDelayRaw, err),
+				AttributePath: cty.Path{cty.GetAttrStep{Name: "retry_max_delay"}},
+			},
+		}
+	}
+
+	// A base delay above the cap would make the cap meaningless, and the SDK
+	// silently clamps rather than complaining, so say so at plan time instead of
+	// letting a config mean something other than it reads.
+	if retryBaseDelay > retryMaxDelay {
+		return nil, diag.Diagnostics{
+			{
+				Severity: diag.Error,
+				Summary:  "retry_base_delay exceeds retry_max_delay",
+				Detail: fmt.Sprintf("retry_base_delay %q is longer than retry_max_delay %q, so every backoff would be capped at the first delay. "+
+					"Raise retry_max_delay or lower retry_base_delay.", retryBaseDelayRaw, retryMaxDelayRaw),
+				AttributePath: cty.Path{cty.GetAttrStep{Name: "retry_base_delay"}},
+			},
+		}
+	}
+
 	requestTimeoutRaw := data.Get("request_timeout").(string)
 	requestTimeout, err := time.ParseDuration(requestTimeoutRaw)
 	if err != nil {
@@ -222,6 +281,8 @@ func configureContext(ctx context.Context, data *schema.ResourceData) (interface
 		Retry: &namecheap.RetryOptions{
 			MaxAttempts: maxRetries,
 			MaxElapsed:  retryMaxElapsed,
+			BaseDelay:   retryBaseDelay,
+			MaxDelay:    retryMaxDelay,
 		},
 		// Bridge the SDK's structured slog events into Terraform's tflog so
 		// that TF_LOG_PROVIDER_NAMECHEAP=DEBUG surfaces per-API-call entries

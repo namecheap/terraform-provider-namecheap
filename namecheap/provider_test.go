@@ -74,8 +74,15 @@ func acceptanceMaxRetries() int {
 // suite, read from the same NAMECHEAP_RETRY_MAX_ELAPSED variable the provider
 // honours. Anything unusable falls back to the provider's own default.
 func acceptanceRetryMaxElapsed() time.Duration {
-	fallback, _ := time.ParseDuration(defaultRetryMaxElapsed)
-	raw := os.Getenv("NAMECHEAP_RETRY_MAX_ELAPSED")
+	return acceptanceDuration("NAMECHEAP_RETRY_MAX_ELAPSED", defaultRetryMaxElapsed)
+}
+
+// acceptanceDuration reads a duration from env, falling back to the provider's
+// own default string when it is unset or unusable, so the helper client and the
+// provider under test are always tuned alike.
+func acceptanceDuration(envVar, fallbackRaw string) time.Duration {
+	fallback, _ := time.ParseDuration(fallbackRaw)
+	raw := os.Getenv(envVar)
 	if raw == "" {
 		return fallback
 	}
@@ -115,6 +122,8 @@ func init() {
 		Retry: &namecheap.RetryOptions{
 			MaxAttempts: acceptanceMaxRetries(),
 			MaxElapsed:  acceptanceRetryMaxElapsed(),
+			BaseDelay:   acceptanceDuration("NAMECHEAP_RETRY_BASE_DELAY", defaultRetryBaseDelay),
+			MaxDelay:    acceptanceDuration("NAMECHEAP_RETRY_MAX_DELAY", defaultRetryMaxDelay),
 		},
 	})
 
@@ -359,12 +368,14 @@ func TestProviderConfigureWhitespaceClientIPTriggersDetection(t *testing.T) {
 }
 
 // Resilience config options: requests_per_minute, max_retries,
-// retry_max_elapsed, request_timeout.
+// retry_max_elapsed, retry_base_delay, retry_max_delay, request_timeout.
 
 const (
 	testEnvRequestsPerMinute = "NAMECHEAP_REQUESTS_PER_MINUTE"
 	testEnvMaxRetries        = "NAMECHEAP_MAX_RETRIES"
 	testEnvRetryMaxElapsed   = "NAMECHEAP_RETRY_MAX_ELAPSED"
+	testEnvRetryBaseDelay    = "NAMECHEAP_RETRY_BASE_DELAY"
+	testEnvRetryMaxDelay     = "NAMECHEAP_RETRY_MAX_DELAY"
 	testEnvRequestTimeout    = "NAMECHEAP_REQUEST_TIMEOUT"
 )
 
@@ -372,7 +383,10 @@ const (
 // duration of a test, so an ambient developer/CI environment cannot leak in.
 func clearResilienceEnvVars(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{testEnvRequestsPerMinute, testEnvMaxRetries, testEnvRetryMaxElapsed, testEnvRequestTimeout} {
+	for _, k := range []string{
+		testEnvRequestsPerMinute, testEnvMaxRetries, testEnvRetryMaxElapsed,
+		testEnvRetryBaseDelay, testEnvRetryMaxDelay, testEnvRequestTimeout,
+	} {
 		t.Setenv(k, "")
 	}
 }
@@ -392,7 +406,10 @@ func baseProviderConfig(t *testing.T) map[string]interface{} {
 
 func TestProviderResilienceFieldsAreOptional(t *testing.T) {
 	p := Provider()
-	for _, field := range []string{"requests_per_minute", "max_retries", "retry_max_elapsed", "request_timeout"} {
+	for _, field := range []string{
+		"requests_per_minute", "max_retries", "retry_max_elapsed",
+		"retry_base_delay", "retry_max_delay", "request_timeout",
+	} {
 		s, ok := p.Schema[field]
 		assert.True(t, ok, "field %s should exist", field)
 		assert.True(t, s.Optional, "field %s should be Optional", field)
@@ -413,6 +430,10 @@ func TestProviderResilienceDefaultsPreserveCurrentBehavior(t *testing.T) {
 	assert.Equal(t, defaultRequestsPerMinute, client.ClientOptions.RateLimit.PerMinute)
 	assert.Equal(t, defaultMaxRetries, client.ClientOptions.Retry.MaxAttempts)
 	assert.Equal(t, 2*time.Minute, client.ClientOptions.Retry.MaxElapsed)
+	// The backoff defaults must equal the SDK's own, so a configuration that does
+	// not mention them retries exactly as it did before they existed.
+	assert.Equal(t, 500*time.Millisecond, client.ClientOptions.Retry.BaseDelay)
+	assert.Equal(t, 30*time.Second, client.ClientOptions.Retry.MaxDelay)
 	assert.Equal(t, 30*time.Second, client.ClientOptions.HTTPClient.Timeout)
 }
 
@@ -422,6 +443,8 @@ func TestProviderResilienceFieldsFromInlineConfig(t *testing.T) {
 	raw["requests_per_minute"] = 5
 	raw["max_retries"] = 10
 	raw["retry_max_elapsed"] = "90s"
+	raw["retry_base_delay"] = "2s"
+	raw["retry_max_delay"] = "45s"
 	raw["request_timeout"] = "45s"
 
 	rawProvider := Provider()
@@ -432,6 +455,8 @@ func TestProviderResilienceFieldsFromInlineConfig(t *testing.T) {
 	assert.Equal(t, 5, client.ClientOptions.RateLimit.PerMinute)
 	assert.Equal(t, 10, client.ClientOptions.Retry.MaxAttempts)
 	assert.Equal(t, 90*time.Second, client.ClientOptions.Retry.MaxElapsed)
+	assert.Equal(t, 2*time.Second, client.ClientOptions.Retry.BaseDelay)
+	assert.Equal(t, 45*time.Second, client.ClientOptions.Retry.MaxDelay)
 	assert.Equal(t, 45*time.Second, client.ClientOptions.HTTPClient.Timeout)
 }
 
@@ -761,4 +786,99 @@ func TestAcceptanceRetryBudget(t *testing.T) {
 			})
 		}
 	})
+}
+
+// TestProviderRetryBackoffFromEnvVars asserts the two backoff options are
+// readable from the environment, which is how CI tunes them for the live suite.
+func TestProviderRetryBackoffFromEnvVars(t *testing.T) {
+	clearResilienceEnvVars(t)
+	t.Setenv(testEnvRetryBaseDelay, "5s")
+	t.Setenv(testEnvRetryMaxDelay, "1m")
+	raw := baseProviderConfig(t)
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
+
+	client := rawProvider.Meta().(*namecheap.Client)
+	assert.Equal(t, 5*time.Second, client.ClientOptions.Retry.BaseDelay)
+	assert.Equal(t, time.Minute, client.ClientOptions.Retry.MaxDelay)
+}
+
+// TestProviderRetryBackoffInvalid covers the rejections: an unparsable or
+// non-positive duration, and a base delay above the cap — which the SDK would
+// silently clamp, making the configuration mean something other than it reads.
+func TestProviderRetryBackoffInvalid(t *testing.T) {
+	tests := []struct {
+		name      string
+		base      string
+		max       string
+		wantInSum string
+	}{
+		{"unparsable base", "soon", "30s", "retry_base_delay"},
+		{"unparsable max", "500ms", "eventually", "retry_max_delay"},
+		{"zero base", "0s", "30s", "Invalid duration"},
+		{"negative max", "500ms", "-1s", "Invalid duration"},
+		{"base above cap", "45s", "30s", "exceeds retry_max_delay"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearResilienceEnvVars(t)
+			raw := baseProviderConfig(t)
+			raw["retry_base_delay"] = tc.base
+			raw["retry_max_delay"] = tc.max
+
+			rawProvider := Provider()
+			// Validators run through the schema, so exercise both paths: validation
+			// diagnostics for the duration shape, and Configure for the ordering
+			// rule that only makes sense once both values are known.
+			var summaries string
+			for field, value := range map[string]string{"retry_base_delay": tc.base, "retry_max_delay": tc.max} {
+				for _, d := range validatePositiveDuration(value, cty.Path{cty.GetAttrStep{Name: field}}) {
+					summaries += d.Summary + " "
+				}
+			}
+			for _, d := range rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw)) {
+				summaries += d.Summary + " "
+			}
+			assert.Contains(t, summaries, tc.wantInSum)
+		})
+	}
+}
+
+// TestProviderRetryBackoffCostsQuota documents why the knobs exist: every retry
+// is itself an API request, so a rate-limited caller wants few attempts spaced
+// far apart, not many spaced closely. This pins that such a configuration is
+// expressible — 6 attempts with a 5s base and 60s cap can wait out a full
+// rate-limit window while spending 6 requests, where the stock 500ms/30s policy
+// exhausts its attempts in seconds.
+func TestProviderRetryBackoffCostsQuota(t *testing.T) {
+	clearResilienceEnvVars(t)
+	raw := baseProviderConfig(t)
+	raw["max_retries"] = 6
+	raw["retry_base_delay"] = "5s"
+	raw["retry_max_delay"] = "60s"
+	raw["retry_max_elapsed"] = "5m"
+
+	rawProvider := Provider()
+	diags := rawProvider.Configure(context.Background(), terraform.NewResourceConfigRaw(raw))
+	assert.False(t, diags.HasError(), "expected no errors, got: %v", diags)
+
+	retry := rawProvider.Meta().(*namecheap.Client).ClientOptions.Retry
+	assert.Equal(t, 6, retry.MaxAttempts)
+	assert.Equal(t, 5*time.Second, retry.BaseDelay)
+	assert.Equal(t, 60*time.Second, retry.MaxDelay)
+
+	// Exponential growth from the base, capped, must be able to outlast a
+	// one-minute rate window within the elapsed budget.
+	var total, delay time.Duration
+	for i := 1; i < retry.MaxAttempts; i++ {
+		delay = retry.BaseDelay << (i - 1)
+		if delay > retry.MaxDelay {
+			delay = retry.MaxDelay
+		}
+		total += delay
+	}
+	assert.Greater(t, total, time.Minute, "backoff should outlast a one-minute rate window")
+	assert.LessOrEqual(t, total, retry.MaxElapsed, "backoff must fit inside the elapsed budget")
 }

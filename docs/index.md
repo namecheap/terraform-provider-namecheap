@@ -40,6 +40,8 @@ provider "namecheap" {
   # requests_per_minute = 20
   # max_retries         = 4
   # retry_max_elapsed   = "2m"
+  # retry_base_delay    = "500ms"
+  # retry_max_delay     = "30s"
   # request_timeout     = "30s"
 }
 

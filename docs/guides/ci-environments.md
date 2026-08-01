@@ -74,7 +74,7 @@ honored unchanged; the provider never overrides it with a detected address.
 Namecheap enforces a documented primary quota (per-minute request limit) at the
 account level. When several CI jobs — or several `terraform apply` runs — hit
 the API for the **same account** concurrently, their requests are counted
-together and can trip the limit. Four provider arguments control how the client
+together and can trip the limit. Six provider arguments control how the client
 paces and recovers from this:
 
 - `requests_per_minute` (default `20`, valid range `1`–`20`) — the client-side
@@ -88,15 +88,31 @@ paces and recovers from this:
   retrying a single call, as a [Go duration string](https://pkg.go.dev/time#ParseDuration).
   Keep this comfortably under your CI step timeout so a retry storm does not
   cause the job to be killed mid-call.
+- `retry_base_delay` (default `"500ms"`) — the first backoff delay, as a Go
+  duration string. Subsequent delays grow exponentially, capped by
+  `retry_max_delay`.
+- `retry_max_delay` (default `"30s"`) — the cap on any single backoff delay, as a
+  Go duration string.
 - `request_timeout` (default `"30s"`) — the per-request HTTP timeout, as a Go
   duration string.
+
+!> **Every retry is itself a request.** When the API is rate-limiting you,
+retrying quickly makes it worse: the retries are counted against the same quota
+that rejected the original call. Under a rate limit you want *fewer* attempts
+spaced *further apart* — raise `retry_base_delay` and `retry_max_delay` rather
+than `max_retries`. The stock `500ms` base exhausts four attempts in about
+3 seconds, well inside a one-minute rate window; a `5s` base with a `60s` cap
+waits roughly two minutes across five attempts, outlasting the window while
+spending a fraction of the quota.
 
 ```terraform
 # Example: four parallel pipelines sharing one Namecheap account.
 provider "namecheap" {
-  requests_per_minute = 5     # 20 / 4 jobs
-  max_retries         = 6     # ride out brief bursts from sibling jobs
-  retry_max_elapsed   = "3m"  # keep below the CI step timeout
+  requests_per_minute = 5      # 20 / 4 jobs
+  max_retries         = 5      # few attempts, because each one costs quota
+  retry_base_delay    = "5s"   # ...spaced far enough apart to outlast the window
+  retry_max_delay     = "60s"
+  retry_max_elapsed   = "3m"   # keep below the CI step timeout
   request_timeout     = "30s"
 }
 ```
@@ -107,7 +123,8 @@ safety net rather than the only defense.
 
 Each argument also has a `NAMECHEAP_*` environment variable
 (`NAMECHEAP_REQUESTS_PER_MINUTE`, `NAMECHEAP_MAX_RETRIES`,
-`NAMECHEAP_RETRY_MAX_ELAPSED`, `NAMECHEAP_REQUEST_TIMEOUT`), which is often more
+`NAMECHEAP_RETRY_MAX_ELAPSED`, `NAMECHEAP_RETRY_BASE_DELAY`,
+`NAMECHEAP_RETRY_MAX_DELAY`, `NAMECHEAP_REQUEST_TIMEOUT`), which is often more
 convenient to set per pipeline.
 
 ## Debug logging
