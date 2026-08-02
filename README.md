@@ -14,6 +14,7 @@ A Terraform Provider for Namecheap domain DNS configuration.
 - [Guide: Migration to v2.0.0 new major release](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/namecheap_provider_migration_v2.0.0)
 - [Guide: Namecheap domain records](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/namecheap_domain_records_guide)
 - [Guide: Running in CI and automation environments](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/ci-environments)
+- [Guide: Importing an existing portfolio](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/guides/importing)
 
 ## Prerequisites
 
@@ -77,6 +78,20 @@ resource "namecheap_domain_records" "domain2-com" {
     "ns1.random-domain.org",
     "ns2.random-domain.org",
   ]
+}
+```
+
+`namecheap_domain_records` owns a domain's whole zone. To manage records
+individually — one resource per record, so different owners can share a domain —
+use [`namecheap_dns_record`](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/resources/dns_record)
+instead. The two are mutually exclusive for a given domain.
+
+```terraform
+resource "namecheap_dns_record" "www" {
+  domain   = "your-domain.com"
+  hostname = "www"
+  type     = "A"
+  address  = "203.0.113.10"
 }
 ```
 
