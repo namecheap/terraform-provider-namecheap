@@ -63,6 +63,11 @@ listing the candidates, rather than being applied to both. Remove the duplicate,
 or manage the domain's records as one set with
 [`namecheap_domain_records`](./domain_records.md).
 
+For the same reason, creating a record that already exists is refused and points
+you at `terraform import` — and so is *changing* one onto the identity of a record
+that already exists, whether or not Terraform manages it. Writing either would
+leave the zone holding two records that nothing can tell apart.
+
 The import ID carries no preference, so an `MX` record sharing its host and target
 with another at a different preference is ambiguous on import for the same reason.
 
@@ -84,11 +89,18 @@ Tracked in [go-namecheap-sdk#162](https://github.com/namecheap/go-namecheap-sdk/
 ## Argument Reference
 
 - `domain` - (Required, Force New) The registered root domain the record belongs to (e.g. `example.com`). Must be a root domain on the account, not a subdomain.
-- `hostname` - (Required, Force New) The sub-domain the record answers for, or `@` for the domain itself (e.g. `www`).
+- `hostname` - (Required, Force New) The sub-domain the record answers for, or `@` for the domain itself (e.g. `www`). Must not be empty — write `@` for the apex.
 - `type` - (Required, Force New) The record type: `A`, `AAAA`, `ALIAS`, `CAA`, `CNAME`, `MX`, `MXE`, `NS`, `TXT`, `URL`, `URL301`, `FRAME`.
 - `address` - (Required) The record's value, whose meaning depends on `type`: an IP address for `A`/`AAAA`, a hostname for `CNAME`/`MX`/`NS`, arbitrary text for `TXT`, a URL for `URL`/`URL301`/`FRAME`. Changed in place.
 - `ttl` - (Optional) Time to live in seconds, between `60` and `60000`. Defaults to `1800`. Changed in place.
-- `mx_pref` - (Optional) MX preference, lower being preferred, between `0` and `255`. Applies to `MX` records only. Defaults to `10`, which is what the API reports for every other type.
+- `mx_pref` - (Optional) MX preference, lower being preferred, between `0` and `255`. Defaults to `10`. Changed in place.
+
+-> `mx_pref` applies to `MX` records only, where it is part of the record's
+identity — a primary and a backup mail server may name the same host, and the
+preference is what tells them apart. For every other type Namecheap stores a fixed
+`10` whatever is sent, so a value set there is ignored rather than fought over:
+sending it would make the post-write check compare it against the API's `10` and
+report the write as a lost race.
 
 `domain`, `hostname` and `type` are the record's identity, so changing any of
 them replaces the record rather than editing it. `address`, `ttl` and `mx_pref`

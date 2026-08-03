@@ -444,7 +444,7 @@ func parseSetHostsRequest(r *http.Request) []hostEntry {
 			Name:    name,
 			Type:    recordType,
 			Address: mockNormalizeAddress(recordType, r.FormValue("Address"+idx)),
-			MXPref:  mxPref,
+			MXPref:  mockNormalizeMXPref(recordType, mxPref),
 			TTL:     ttl,
 		})
 	}
@@ -463,6 +463,18 @@ func mockNormalizeAddress(recordType, address string) string {
 		}
 	}
 	return address
+}
+
+// mockNormalizeMXPref mimics the Namecheap server, which keeps a preference only
+// for MX records and reports a fixed 10 for every other type, whatever was sent.
+// Echoing the submitted value back instead would hide a real defect: a provider
+// that reads the preference into state for a type that has none leaves a diff the
+// user can never resolve.
+func mockNormalizeMXPref(recordType string, mxPref int) int {
+	if recordType == "MX" {
+		return mxPref
+	}
+	return 10
 }
 
 // splitNameservers parses the comma-separated Nameservers parameter, trimming

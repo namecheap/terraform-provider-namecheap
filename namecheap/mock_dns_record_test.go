@@ -549,6 +549,154 @@ resource "namecheap_dns_record" "shop" {
 	})
 }
 
+// TestAccMockDNSRecordUpdateRefusesExistingIdentity covers an update that moves a
+// record onto the identity of one that already exists. The SDK's upsert is a
+// filter-then-append with no collision check, so the write would land a second
+// record the selector can no longer tell apart — and the read straight after
+// would refuse to touch either, wedging the resource with no way out but the
+// dashboard. Create refuses this case; so must update.
+func TestAccMockDNSRecordUpdateRefusesExistingIdentity(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seed(dnsRecordTestDomain, []hostEntry{
+		// Managed by nobody, and the address step 2 tries to move onto.
+		{Name: "www", Type: "A", Address: "10.7.0.2", TTL: 1800, MXPref: 10},
+	}, "NONE", nil)
+
+	config := func(address string) string {
+		return fmt.Sprintf(`
+resource "namecheap_dns_record" "www" {
+  domain   = "%s"
+  hostname = "www"
+  type     = "A"
+  address  = "%s"
+}
+`, dnsRecordTestDomain, address)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: config("10.7.0.1"),
+				Check:  assertZoneHas(m, "www", "A", "10.7.0.1"),
+			},
+			{
+				Config:      config("10.7.0.2"),
+				ExpectError: regexp.MustCompile(`(?s)DNS record already exists.*terraform import`),
+			},
+			{
+				// The refusal must leave everything as it was: one record at each
+				// address, and state still describing the one this resource owns.
+				// SDKv2 persists planned values on any update error, so without the
+				// restore this plan is not empty.
+				Config:   config("10.7.0.1"),
+				PlanOnly: true,
+				Check: resource.ComposeTestCheckFunc(
+					assertZoneHas(m, "www", "A", "10.7.0.1"),
+					assertZoneCount(m, "www", "A", "10.7.0.2", 1),
+				),
+			},
+		},
+	})
+}
+
+// TestAccMockDNSRecordRejectsEmptyIdentityFields covers empty strings, which
+// Terraform's Required does not reject. An empty hostname silently means the apex
+// through SDK normalization, but renders an ID the importer itself refuses to
+// parse — so the resource would create a record it could never import.
+func TestAccMockDNSRecordRejectsEmptyIdentityFields(t *testing.T) {
+	m := newNamecheapMock(t)
+	seedUnmanagedZone(m)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "namecheap_dns_record" "empty_host" {
+  domain   = "%s"
+  hostname = ""
+  type     = "A"
+  address  = "10.8.0.1"
+}
+`, dnsRecordTestDomain),
+				ExpectError: regexp.MustCompile(`(?s)hostname.*empty`),
+			},
+			{
+				Config: fmt.Sprintf(`
+resource "namecheap_dns_record" "empty_address" {
+  domain   = "%s"
+  hostname = "www"
+  type     = "A"
+  address  = ""
+}
+`, dnsRecordTestDomain),
+				ExpectError: regexp.MustCompile(`(?s)address.*empty`),
+			},
+		},
+	})
+}
+
+// TestAccMockDNSRecordMXPrefIgnoredOutsideMX covers an explicit mx_pref on a
+// record type that has no preference. The API answers 10 for all of them, so
+// reading that back over the configured value leaves a diff that can never be
+// resolved — and applying it rewrites the whole zone to change nothing.
+func TestAccMockDNSRecordMXPrefIgnoredOutsideMX(t *testing.T) {
+	m := newNamecheapMock(t)
+	seedUnmanagedZone(m)
+
+	config := fmt.Sprintf(`
+resource "namecheap_dns_record" "with_pref" {
+  domain   = "%s"
+  hostname = "pref"
+  type     = "A"
+  address  = "10.9.0.1"
+  mx_pref  = 20
+}
+`, dnsRecordTestDomain)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				// resource.Test fails the step on a non-empty post-apply plan, so
+				// this alone proves the value no longer round-trips into a diff.
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_dns_record.with_pref", "mx_pref", "20"),
+					assertZoneHas(m, "pref", "A", "10.9.0.1"),
+				),
+			},
+			{Config: config, PlanOnly: true},
+		},
+	})
+}
+
+// assertZoneCount checks how many records in the mock's zone match a host, type
+// and address — the assertion that catches a write which duplicated a record
+// rather than replacing it.
+func assertZoneCount(m *namecheapMock, host, recordType, address string, want int) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		state := m.state(dnsRecordTestDomain)
+		if state == nil {
+			return fmt.Errorf("domain %s has no state in the mock", dnsRecordTestDomain)
+		}
+		var got int
+		for _, h := range state.hosts {
+			if h.Name == host && h.Type == recordType && h.Address == address {
+				got++
+			}
+		}
+		if got != want {
+			return fmt.Errorf("%s %s -> %q: want %d record(s), got %d (zone now %+v)", host, recordType, address, want, got, state.hosts)
+		}
+		return nil
+	}
+}
+
 // assertZoneMXPrefs checks the MX records for a host and address carry exactly
 // the given preferences, in any order.
 func assertZoneMXPrefs(m *namecheapMock, host, address string, want ...int) resource.TestCheckFunc {

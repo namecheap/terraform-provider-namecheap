@@ -151,6 +151,69 @@ func TestDNSRecordSelectorNeverMatchesAll(t *testing.T) {
 	}
 }
 
+// TestDNSRecordIdentityMatchesWildcardsUnknownMXPref pins the one asymmetry
+// between the two arguments: the import ID carries no preference, so a want
+// without one has to match whatever the live record has. Getting this backwards
+// makes every MX record unimportable.
+func TestDNSRecordIdentityMatchesWildcardsUnknownMXPref(t *testing.T) {
+	live := dnsRecordFixture("@", "MX", "mail.example.com.", 20)
+
+	unknownPref := namecheap.DomainsDNSHostRecord{
+		HostName:   namecheap.String("@"),
+		RecordType: namecheap.String("MX"),
+		Address:    namecheap.String("mail.example.com"),
+	}
+	assert.True(t, dnsRecordIdentityMatches(live, unknownPref),
+		"a want with no preference — an import ID — must match any preference")
+
+	assert.True(t, dnsRecordIdentityMatches(live, dnsRecordFixture("@", "MX", "mail.example.com", 20)),
+		"the same preference matches, trailing dot notwithstanding")
+	assert.False(t, dnsRecordIdentityMatches(live, dnsRecordFixture("@", "MX", "mail.example.com", 10)),
+		"a different preference is a different MX record")
+
+	// Outside MX the preference is not compared at all, in either direction.
+	assert.True(t, dnsRecordIdentityMatches(
+		dnsRecordFixture("www", "A", "10.0.0.1", 10),
+		dnsRecordFixture("www", "A", "10.0.0.1", 20)))
+
+	// TTL is never identity: it is an attribute of the record, and matching on it
+	// would make a TTL changed in the dashboard look like a deletion.
+	live.TTL = namecheap.Int(60)
+	assert.True(t, dnsRecordIdentityMatches(live, dnsRecordFixture("@", "MX", "mail.example.com", 20)))
+}
+
+// TestDNSRecordEffectiveMXPref covers the value actually sent to the API. Only MX
+// carries a preference; sending a configured one for any other type makes the
+// SDK's post-write verification compare it against the API's fixed 10 and fail the
+// apply as a lost race.
+func TestDNSRecordEffectiveMXPref(t *testing.T) {
+	assert.Equal(t, uint8(20), dnsRecordEffectiveMXPref("MX", 20))
+	assert.Equal(t, uint8(20), dnsRecordEffectiveMXPref("mx", 20), "type case must not change what is sent")
+	assert.Equal(t, uint8(0), dnsRecordEffectiveMXPref("MX", 0), "zero is a valid, most-preferred MX preference")
+
+	for _, recordType := range []string{"A", "AAAA", "CNAME", "TXT", "MXE", "URL", "NS"} {
+		assert.Equal(t, uint8(dnsRecordFixedMXPref), dnsRecordEffectiveMXPref(recordType, 20),
+			"%s has no preference, so the API's fixed value is what must be sent", recordType)
+	}
+}
+
+// TestDNSRecordSchemaRejectsEmptyIdentityFields covers empty strings, which
+// Required alone accepts. An empty hostname would mean the apex through SDK
+// normalization while rendering an ID the importer refuses to parse.
+func TestDNSRecordSchemaRejectsEmptyIdentityFields(t *testing.T) {
+	s := resourceNamecheapDNSRecord().Schema
+	for _, field := range []string{"hostname", "address"} {
+		validate := s[field].ValidateFunc
+		if !assert.NotNil(t, validate, "%s must reject an empty value", field) {
+			continue
+		}
+		_, errs := validate("", field)
+		assert.NotEmpty(t, errs, "%s = \"\" should be rejected", field)
+		_, errs = validate("www", field)
+		assert.Empty(t, errs, "%s = %q should be accepted", field, "www")
+	}
+}
+
 // TestDNSRecordAmbiguousErrorListsCandidates covers the message a user gets when
 // the zone holds records this resource cannot tell apart. It has to say what
 // distinguishes them, since the only way out is to go and look at the zone.
