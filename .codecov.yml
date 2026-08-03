@@ -1,9 +1,13 @@
+# CI uploads two profiles per commit, merged into one report: the unit tests and
+# the mock acceptance suite (see the Codecov step in ci.yml). The second one is
+# what covers the CRUD paths — those are only reachable through real Terraform —
+# so a resource's Create/Read/Update/Delete counts as the tested code it is,
+# rather than dragging every new-resource PR under the patch target.
 coverage:
   status:
     project:
       default:
-        # Allow a slightly larger drop for mechanical/refactor PRs whose changed
-        # lines are exercised by the acceptance suite (not the unit-test upload).
+        # Small allowance for ordinary noise, not for whole untested paths.
         threshold: 2%
     patch:
       default:

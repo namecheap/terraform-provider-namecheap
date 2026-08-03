@@ -163,10 +163,14 @@ disk; `git checkout -- docs/` restores it.
 Every pull request — **including PRs from forks** — runs, on GitHub-hosted
 runners with no secrets:
 
-- the `check` job (unit tests, lint, coverage),
+- the `check` job: unit tests, lint, the credential-free mock acceptance suite
+  (`make testacc-mock`), and the coverage upload — which carries the profiles of
+  *both* suites, since the CRUD paths are only reachable through real Terraform;
 - the `docs` job (documentation is current, examples type-check), and
-- `acceptance_mock`: the credential-free mock acceptance suite (`make
-  testacc-mock`) across a Terraform + OpenTofu version matrix.
+- `acceptance_mock`: the same mock suite across a Terraform + OpenTofu version
+  matrix, on fork and Dependabot PRs — the ones that cannot reach the live
+  sandbox. `check` proves the suite passes; this proves it passes on every engine
+  the provider supports.
 
 The live-API sandbox suite (`acceptance_test`, on the self-hosted EC2 runner) is
 **push-only** — it runs on branch pushes within this repository, not on
