@@ -5,6 +5,8 @@ package namecheap_provider
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -328,6 +330,247 @@ resource "namecheap_dns_record" "go" {
 			},
 		},
 	})
+}
+
+// TestAccMockDNSRecordRefusesAmbiguousMatch covers a zone holding two records
+// with the same host, type and address, differing only in TTL. Nothing in the
+// resource's identity — or in the API's selector — can tell them apart, and the
+// SDK's delete matches *every* record a selector hits, so proceeding would take
+// both records out on a destroy. Both the create path and the import path must
+// refuse, naming the candidates.
+func TestAccMockDNSRecordRefusesAmbiguousMatch(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seed(dnsRecordTestDomain, []hostEntry{
+		{Name: "twin", Type: "A", Address: "10.0.0.1", TTL: 300, MXPref: 10},
+		{Name: "twin", Type: "A", Address: "10.0.0.1", TTL: 7200, MXPref: 10},
+	}, "NONE", nil)
+
+	config := fmt.Sprintf(`
+resource "namecheap_dns_record" "twin" {
+  domain   = "%s"
+  hostname = "twin"
+  type     = "A"
+  address  = "10.0.0.1"
+}
+`, dnsRecordTestDomain)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`(?s)Ambiguous DNS record.*TTL 300.*TTL 7200`),
+			},
+			{
+				Config:        config,
+				ResourceName:  "namecheap_dns_record.twin",
+				ImportState:   true,
+				ImportStateId: dnsRecordTestDomain + "/A/twin/10.0.0.1",
+				ExpectError:   regexp.MustCompile(`(?s)Ambiguous DNS record.*TTL 300.*TTL 7200`),
+			},
+		},
+	})
+}
+
+// TestAccMockDNSRecordMXPreferenceIsPartOfIdentity covers two MX records for the
+// same mail host at different preferences — a normal way to configure a backup
+// mail server. The preference is what tells them apart, so it has to be part of
+// what this resource matches on: without it, creating the second one looks like a
+// duplicate, and destroying either one takes both, which on an EmailType=MX zone
+// leaves a set the API refuses to write at all.
+func TestAccMockDNSRecordMXPreferenceIsPartOfIdentity(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seed(dnsRecordTestDomain, []hostEntry{
+		// The backup MX, managed by nobody, sharing this test's mail host.
+		{Name: "@", Type: "MX", Address: "mail.example.com.", TTL: 1800, MXPref: 20},
+	}, "MX", nil)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+resource "namecheap_dns_record" "primary_mx" {
+  domain   = "%s"
+  hostname = "@"
+  type     = "MX"
+  address  = "mail.example.com"
+  mx_pref  = 10
+}
+`, dnsRecordTestDomain),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_dns_record.primary_mx", "mx_pref", "10"),
+					assertZoneMXPrefs(m, "@", "mail.example.com.", 10, 20),
+				),
+			},
+		},
+		// Destroying the record this configuration owns must leave the backup MX
+		// alone — and therefore leave the zone with the MX record its EmailType
+		// requires.
+		CheckDestroy: assertZoneMXPrefs(m, "@", "mail.example.com.", 20),
+	})
+}
+
+// TestAccMockDNSRecordFailedUpdateKeepsStateOnTheLiveRecord covers a write that
+// fails half way through an update. SDKv2 persists the *planned* values when
+// UpdateContext returns an error, so unless the resource puts them back, state
+// ends up describing a record the zone does not hold — and the record it does
+// hold, the one this resource is responsible for, is orphaned: no later plan will
+// ever mention it again.
+func TestAccMockDNSRecordFailedUpdateKeepsStateOnTheLiveRecord(t *testing.T) {
+	m := newNamecheapMock(t)
+	seedUnmanagedZone(m)
+
+	config := func(address string) string {
+		return fmt.Sprintf(`
+resource "namecheap_dns_record" "flaky" {
+  domain   = "%s"
+  hostname = "flaky"
+  type     = "A"
+  address  = "%s"
+}
+`, dnsRecordTestDomain, address)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: config("10.6.0.1"),
+				Check:  assertZoneHas(m, "flaky", "A", "10.6.0.1"),
+			},
+			{
+				// The update is planned, then rejected by the API.
+				PreConfig: func() {
+					m.failOn("namecheap.domains.dns.setHosts", "4022337", "mock: setHosts rejected")
+				},
+				Config:      config("10.6.0.2"),
+				ExpectError: regexp.MustCompile(`mock: setHosts rejected`),
+			},
+			{
+				// State must still describe the record the zone actually holds, so
+				// re-planning the *original* configuration is a no-op. If the failed
+				// update leaked its planned address into state, this plan is not
+				// empty and 10.6.0.1 is orphaned.
+				PreConfig: func() {
+					m.failOn("", "", "")
+				},
+				Config:   config("10.6.0.1"),
+				PlanOnly: true,
+				Check:    assertZoneHas(m, "flaky", "A", "10.6.0.1"),
+			},
+		},
+	})
+}
+
+// TestAccMockDNSRecordKeepsConfiguredCase covers a configuration that spells the
+// domain or the host with capitals. The API lower-cases both, so reading the
+// API's spelling back into state contradicts the configuration on every plan —
+// and because these are ForceNew, that plan destroys and recreates a live record,
+// every single apply, forever.
+func TestAccMockDNSRecordKeepsConfiguredCase(t *testing.T) {
+	m := newNamecheapMock(t)
+	seedUnmanagedZone(m)
+
+	// Deliberately not built from dnsRecordTestDomain: the point is the capitals.
+	const config = `
+resource "namecheap_dns_record" "cased" {
+  domain   = "DNS-Record-Example.com"
+  hostname = "WWW"
+  type     = "A"
+  address  = "10.5.0.1"
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				// resource.Test re-plans after every apply and fails the step on a
+				// non-empty plan, so this step alone proves the round-trip is stable.
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_dns_record.cased", "domain", "DNS-Record-Example.com"),
+					resource.TestCheckResourceAttr("namecheap_dns_record.cased", "hostname", "WWW"),
+					// The ID stays canonical regardless of how the config is spelled.
+					resource.TestCheckResourceAttr("namecheap_dns_record.cased", "id", dnsRecordTestDomain+"/A/www/10.5.0.1"),
+					assertZoneHas(m, "www", "A", "10.5.0.1"),
+				),
+			},
+			{Config: config, PlanOnly: true},
+		},
+	})
+}
+
+// TestAccMockDNSRecordTrailingDotIsStable covers the trailing dot Namecheap adds
+// to the address of a hostname-valued record. Storing the API's spelling makes
+// every subsequent plan want to rewrite the record back to the configuration's
+// spelling — a permanent diff, and a full-zone read-modify-write each time it is
+// applied.
+func TestAccMockDNSRecordTrailingDotIsStable(t *testing.T) {
+	m := newNamecheapMock(t)
+	seedUnmanagedZone(m)
+
+	config := fmt.Sprintf(`
+resource "namecheap_dns_record" "shop" {
+  domain   = "%s"
+  hostname = "shop"
+  type     = "CNAME"
+  address  = "hosting.example.com"
+}
+`, dnsRecordTestDomain)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_dns_record.shop", "address", "hosting.example.com"),
+					resource.TestCheckResourceAttr("namecheap_dns_record.shop", "id", dnsRecordTestDomain+"/CNAME/shop/hosting.example.com"),
+					// The zone holds the API's spelling; state holds the config's.
+					assertZoneHas(m, "shop", "CNAME", "hosting.example.com."),
+				),
+			},
+			{Config: config, PlanOnly: true},
+			{
+				// Importing by the undotted address the config uses must produce
+				// exactly the state the apply did.
+				ResourceName:      "namecheap_dns_record.shop",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// assertZoneMXPrefs checks the MX records for a host and address carry exactly
+// the given preferences, in any order.
+func assertZoneMXPrefs(m *namecheapMock, host, address string, want ...int) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		state := m.state(dnsRecordTestDomain)
+		if state == nil {
+			return fmt.Errorf("domain %s has no state in the mock", dnsRecordTestDomain)
+		}
+		var got []int
+		for _, h := range state.hosts {
+			if h.Name == host && h.Type == "MX" && h.Address == address {
+				got = append(got, h.MXPref)
+			}
+		}
+		sort.Ints(got)
+		sorted := append([]int(nil), want...)
+		sort.Ints(sorted)
+		if !slices.Equal(got, sorted) {
+			return fmt.Errorf("MX %s -> %q: want preferences %v, got %v (zone now %+v)", host, address, sorted, got, state.hosts)
+		}
+		return nil
+	}
 }
 
 // assertZoneHas checks a record is present in the mock's zone.

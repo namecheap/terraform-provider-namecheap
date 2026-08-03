@@ -42,12 +42,29 @@ protected two ways:
 
 1. Within a single Terraform run, changes to one domain are serialized, so
    parallel instances of this resource do not interleave.
-2. After writing, the zone is re-read and compared. A change lost to a writer
-   *outside* the run — another Terraform run, a script, the dashboard — surfaces
-   as an error and is retried, rather than silently vanishing.
+2. After writing, the zone is re-read and compared against what the write
+   intended. A mismatch is retried, so a change of *yours* is not silently lost.
 
-That second point is worth internalising: a concurrent writer can still cost you
-an apply, it just cannot cost you a record silently.
+~> **This narrows the race with writers outside the run; it does not close it.**
+The comparison is against the record set this run computed from its own read, so a
+foreign write that lands between that read and the `setHosts` is inside the
+replaced set — it is overwritten, the verification still matches, and the apply
+succeeds. Concurrent writers *can* cost you a record. Serialize changes to a
+domain: one Terraform run at a time, and no dashboard edits while it runs.
+
+## Records this resource cannot tell apart
+
+A record is identified by its host, type and address — plus the preference for
+`MX`, so a primary and a backup mail server naming the same host stay distinct.
+
+Two records that agree on all of those and differ only in TTL cannot be selected
+individually through the API, so any operation on them is refused with an error
+listing the candidates, rather than being applied to both. Remove the duplicate,
+or manage the domain's records as one set with
+[`namecheap_domain_records`](./domain_records.md).
+
+The import ID carries no preference, so an `MX` record sharing its host and target
+with another at a different preference is ambiguous on import for the same reason.
 
 ## Mail records
 
@@ -71,10 +88,16 @@ Tracked in [go-namecheap-sdk#162](https://github.com/namecheap/go-namecheap-sdk/
 - `type` - (Required, Force New) The record type: `A`, `AAAA`, `ALIAS`, `CAA`, `CNAME`, `MX`, `MXE`, `NS`, `TXT`, `URL`, `URL301`, `FRAME`.
 - `address` - (Required) The record's value, whose meaning depends on `type`: an IP address for `A`/`AAAA`, a hostname for `CNAME`/`MX`/`NS`, arbitrary text for `TXT`, a URL for `URL`/`URL301`/`FRAME`. Changed in place.
 - `ttl` - (Optional) Time to live in seconds, between `60` and `60000`. Defaults to `1800`. Changed in place.
-- `mx_pref` - (Optional) MX preference, lower being preferred. Applies to `MX` records only. Defaults to `10`, which is what the API reports for every other type.
+- `mx_pref` - (Optional) MX preference, lower being preferred, between `0` and `255`. Applies to `MX` records only. Defaults to `10`, which is what the API reports for every other type.
 
 `domain`, `hostname` and `type` are the record's identity, so changing any of
-them replaces the record rather than editing it.
+them replaces the record rather than editing it. `address`, `ttl` and `mx_pref`
+are changed in place; if such a change is rejected by the API, the record is left
+as it was and the next plan proposes the same change again.
+
+-> The case of `domain` and `hostname` is kept as you write it, as is an address
+the API only re-spells (the trailing dot it adds to a `CNAME`, `ALIAS`, `NS` or
+`MX` target). Only a genuine change out-of-band shows up as drift.
 
 ## Attribute Reference
 

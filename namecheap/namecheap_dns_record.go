@@ -78,10 +78,12 @@ func resourceNamecheapDNSRecord() *schema.Resource {
 				Description: "The record's value, whose meaning depends on `type`: an IP address for A/AAAA, a hostname for CNAME/MX/NS, arbitrary text for TXT, a URL for URL/URL301/FRAME. Changed in place.",
 			},
 			"mx_pref": {
-				Type:        schema.TypeInt,
-				Optional:    true,
-				Default:     10,
-				Description: "The MX preference, lower being preferred. Applies to MX records only; the API returns 10 for every other type, so leaving it at the default keeps plans empty.",
+				Type:         schema.TypeInt,
+				Optional:     true,
+				Default:      10,
+				ValidateFunc: validation.IntBetween(0, 255),
+				Description: "The MX preference, lower being preferred, between 0 and 255. Applies to MX records only; the API returns 10 for every other type, so leaving it at the default keeps plans empty. " +
+					"For MX records it is part of what identifies the record, so a primary and a backup mail server can name the same host.",
 			},
 			"ttl": {
 				Type:         schema.TypeInt,
@@ -105,16 +107,61 @@ func dnsRecordFromData(data *schema.ResourceData) namecheap.DomainsDNSHostRecord
 	}
 }
 
-// dnsRecordSelector identifies this resource's record within the zone. Host,
-// type and address together are the record's identity — the same triple the
-// import ID uses — so an update that changes only the address selects on the
-// address the record had before the change.
-func dnsRecordSelector(domain, hostname, recordType, address string) namecheap.RecordSelector {
-	return namecheap.RecordSelector{
-		HostName:   namecheap.String(strings.ToLower(hostname)),
-		RecordType: namecheap.String(strings.ToUpper(recordType)),
-		Address:    namecheap.String(address),
+// dnsRecordBeforeChange builds the SDK record as the zone still holds it: the
+// pre-change value of every attribute an update is able to move. That is what
+// identifies the record during an update, both for the ambiguity check and for
+// the selector — the new values are not in the zone yet.
+func dnsRecordBeforeChange(data *schema.ResourceData) namecheap.DomainsDNSHostRecord {
+	oldAddress, _ := data.GetChange("address")
+	oldTTL, _ := data.GetChange("ttl")
+	oldMXPref, _ := data.GetChange("mx_pref")
+	return namecheap.DomainsDNSHostRecord{
+		HostName:   namecheap.String(strings.ToLower(data.Get("hostname").(string))),
+		RecordType: namecheap.String(strings.ToUpper(data.Get("type").(string))),
+		Address:    namecheap.String(oldAddress.(string)),
+		MXPref:     namecheap.UInt8(uint8(oldMXPref.(int))),
+		TTL:        namecheap.Int(oldTTL.(int)),
 	}
+}
+
+// dnsRecordRestoreBeforeChange puts the pre-change values of the mutable
+// attributes back into state. SDKv2 persists the *planned* values when an update
+// returns an error, which would leave state describing a record the zone does not
+// hold — and orphan the record it does hold, since no later plan would mention it
+// again.
+func dnsRecordRestoreBeforeChange(data *schema.ResourceData) {
+	for _, key := range []string{"address", "ttl", "mx_pref"} {
+		before, _ := data.GetChange(key)
+		_ = data.Set(key, before)
+	}
+}
+
+// dnsRecordSelector identifies record within the zone. Host, type and address
+// together are a record's identity — the same triple the import ID uses — plus
+// the MX preference for MX records, where it is what tells a primary mail server
+// from its backup (see dnsRecordMXPrefIsIdentity).
+//
+// Records the selector cannot tell apart are rejected before any write, by
+// dnsRecordLookup, because the SDK applies a change to *every* matching record.
+func dnsRecordSelector(record namecheap.DomainsDNSHostRecord) namecheap.RecordSelector {
+	selector := namecheap.RecordSelector{
+		HostName:   namecheap.String(strings.ToLower(derefString(record.HostName))),
+		RecordType: namecheap.String(strings.ToUpper(derefString(record.RecordType))),
+		Address:    namecheap.String(derefString(record.Address)),
+	}
+	if dnsRecordMXPrefIsIdentity(derefString(record.RecordType)) {
+		selector.MXPref = record.MXPref
+	}
+	return selector
+}
+
+// dnsRecordMXPrefIsIdentity reports whether mx_pref is part of what distinguishes
+// one record from another. Two MX records naming the same mail host at different
+// preferences are an ordinary primary/backup pair, so for MX the preference is
+// part of the record's identity; for every other type the API reports a fixed 10
+// that means nothing.
+func dnsRecordMXPrefIsIdentity(recordType string) bool {
+	return strings.ToUpper(strings.TrimSpace(recordType)) == namecheap.RecordTypeMX
 }
 
 // dnsRecordID renders the resource ID, which doubles as the import ID.
@@ -146,10 +193,13 @@ func resourceNamecheapDNSRecordCreate(ctx context.Context, data *schema.Resource
 		return diag.Diagnostics{{
 			Severity: diag.Error,
 			Summary:  fmt.Sprintf("DNS record already exists on %s", domain),
+			// The ID is rendered from the configuration, not from the API's echo of
+			// the record: they denote the same record either way, and importing with
+			// the spelling the configuration uses is what leaves the first plan empty.
 			Detail: fmt.Sprintf("A %s record for %q pointing at %q already exists (TTL %d). Import it instead of creating it:\n\n"+
 				"  terraform import <resource address> %s",
 				derefString(existing.Type), derefString(existing.Name), derefString(existing.Address), derefInt(existing.TTL),
-				dnsRecordID(domain, derefString(existing.Type), derefString(existing.Name), derefString(existing.Address))),
+				dnsRecordID(domain, data.Get("type").(string), data.Get("hostname").(string), data.Get("address").(string))),
 		}}
 	}
 
@@ -180,14 +230,18 @@ func resourceNamecheapDNSRecordRead(ctx context.Context, data *schema.ResourceDa
 		return nil
 	}
 
-	_ = data.Set("domain", domain)
-	_ = data.Set("hostname", derefString(live.Name))
-	_ = data.Set("type", derefString(live.Type))
-	_ = data.Set("address", derefString(live.Address))
+	// Only the attributes are read back. domain, hostname, type and address are
+	// what the record was just *found* by — dnsRecordMatches compares them
+	// normalized — so state already describes this record, and overwriting them
+	// with the API's own spelling is precisely what must not happen: the API
+	// lower-cases a host and adds a trailing dot to a CNAME target, neither of
+	// which a configuration writes. Storing that spelling puts state permanently at
+	// odds with the config, which for the ForceNew fields plans a destroy and
+	// recreate of a live record on every single apply.
 	_ = data.Set("ttl", derefInt(live.TTL))
 	_ = data.Set("mx_pref", derefInt(live.MXPref))
 
-	data.SetId(dnsRecordID(domain, derefString(live.Type), derefString(live.Name), derefString(live.Address)))
+	data.SetId(dnsRecordID(domain, data.Get("type").(string), data.Get("hostname").(string), data.Get("address").(string)))
 	return nil
 }
 
@@ -198,16 +252,21 @@ func resourceNamecheapDNSRecordUpdate(ctx context.Context, data *schema.Resource
 	ncMutexKV.Lock(domain)
 	defer ncMutexKV.Unlock(domain)
 
-	// domain, hostname and type are ForceNew, so only address, ttl and mx_pref
-	// can reach here. The selector has to use the *old* address, since that is
-	// what identifies the record still in the zone.
-	oldAddress, _ := data.GetChange("address")
-	selector := dnsRecordSelector(domain, data.Get("hostname").(string), data.Get("type").(string), oldAddress.(string))
+	// domain, hostname and type are ForceNew, so only address, ttl and mx_pref can
+	// reach here — and the record to change is still the pre-change one, which is
+	// what both the ambiguity check and the selector have to describe.
+	before := dnsRecordBeforeChange(data)
+	if _, _, diags := dnsRecordLookup(ctx, client, domain, before); diags.HasError() {
+		return diags
+	}
 
-	_, err := client.DomainsDNS.UpsertRecordsWithContext(ctx, domain, selector,
+	_, err := client.DomainsDNS.UpsertRecordsWithContext(ctx, domain, dnsRecordSelector(before),
 		[]namecheap.DomainsDNSHostRecord{dnsRecordFromData(data)},
 		namecheap.WithRetryOnConflict(dnsRecordRetryAttempts))
 	if err != nil {
+		// The write did not happen, so state must keep describing the record that
+		// is still in the zone. See dnsRecordRestoreBeforeChange.
+		dnsRecordRestoreBeforeChange(data)
 		return dnsRecordWriteError(domain, "update", err)
 	}
 
@@ -222,9 +281,21 @@ func resourceNamecheapDNSRecordDelete(ctx context.Context, data *schema.Resource
 	ncMutexKV.Lock(domain)
 	defer ncMutexKV.Unlock(domain)
 
-	selector := dnsRecordSelector(domain, data.Get("hostname").(string), data.Get("type").(string), data.Get("address").(string))
+	record := dnsRecordFromData(data)
 
-	_, err := client.DomainsDNS.DeleteRecordsWithContext(ctx, domain, selector,
+	// Refuse to delete what cannot be picked out of the zone unambiguously, and
+	// skip the write entirely when the record is already gone — rewriting a whole
+	// zone to remove nothing is a race waiting to happen.
+	found, _, diags := dnsRecordLookup(ctx, client, domain, record)
+	if diags.HasError() {
+		return diags
+	}
+	if !found {
+		data.SetId("")
+		return nil
+	}
+
+	_, err := client.DomainsDNS.DeleteRecordsWithContext(ctx, domain, dnsRecordSelector(record),
 		namecheap.WithRetryOnConflict(dnsRecordRetryAttempts))
 	if err != nil {
 		return dnsRecordWriteError(domain, "delete", err)
@@ -252,16 +323,19 @@ func resourceNamecheapDNSRecordImport(ctx context.Context, data *schema.Resource
 		}
 	}
 
-	_ = data.Set("domain", strings.ToLower(domain))
-	_ = data.Set("type", strings.ToUpper(recordType))
-	_ = data.Set("hostname", strings.ToLower(hostname))
-	_ = data.Set("address", address)
-	data.SetId(dnsRecordID(domain, recordType, hostname, address))
+	// The MX preference is not part of the import ID, so it is left unset here:
+	// dnsRecordMatches then ignores it, and two MX records differing only in
+	// preference come back as an ambiguous match rather than a coin flip.
+	want := namecheap.DomainsDNSHostRecord{
+		HostName:   namecheap.String(hostname),
+		RecordType: namecheap.String(recordType),
+		Address:    namecheap.String(address),
+	}
 
 	client := meta.(*namecheap.Client)
-	found, live, diags := dnsRecordLookup(ctx, client, strings.ToLower(domain), dnsRecordFromData(data))
+	found, live, diags := dnsRecordLookup(ctx, client, strings.ToLower(domain), want)
 	if diags.HasError() {
-		return nil, fmt.Errorf("reading %s during import: %s", domain, diags[0].Summary)
+		return nil, dnsRecordImportError(domain, diags)
 	}
 	if !found {
 		return nil, fmt.Errorf("no %s record for %q pointing at %q exists on %s; "+
@@ -269,48 +343,119 @@ func resourceNamecheapDNSRecordImport(ctx context.Context, data *schema.Resource
 			strings.ToUpper(recordType), hostname, address, domain)
 	}
 
-	// Adopt the API's own normalization so the first plan after import is empty.
-	_ = data.Set("hostname", derefString(live.Name))
+	// The address is taken as the ID spelled it, not as the API echoes it: an
+	// imported record should land in the same state a configuration written the same
+	// way would produce, and no configuration writes the trailing dot the API adds
+	// to a CNAME/ALIAS/NS/MX target. Host and type are canonicalized instead —
+	// lower and upper case respectively — because that is the spelling the ID
+	// itself renders, and the case of a DNS name carries no meaning. TTL and the MX
+	// preference are not in the ID at all, so they can only come from the API.
+	_ = data.Set("domain", strings.ToLower(domain))
+	_ = data.Set("hostname", strings.ToLower(hostname))
 	_ = data.Set("type", derefString(live.Type))
-	_ = data.Set("address", derefString(live.Address))
+	_ = data.Set("address", address)
 	_ = data.Set("ttl", derefInt(live.TTL))
 	_ = data.Set("mx_pref", derefInt(live.MXPref))
-	data.SetId(dnsRecordID(domain, derefString(live.Type), derefString(live.Name), derefString(live.Address)))
+	data.SetId(dnsRecordID(domain, derefString(live.Type), hostname, address))
 
 	return []*schema.ResourceData{data}, nil
 }
 
-// dnsRecordLookup finds the record matching want in domain's live zone. It
-// reports whether exactly that record exists and returns the live copy, so
-// callers read back the API's own normalization rather than the configuration's
-// spelling of it.
+// dnsRecordLookup finds the one record matching want in domain's live zone. It
+// reports whether that record exists and returns the live copy, so callers read
+// back the API's own view of it (its TTL and MX preference) rather than the
+// configuration's.
+//
+// Several records matching want is an error, not a pick-the-first: the SDK applies
+// a change to every record a selector matches, so continuing would update or
+// delete all of them.
 func dnsRecordLookup(ctx context.Context, client *namecheap.Client, domain string, want namecheap.DomainsDNSHostRecord) (bool, namecheap.DomainsDNSHostRecordDetailed, diag.Diagnostics) {
 	var zero namecheap.DomainsDNSHostRecordDetailed
 
+	matches, diags := dnsRecordMatches(ctx, client, domain, want)
+	if diags.HasError() {
+		return false, zero, diags
+	}
+	switch len(matches) {
+	case 0:
+		return false, zero, nil
+	case 1:
+		return true, matches[0], nil
+	default:
+		return false, zero, dnsRecordAmbiguousError(domain, want, matches)
+	}
+}
+
+// dnsRecordMatches returns every record in domain's live zone that shares want's
+// identity.
+//
+// Identity is host, type and address — plus the MX preference for MX records, and
+// then only when want carries one (import does not know it until the record is
+// found). TTL is never part of it: matching on it would make a TTL changed in the
+// dashboard look like a deletion. Normalization is the SDK's, so the API's own
+// spelling of an address — a trailing dot on a CNAME target, say — still matches
+// the configuration's.
+func dnsRecordMatches(ctx context.Context, client *namecheap.Client, domain string, want namecheap.DomainsDNSHostRecord) ([]namecheap.DomainsDNSHostRecordDetailed, diag.Diagnostics) {
 	resp, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return false, zero, dataSourceDomainReadError(domain, err)
+		return nil, dataSourceDomainReadError(domain, err)
 	}
 	if resp == nil || resp.DomainDNSGetHostsResult == nil || resp.DomainDNSGetHostsResult.Hosts == nil {
-		return false, zero, nil
+		return nil, nil
 	}
 
-	// Match on identity only — host, type and address. TTL and MX preference are
-	// attributes of a record, not part of what makes it that record: matching on
-	// them would make a TTL changed in the dashboard look like a deletion, and
-	// would fail during import, where they are not known until the record is
-	// found. Normalization is the SDK's, so the API's own spelling of an address
-	// (a trailing dot on a CNAME target, say) still matches the configuration's.
 	target := namecheap.NormalizeRecord(want)
+	matchMXPref := dnsRecordMXPrefIsIdentity(derefString(target.RecordType)) && target.MXPref != nil
+
+	var matches []namecheap.DomainsDNSHostRecordDetailed
 	for _, host := range *resp.DomainDNSGetHostsResult.Hosts {
 		live := namecheap.NormalizeRecord(namecheap.RecordFromDetailed(host))
-		if derefString(live.HostName) == derefString(target.HostName) &&
-			derefString(live.RecordType) == derefString(target.RecordType) &&
-			derefString(live.Address) == derefString(target.Address) {
-			return true, host, nil
+		if derefString(live.HostName) != derefString(target.HostName) ||
+			derefString(live.RecordType) != derefString(target.RecordType) ||
+			derefString(live.Address) != derefString(target.Address) {
+			continue
 		}
+		if matchMXPref && (live.MXPref == nil || *live.MXPref != *target.MXPref) {
+			continue
+		}
+		matches = append(matches, host)
 	}
-	return false, zero, nil
+	return matches, nil
+}
+
+// dnsRecordAmbiguousError reports a zone holding several records this resource
+// cannot tell apart, listing what distinguishes them so the user can go and look.
+func dnsRecordAmbiguousError(domain string, want namecheap.DomainsDNSHostRecord, matches []namecheap.DomainsDNSHostRecordDetailed) diag.Diagnostics {
+	candidates := make([]string, 0, len(matches))
+	for _, match := range matches {
+		candidate := fmt.Sprintf("  - TTL %d", derefInt(match.TTL))
+		if dnsRecordMXPrefIsIdentity(derefString(match.Type)) {
+			candidate += fmt.Sprintf(", MX preference %d", derefInt(match.MXPref))
+		}
+		candidates = append(candidates, candidate)
+	}
+
+	return diag.Diagnostics{{
+		Severity: diag.Error,
+		Summary:  fmt.Sprintf("Ambiguous DNS record on %s", domain),
+		Detail: fmt.Sprintf("%d records on %s share this one's identity — type %s, host %q, address %q — and "+
+			"differ only in ways this resource cannot select on:\n\n%s\n\n"+
+			"Namecheap has no per-record API, so a change is applied by matching records within the zone — and a "+
+			"match that hits several would change or delete all of them. Remove the duplicate in the Namecheap "+
+			"dashboard, or manage this domain's records as one set with namecheap_domain_records.",
+			len(matches), domain, derefString(want.RecordType), derefString(want.HostName), derefString(want.Address),
+			strings.Join(candidates, "\n")),
+	}}
+}
+
+// dnsRecordImportError flattens diagnostics into the single error the importer
+// interface allows, keeping the detail: for an ambiguous match that detail is the
+// list of candidates, which is the whole value of the message.
+func dnsRecordImportError(domain string, diags diag.Diagnostics) error {
+	if diags[0].Detail == "" {
+		return fmt.Errorf("reading %s during import: %s", domain, diags[0].Summary)
+	}
+	return fmt.Errorf("reading %s during import: %s: %s", domain, diags[0].Summary, diags[0].Detail)
 }
 
 // dnsRecordWriteError turns an SDK write failure into diagnostics that name the

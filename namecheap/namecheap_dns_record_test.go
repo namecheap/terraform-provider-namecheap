@@ -3,6 +3,7 @@ package namecheap_provider
 import (
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
@@ -90,12 +91,23 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
+// dnsRecordFixture builds an SDK record for the identity tests below.
+func dnsRecordFixture(hostname, recordType, address string, mxPref int) namecheap.DomainsDNSHostRecord {
+	return namecheap.DomainsDNSHostRecord{
+		HostName:   namecheap.String(hostname),
+		RecordType: namecheap.String(recordType),
+		Address:    namecheap.String(address),
+		MXPref:     namecheap.UInt8(uint8(mxPref)),
+		TTL:        namecheap.Int(1800),
+	}
+}
+
 // TestDNSRecordSelectorIdentity pins which fields identify a record. Host, type
-// and address are the identity; TTL and MX preference are attributes of it, so
-// selecting must not depend on them — otherwise changing a TTL would fail to
-// find the record it is meant to update.
+// and address are the identity; TTL is an attribute of it, so selecting must not
+// depend on it — otherwise changing a TTL would fail to find the record it is
+// meant to update.
 func TestDNSRecordSelectorIdentity(t *testing.T) {
-	selector := dnsRecordSelector("example.com", "WWW", "a", "10.0.0.1")
+	selector := dnsRecordSelector(dnsRecordFixture("WWW", "a", "10.0.0.1", 10))
 
 	assert.NotNil(t, selector.HostName)
 	assert.Equal(t, "www", *selector.HostName, "hostname is matched lower-cased")
@@ -104,11 +116,27 @@ func TestDNSRecordSelectorIdentity(t *testing.T) {
 	assert.NotNil(t, selector.Address)
 	assert.Equal(t, "10.0.0.1", *selector.Address)
 
-	assert.Nil(t, selector.MXPref, "MX preference is an attribute, not part of the identity")
+	assert.Nil(t, selector.MXPref, "outside MX, the API reports a fixed preference that means nothing")
 	assert.False(t, selector.MatchAll, "a per-record selector must never match everything")
 }
 
-// TestDNSRecordSelectorNeverMatchesAll is the safety property behind the one
+// TestDNSRecordSelectorIncludesMXPrefForMX is the property that keeps a
+// primary/backup mail pair separable: two MX records naming the same host differ
+// only in preference, and the SDK applies a change to every record a selector
+// matches — so leaving the preference out of an MX selector would delete both.
+func TestDNSRecordSelectorIncludesMXPrefForMX(t *testing.T) {
+	for _, recordType := range []string{"MX", "mx"} {
+		selector := dnsRecordSelector(dnsRecordFixture("@", recordType, "mail.example.com", 20))
+
+		assert.NotNil(t, selector.MXPref, "%q: the MX preference is part of an MX record's identity", recordType)
+		assert.Equal(t, uint8(20), *selector.MXPref, "%q", recordType)
+	}
+
+	// MXE carries no preference of its own, and a zone may hold only one.
+	assert.Nil(t, dnsRecordSelector(dnsRecordFixture("@", "MXE", "10.0.0.1", 10)).MXPref)
+}
+
+// TestDNSRecordSelectorNeverMatchesAll is the safety property behind the ones
 // above: the SDK deletes every record a selector matches, so a selector that
 // degenerated to MatchAll would wipe the zone.
 func TestDNSRecordSelectorNeverMatchesAll(t *testing.T) {
@@ -117,10 +145,53 @@ func TestDNSRecordSelectorNeverMatchesAll(t *testing.T) {
 		{"@", "TXT", ""},
 		{"", "", ""},
 	} {
-		selector := dnsRecordSelector("example.com", tc.hostname, tc.recordType, tc.address)
+		selector := dnsRecordSelector(dnsRecordFixture(tc.hostname, tc.recordType, tc.address, 10))
 		assert.False(t, selector.MatchAll,
 			"selector for %q/%q/%q must not match all records", tc.hostname, tc.recordType, tc.address)
 	}
+}
+
+// TestDNSRecordAmbiguousErrorListsCandidates covers the message a user gets when
+// the zone holds records this resource cannot tell apart. It has to say what
+// distinguishes them, since the only way out is to go and look at the zone.
+func TestDNSRecordAmbiguousErrorListsCandidates(t *testing.T) {
+	want := dnsRecordFixture("twin", "A", "10.0.0.1", 10)
+	diags := dnsRecordAmbiguousError("example.com", want, []namecheap.DomainsDNSHostRecordDetailed{
+		{Name: namecheap.String("twin"), Type: namecheap.String("A"), Address: namecheap.String("10.0.0.1"), TTL: namecheap.Int(300)},
+		{Name: namecheap.String("twin"), Type: namecheap.String("A"), Address: namecheap.String("10.0.0.1"), TTL: namecheap.Int(7200)},
+	})
+
+	assert.True(t, diags.HasError())
+	assert.Contains(t, diags[0].Summary, "Ambiguous DNS record on example.com")
+	assert.Contains(t, diags[0].Detail, "TTL 300")
+	assert.Contains(t, diags[0].Detail, "TTL 7200")
+	assert.NotContains(t, diags[0].Detail, "MX preference", "an A record has no meaningful preference")
+
+	mx := dnsRecordFixture("@", "MX", "mail.example.com", 10)
+	mxDiags := dnsRecordAmbiguousError("example.com", mx, []namecheap.DomainsDNSHostRecordDetailed{
+		{Name: namecheap.String("@"), Type: namecheap.String("MX"), Address: namecheap.String("mail.example.com."), TTL: namecheap.Int(1800), MXPref: namecheap.Int(10)},
+		{Name: namecheap.String("@"), Type: namecheap.String("MX"), Address: namecheap.String("mail.example.com."), TTL: namecheap.Int(1800), MXPref: namecheap.Int(10)},
+	})
+	assert.Contains(t, mxDiags[0].Detail, "MX preference 10", "for MX the preference is what a user has to look at")
+}
+
+// TestDNSRecordImportErrorKeepsDetail covers the flattening of diagnostics into
+// the single error the importer interface allows: dropping the detail would throw
+// away the ambiguous-match candidate list, which is the whole message.
+func TestDNSRecordImportErrorKeepsDetail(t *testing.T) {
+	withDetail := dnsRecordImportError("example.com", diag.Diagnostics{{
+		Severity: diag.Error,
+		Summary:  "Ambiguous DNS record on example.com",
+		Detail:   "  - TTL 300\n  - TTL 7200",
+	}})
+	assert.ErrorContains(t, withDetail, "Ambiguous DNS record on example.com")
+	assert.ErrorContains(t, withDetail, "TTL 7200")
+
+	bare := dnsRecordImportError("example.com", diag.Diagnostics{{
+		Severity: diag.Error,
+		Summary:  "Domain not found",
+	}})
+	assert.ErrorContains(t, bare, "reading example.com during import: Domain not found")
 }
 
 // TestDNSRecordLookupMatchesNormalized proves the lookup compares records the
@@ -155,6 +226,26 @@ func TestDNSRecordSchemaForcesNewOnIdentity(t *testing.T) {
 	}
 	for _, field := range []string{"address", "ttl", "mx_pref"} {
 		assert.False(t, s[field].ForceNew, "%s is an attribute and should be updated in place", field)
+	}
+}
+
+// TestDNSRecordSchemaRejectsUnrepresentableMXPref covers a preference the API
+// cannot express. setHosts takes an unsigned byte, so a larger value would be
+// truncated on the way out — 256 arriving as 0, the *most* preferred, which is the
+// opposite of what was asked for. It has to be rejected at plan time instead.
+func TestDNSRecordSchemaRejectsUnrepresentableMXPref(t *testing.T) {
+	validate := resourceNamecheapDNSRecord().Schema["mx_pref"].ValidateFunc
+	if !assert.NotNil(t, validate, "mx_pref must be validated, not silently truncated") {
+		return
+	}
+
+	for _, valid := range []int{0, 10, 255} {
+		_, errs := validate(valid, "mx_pref")
+		assert.Empty(t, errs, "preference %d is representable", valid)
+	}
+	for _, invalid := range []int{-1, 256, 65535} {
+		_, errs := validate(invalid, "mx_pref")
+		assert.NotEmpty(t, errs, "preference %d cannot be sent to the API", invalid)
 	}
 }
 
