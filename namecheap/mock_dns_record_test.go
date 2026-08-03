@@ -413,6 +413,55 @@ resource "namecheap_dns_record" "primary_mx" {
 	})
 }
 
+// TestAccMockDNSRecordMXPreferenceChangesInPlace covers changing the preference of
+// an MX record. The preference is part of an MX record's identity, so the selector
+// has to describe the record as it currently stands — the pre-change preference —
+// or the write appends a second record instead of replacing the first.
+func TestAccMockDNSRecordMXPreferenceChangesInPlace(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seed(dnsRecordTestDomain, []hostEntry{
+		// An unmanaged primary, so the zone keeps an MX record throughout.
+		{Name: "@", Type: "MX", Address: "mail1.example.com.", TTL: 1800, MXPref: 10},
+	}, "MX", nil)
+
+	config := func(pref int) string {
+		return fmt.Sprintf(`
+resource "namecheap_dns_record" "backup_mx" {
+  domain   = "%s"
+  hostname = "@"
+  type     = "MX"
+  address  = "mail2.example.com"
+  mx_pref  = %d
+}
+`, dnsRecordTestDomain, pref)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: config(20),
+				Check: resource.ComposeTestCheckFunc(
+					assertZoneMXPrefs(m, "@", "mail2.example.com.", 20),
+					assertZoneMXPrefs(m, "@", "mail1.example.com.", 10),
+				),
+			},
+			{
+				// mx_pref is not ForceNew: one record, changed in place, and the
+				// preference it had must not be left behind as a second record.
+				Config: config(30),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("namecheap_dns_record.backup_mx", "mx_pref", "30"),
+					assertZoneMXPrefs(m, "@", "mail2.example.com.", 30),
+					assertZoneMXPrefs(m, "@", "mail1.example.com.", 10),
+				),
+			},
+		},
+		CheckDestroy: assertZoneMXPrefs(m, "@", "mail1.example.com.", 10),
+	})
+}
+
 // TestAccMockDNSRecordFailedUpdateKeepsStateOnTheLiveRecord covers a write that
 // fails half way through an update. SDKv2 persists the *planned* values when
 // UpdateContext returns an error, so unless the resource puts them back, state
