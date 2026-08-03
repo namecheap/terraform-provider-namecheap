@@ -23,8 +23,14 @@ import (
 // not let you construct on demand. These tests exist to prove the API contract
 // those mock assertions are built on is real: that Namecheap does add a trailing
 // dot to a CNAME target, does report a fixed MX preference outside MX, does accept
-// a second MX at another preference, and does leave records this resource never
-// mentioned alone.
+// a managed MX alongside one it does not manage, and does leave records this
+// resource never mentioned alone.
+//
+// Where the sandbox turns out not to support a shape the provider handles, the
+// assertion stays in the mock suite and the live suite records what the API did
+// instead — see probeSameExchangeMXPair. A sandbox refusal is not proof that
+// production refuses the same thing, so it is evidence to report, not a reason to
+// drop a guard.
 //
 // They are deliberately frugal. Namecheap has no per-record API, so one apply of
 // one record costs five calls (identity lookup, then the SDK's
@@ -358,17 +364,23 @@ func checkLiveTrailingDot(t *testing.T, host, recordType string) resource.TestCh
 }
 
 // TestAccNamecheapDNSRecordMXPreference covers the mail case against the real API,
-// which is the one place the SDK's own validation is known to be uncertain (see
+// which is where the SDK's own validation is least settled (see
 // go-namecheap-sdk#162): it ties MX records to the zone's EmailType, and whether
-// those rules match the live API has not been settled.
+// those rules match the live API is an open question.
 //
-// It also proves the property the resource's MX identity handling exists for: a
-// primary and a backup mail server naming the same host, distinguished only by
-// preference. Creating the second must not look like a duplicate, and destroying
-// it must leave the first — on an EmailType=MX zone, deleting both would leave a
+// A managed backup MX alongside an unmanaged primary, on a zone whose EmailType the
+// resource does not own, is the shape a real user arrives with. Destroying the
+// backup must leave the primary: on an EmailType=MX zone, taking both out leaves a
 // record set the API refuses outright.
+//
+// The two MX records here name *different* mail hosts. The same-exchange pair —
+// two MX records differing only in preference, which is what the resource's MX
+// identity handling exists for — is asserted in the mock suite instead, because
+// this sandbox will not store it: see probeSameExchangeMXPair, which records what
+// the API actually does with one.
 func TestAccNamecheapDNSRecordMXPreference(t *testing.T) {
-	mailHost := "mail." + *testAccDomain
+	primaryMailHost := "mail1." + *testAccDomain
+	mailHost := "mail2." + *testAccDomain
 
 	// The primary MX, and the EmailType=MX the API requires before any MX record can
 	// be written. This resource does not manage EmailType, so the zone has to arrive
@@ -379,10 +391,13 @@ func TestAccNamecheapDNSRecordMXPreference(t *testing.T) {
 	// rejected unless the same write moves the type back down.
 	restoreEmailType := liveEmailTypeOrDefault(t)
 	seedLiveRecords(t,
-		[]namecheap.DomainsDNSHostRecord{liveRecord("@", "MX", mailHost, 1800)},
+		[]namecheap.DomainsDNSHostRecord{liveRecord("@", "MX", primaryMailHost, 1800)},
 		[]namecheap.RecordOption{namecheap.WithEmailType(namecheap.EmailTypeMX)},
 		[]namecheap.RecordOption{namecheap.WithEmailType(restoreEmailType)},
 	)
+
+	// With an MX zone set up, record what the API does with the same-exchange pair.
+	probeSameExchangeMXPair(t, primaryMailHost)
 
 	config := func(pref int) string {
 		return fmt.Sprintf(`
@@ -408,7 +423,7 @@ resource "namecheap_dns_record" "backup_mx" {
 					resource.TestCheckResourceAttr("namecheap_dns_record.backup_mx", "mx_pref", "20"),
 					checkLiveZone(t,
 						liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: 20},
-						liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: dnsRecordFixedMXPref},
+						liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: dnsRecordFixedMXPref},
 					),
 				),
 			},
@@ -420,7 +435,7 @@ resource "namecheap_dns_record" "backup_mx" {
 				Check: resource.ComposeTestCheckFunc(
 					checkLiveZone(t,
 						liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: 30},
-						liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: dnsRecordFixedMXPref},
+						liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: dnsRecordFixedMXPref},
 					),
 				),
 			},
@@ -429,10 +444,71 @@ resource "namecheap_dns_record" "backup_mx" {
 		// the MX record its EmailType requires. Deleting both would leave a record
 		// set the API refuses outright, which is how this bug announced itself.
 		CheckDestroy: checkLiveZone(t,
-			liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: dnsRecordFixedMXPref},
+			liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: dnsRecordFixedMXPref},
 			liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: 30, absent: true},
 		),
 	})
+}
+
+// probeSameExchangeMXPair records what the live API does with two MX records that
+// name the same mail host and differ only in preference — a primary/backup pair
+// pointing at one server. DNS allows it; this sandbox does not store it. An attempt
+// comes back as a lost race, because the SDK verifies a write by re-reading the zone
+// and the zone does not contain what it was sent.
+//
+// It never fails the test. What the *provider* does with such a pair is settled by
+// the mock suite, deterministically; what the *API* accepts is the open question in
+// go-namecheap-sdk#162, and the useful thing this can do is put the evidence in the
+// CI log — the error, and the zone as it stood afterwards — instead of a guess.
+func probeSameExchangeMXPair(t *testing.T, exchange string) {
+	t.Helper()
+	if !liveTestConfigured() {
+		return
+	}
+
+	backup := liveRecord("@", "MX", exchange, 1800)
+	backup.MXPref = namecheap.UInt8(20)
+
+	_, addErr := namecheapSDKClient.DomainsDNS.AddRecordsWithContext(
+		context.Background(), *testAccDomain, []namecheap.DomainsDNSHostRecord{backup},
+		namecheap.WithEmailType(namecheap.EmailTypeMX))
+
+	zone, readErr := liveZoneRecords()
+	if readErr != nil {
+		t.Logf("MX pair probe: could not read %s back: %v", *testAccDomain, readErr)
+		return
+	}
+
+	stored := make([]string, 0, 2)
+	for _, record := range zone {
+		if derefString(record.Type) == namecheap.RecordTypeMX &&
+			dnsRecordNormalizedAddress(derefString(record.Address)) == dnsRecordNormalizedAddress(exchange) {
+			stored = append(stored, fmt.Sprintf("pref=%d ttl=%d", derefInt(record.MXPref), derefInt(record.TTL)))
+		}
+	}
+
+	t.Logf("MX pair probe on %s: adding a second MX for %q at preference 20 returned %v; "+
+		"the zone then held %d MX record(s) for that host [%s]. Two is what DNS allows and what the "+
+		"mock suite asserts the provider handles; one means the API collapsed the pair, which is why "+
+		"the live suite uses two different mail hosts instead (see go-namecheap-sdk#162).",
+		*testAccDomain, exchange, addErr, len(stored), strings.Join(stored, ", "))
+
+	if len(stored) > 1 {
+		// It did store both: take the probe's own record back out again.
+		if _, err := namecheapSDKClient.DomainsDNS.DeleteRecordsWithContext(
+			context.Background(), *testAccDomain, dnsRecordSelector(backup),
+			namecheap.WithEmailType(namecheap.EmailTypeMX)); err != nil {
+			t.Errorf("MX pair probe: failed to remove the record it added to %s: %v", *testAccDomain, err)
+		}
+	}
+}
+
+// dnsRecordNormalizedAddress exposes the SDK's address normalization for the probe's
+// comparison, so a trailing dot the API adds does not read as a different host.
+func dnsRecordNormalizedAddress(address string) string {
+	return derefString(namecheap.NormalizeRecord(namecheap.DomainsDNSHostRecord{
+		Address: namecheap.String(address),
+	}).Address)
 }
 
 // liveEmailTypeOrDefault reads the test domain's current EmailType, so a test that
