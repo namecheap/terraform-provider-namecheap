@@ -84,19 +84,26 @@ Tracked in [go-namecheap-sdk#162](https://github.com/namecheap/go-namecheap-sdk/
 - `domain` - (Required, Force New) The registered root domain the record belongs to (e.g. `example.com`). Must be a root domain on the account, not a subdomain.
 - `hostname` - (Required, Force New) The sub-domain the record answers for, or `@` for the domain itself (e.g. `www`). Must not be empty — write `@` for the apex.
 - `type` - (Required, Force New) The record type: `A`, `AAAA`, `ALIAS`, `CAA`, `CNAME`, `MX`, `MXE`, `NS`, `TXT`, `URL`, `URL301`, `FRAME`.
-- `address` - (Required) The record's value, whose meaning depends on `type`: an IP address for `A`/`AAAA`, a hostname for `CNAME`/`MX`/`NS`, arbitrary text for `TXT`, a URL for `URL`/`URL301`/`FRAME`. Changed in place.
-- `ttl` - (Optional) Time to live in seconds, between `60` and `60000`. Defaults to `1800`. Changed in place.
-- `mx_pref` - (Optional) MX preference, lower being preferred, between `0` and `255`. Defaults to `10`. Changed in place.
+- `address` - (Required) The record's value, whose meaning depends on `type`: an IP address for `A`/`AAAA`, a hostname for `CNAME`/`MX`/`NS`, arbitrary text for `TXT`, a URL for `URL`/`URL301`/`FRAME`. Edited on the existing record; not Force New.
+- `ttl` - (Optional) Time to live in seconds, between `60` and `60000`. Defaults to `1800`. Edited on the existing record; not Force New.
+- `mx_pref` - (Optional) MX preference, lower being preferred, between `0` and `255`. Defaults to `10`. Edited on the existing record; not Force New.
 
 -> `mx_pref` applies to `MX` records only, where it is part of the record's
 identity — a primary and a backup mail server may name the same host, and the
 preference is what tells them apart. For every other type Namecheap stores a fixed
 `10` whatever is sent, so a value set there is ignored.
 
-`domain`, `hostname` and `type` are the record's identity, so changing any of
-them replaces the record rather than editing it. `address`, `ttl` and `mx_pref`
-are changed in place; if such a change is rejected by the API, the record is left
-as it was and the next plan proposes the same change again.
+### What replaces a record and what edits it
+
+`domain`, `hostname` and `type` are the record's identity, so changing any of them
+**destroys the record and creates a new one** — the plan says
+`-/+ destroy and then create replacement`.
+
+`address`, `ttl` and `mx_pref` are **edited on the record that is already there**:
+the plan shows `~ update in-place`, one write swaps the value, and the name keeps
+resolving throughout. Changing `address` also re-renders the resource's `id`, which
+contains it. If such a change is rejected by the API, the record is left exactly as
+it was and the next plan proposes the same change again.
 
 -> The case of `domain` and `hostname` is kept as you write it, as is an address
 the API only re-spells (the trailing dot it adds to a `CNAME`, `ALIAS`, `NS` or

@@ -94,7 +94,8 @@ func resourceNamecheapDomainHostRecord() *schema.Resource {
 				Type:         schema.TypeString,
 				Required:     true,
 				ValidateFunc: validation.StringIsNotEmpty,
-				Description:  "The record's value, whose meaning depends on `type`: an IP address for A/AAAA, a hostname for CNAME/MX/NS, arbitrary text for TXT, a URL for URL/URL301/FRAME. Changed in place.",
+				Description: "The record's value, whose meaning depends on `type`: an IP address for A/AAAA, a hostname for CNAME/MX/NS, arbitrary text for TXT, a URL for URL/URL301/FRAME. " +
+					"Changing this does not force a new resource: the existing record is edited, in one write that swaps the value, so the name never stops resolving. The resource id is re-rendered, since the address is part of it.",
 			},
 			"mx_pref": {
 				Type:         schema.TypeInt,
@@ -109,7 +110,7 @@ func resourceNamecheapDomainHostRecord() *schema.Resource {
 				Optional:     true,
 				Default:      1800,
 				ValidateFunc: validation.IntBetween(namecheap.MinTTL, namecheap.MaxTTL),
-				Description:  fmt.Sprintf("Time to live in seconds, between %d and %d. Changed in place.", namecheap.MinTTL, namecheap.MaxTTL),
+				Description:  fmt.Sprintf("Time to live in seconds, between %d and %d. Changing this edits the existing record rather than forcing a new resource.", namecheap.MinTTL, namecheap.MaxTTL),
 			},
 		},
 	}
