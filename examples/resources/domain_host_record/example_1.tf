@@ -1,5 +1,5 @@
 # Each record is managed independently; everything else in the zone is left alone.
-resource "namecheap_dns_record" "www" {
+resource "namecheap_domain_host_record" "www" {
   domain   = "example.com"
   hostname = "www"
   type     = "A"
@@ -7,7 +7,7 @@ resource "namecheap_dns_record" "www" {
   ttl      = 1800
 }
 
-resource "namecheap_dns_record" "spf" {
+resource "namecheap_domain_host_record" "spf" {
   domain   = "example.com"
   hostname = "@"
   type     = "TXT"

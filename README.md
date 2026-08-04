@@ -83,11 +83,11 @@ resource "namecheap_domain_records" "domain2-com" {
 
 `namecheap_domain_records` owns a domain's whole zone. To manage records
 individually — one resource per record, so different owners can share a domain —
-use [`namecheap_dns_record`](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/resources/dns_record)
+use [`namecheap_domain_host_record`](https://registry.terraform.io/providers/namecheap/namecheap/latest/docs/resources/domain_host_record)
 instead. The two are mutually exclusive for a given domain.
 
 ```terraform
-resource "namecheap_dns_record" "www" {
+resource "namecheap_domain_host_record" "www" {
   domain   = "your-domain.com"
   hostname = "www"
   type     = "A"

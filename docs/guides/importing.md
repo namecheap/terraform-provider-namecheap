@@ -59,7 +59,7 @@ terraform import namecheap_domain_records.example example.com
 | `namecheap_domain_contacts` | the domain name | `example.com` |
 | `namecheap_email_forwarding` | the domain name | `example.com` |
 | `namecheap_personal_nameserver` | `<domain>/<nameserver>` | `example.com/ns1.example.com` |
-| `namecheap_dns_record` | `<domain>/<type>/<hostname>/<address>` | `example.com/A/www/203.0.113.10` |
+| `namecheap_domain_host_record` | `<domain>/<type>/<hostname>/<address>` | `example.com/A/www/203.0.113.10` |
 
 Each resource's own page documents its ID format too; that page is the
 authority if this table ever falls behind.

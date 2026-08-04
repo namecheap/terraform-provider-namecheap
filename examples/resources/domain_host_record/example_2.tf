@@ -7,7 +7,7 @@ locals {
   }
 }
 
-resource "namecheap_dns_record" "fleet" {
+resource "namecheap_domain_host_record" "fleet" {
   for_each = local.hosts
 
   domain   = "example.com"

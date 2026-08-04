@@ -1,11 +1,11 @@
 ---
-page_title: "namecheap_dns_record Resource - terraform-provider-namecheap"
+page_title: "namecheap_domain_host_record Resource - terraform-provider-namecheap"
 subcategory: "DNS"
 description: |-
-  Manages a single DNS host record on a domain, leaving all other records untouched. Mutually exclusive with namecheap_domain_records for the same domain.
+  {{ .Description }}
 ---
 
-# namecheap_dns_record (Resource)
+# namecheap_domain_host_record (Resource)
 
 Manages a **single** DNS host record, leaving every other record on the domain
 untouched. This is the per-record counterpart to
@@ -15,45 +15,11 @@ per record, `for_each` over a map, per-record import.
 
 ## Example Usage
 
-```terraform
-# Each record is managed independently; everything else in the zone is left alone.
-resource "namecheap_dns_record" "www" {
-  domain   = "example.com"
-  hostname = "www"
-  type     = "A"
-  address  = "203.0.113.10"
-  ttl      = 1800
-}
-
-resource "namecheap_dns_record" "spf" {
-  domain   = "example.com"
-  hostname = "@"
-  type     = "TXT"
-  address  = "v=spf1 include:_spf.example.net -all"
-}
-```
+{{tffile "examples/resources/domain_host_record/example_1.tf"}}
 
 ### One record per entry
 
-```terraform
-# A record per entry, driven by a map. Each instance owns exactly its own record,
-# so adding or removing one key does not touch the others.
-locals {
-  hosts = {
-    api = "203.0.113.20"
-    cdn = "203.0.113.21"
-  }
-}
-
-resource "namecheap_dns_record" "fleet" {
-  for_each = local.hosts
-
-  domain   = "example.com"
-  hostname = each.key
-  type     = "A"
-  address  = each.value
-}
-```
+{{tffile "examples/resources/domain_host_record/example_2.tf"}}
 
 ## Choosing between this and `namecheap_domain_records`
 
@@ -63,28 +29,21 @@ together on one domain they fight — the zone-level resource will delete record
 this one created (in `OVERWRITE` mode) or fight over ownership (in `MERGE`),
 because neither knows about the other.
 
-- **Use `namecheap_dns_record`** when different records are owned by different
-  people, modules or workspaces, or when you want `for_each` over a map of hosts.
+- **Use `namecheap_domain_host_record`** when different records are owned by
+  different people, modules or workspaces, or when you want `for_each` over a map
+  of hosts.
 - **Use `namecheap_domain_records`** when one configuration should own the whole
   zone, zone-file style — including the guarantee that nothing else exists.
 
-## How a change is applied
+## Concurrent changes to one domain
 
-Namecheap has no per-record API: `domains.dns.setHosts` replaces the entire
-record set. Every change here is therefore a read-modify-write of the whole zone,
-protected two ways:
-
-1. Within a single Terraform run, changes to one domain are serialized, so
-   parallel instances of this resource do not interleave.
-2. After writing, the zone is re-read and compared against what the write
-   intended. A mismatch is retried, so a change of *yours* is not silently lost.
-
-~> **This narrows the race with writers outside the run; it does not close it.**
-The comparison is against the record set this run computed from its own read, so a
-foreign write that lands between that read and the `setHosts` is inside the
-replaced set — it is overwritten, the verification still matches, and the apply
-succeeds. Concurrent writers *can* cost you a record. Serialize changes to a
-domain: one Terraform run at a time, and no dashboard edits while it runs.
+!> **Change a domain from one place at a time.** Namecheap has no per-record API,
+so a change to any single record rewrites the domain's whole record set. Records
+managed within one Terraform run are safe — the provider serializes them, and it
+detects and retries most interference from outside the run — but that window
+cannot be closed: a second writer landing mid-apply, another `terraform apply` or
+an edit in the Namecheap dashboard, can still cost you a record silently. Run one
+apply per domain at a time, and leave the zone alone while it runs.
 
 ## Records this resource cannot tell apart
 
@@ -132,9 +91,7 @@ Tracked in [go-namecheap-sdk#162](https://github.com/namecheap/go-namecheap-sdk/
 -> `mx_pref` applies to `MX` records only, where it is part of the record's
 identity — a primary and a backup mail server may name the same host, and the
 preference is what tells them apart. For every other type Namecheap stores a fixed
-`10` whatever is sent, so a value set there is ignored rather than fought over:
-sending it would make the post-write check compare it against the API's `10` and
-report the write as a lost race.
+`10` whatever is sent, so a value set there is ignored.
 
 `domain`, `hostname` and `type` are the record's identity, so changing any of
 them replaces the record rather than editing it. `address`, `ttl` and `mx_pref`
@@ -153,11 +110,7 @@ the API only re-spells (the trailing dot it adds to a `CNAME`, `ALIAS`, `NS` or
 
 Records are imported by that same composite ID:
 
-```shell
-# The ID is <domain>/<type>/<hostname>/<address>. The address may itself contain
-# slashes (a URL record, for instance) — only the first three components are split.
-terraform import namecheap_dns_record.www example.com/A/www/203.0.113.10
-```
+{{codefile "shell" "examples/resources/domain_host_record/import.sh"}}
 
 The address may itself contain `/` — a `URL` record's target, for instance —
 because only the first three components are split off.

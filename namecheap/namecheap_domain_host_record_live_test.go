@@ -13,12 +13,12 @@ import (
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 )
 
-// Live-sandbox acceptance coverage for namecheap_dns_record, against the real
+// Live-sandbox acceptance coverage for namecheap_domain_host_record, against the real
 // Namecheap API. Like the other TestAcc* tests these run only under TF_ACC and
 // skip (via testAccPreCheck) without NAMECHEAP_* credentials and a test domain.
 //
 // What these are for, and what they are not: the mock suite
-// (mock_dns_record_test.go) is the exhaustive one — it is deterministic, free, and
+// (mock_domain_host_record_test.go) is the exhaustive one — it is deterministic, free, and
 // covers every branch including the ones that need a zone in a state the API will
 // not let you construct on demand. These tests exist to prove the API contract
 // those mock assertions are built on is real: that Namecheap does add a trailing
@@ -114,7 +114,7 @@ func liveZoneMatches(zone []namecheap.DomainsDNSHostRecordDetailed, want liveRec
 	if want.mxPref != 0 {
 		target.MXPref = namecheap.UInt8(uint8(want.mxPref))
 	}
-	return dnsRecordMatches(zone, target)
+	return hostRecordMatches(zone, target)
 }
 
 // liveZoneRecords reads the test domain's host records through the helper client.
@@ -162,7 +162,7 @@ func seedLiveRecords(t *testing.T, records []namecheap.DomainsDNSHostRecord, add
 	t.Cleanup(func() {
 		for _, record := range records {
 			if _, err := namecheapSDKClient.DomainsDNS.DeleteRecordsWithContext(
-				context.Background(), *testAccDomain, dnsRecordSelector(record), removeOpts...); err != nil {
+				context.Background(), *testAccDomain, hostRecordSelector(record), removeOpts...); err != nil {
 				t.Errorf("failed to remove seeded record %s %s -> %q from %s: %v",
 					derefString(record.HostName), derefString(record.RecordType), derefString(record.Address), *testAccDomain, err)
 			}
@@ -180,18 +180,18 @@ func liveRecord(host, recordType, address string, ttl int) namecheap.DomainsDNSH
 		HostName:   namecheap.String(host),
 		RecordType: namecheap.String(recordType),
 		Address:    namecheap.String(address),
-		MXPref:     namecheap.UInt8(dnsRecordFixedMXPref),
+		MXPref:     namecheap.UInt8(hostRecordFixedMXPref),
 		TTL:        namecheap.Int(ttl),
 	}
 }
 
-// TestAccNamecheapDNSRecordLifecycle is the core live test: create, in-place
+// TestAccNamecheapDomainHostRecordLifecycle is the core live test: create, in-place
 // update, replacement, import and destroy of one record against the real API,
 // asserting at every step that a record this resource does not manage is still
 // there. That surviving record is the whole promise of this resource — the API
 // replaces the entire zone on every write, so a bug in the read-modify-write
 // deletes data the configuration never mentioned.
-func TestAccNamecheapDNSRecordLifecycle(t *testing.T) {
+func TestAccNamecheapDomainHostRecordLifecycle(t *testing.T) {
 	const (
 		unmanagedHost = "tf-dnsrec-untouched"
 		managedHost   = "tf-dnsrec-lifecycle"
@@ -203,7 +203,7 @@ func TestAccNamecheapDNSRecordLifecycle(t *testing.T) {
 
 	config := func(host, address string, ttl int) string {
 		return fmt.Sprintf(`
-resource "namecheap_dns_record" "lifecycle" {
+resource "namecheap_domain_host_record" "lifecycle" {
   domain   = %[1]q
   hostname = %[2]q
   type     = "A"
@@ -222,8 +222,8 @@ resource "namecheap_dns_record" "lifecycle" {
 			{
 				Config: config(managedHost, "203.0.113.10", 1800),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("namecheap_dns_record.lifecycle", "address", "203.0.113.10"),
-					resource.TestCheckResourceAttr("namecheap_dns_record.lifecycle", "id",
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.lifecycle", "address", "203.0.113.10"),
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.lifecycle", "id",
 						strings.ToLower(*testAccDomain)+"/A/"+managedHost+"/203.0.113.10"),
 					checkLiveZone(t,
 						liveRecordWant{host: managedHost, recordType: "A", address: "203.0.113.10", ttl: 1800},
@@ -236,7 +236,7 @@ resource "namecheap_dns_record" "lifecycle" {
 				// address it replaces must not be left behind as a second record.
 				Config: config(managedHost, "203.0.113.11", 600),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("namecheap_dns_record.lifecycle", "ttl", "600"),
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.lifecycle", "ttl", "600"),
 					checkLiveZone(t,
 						liveRecordWant{host: managedHost, recordType: "A", address: "203.0.113.11", ttl: 600},
 						liveRecordWant{host: managedHost, recordType: "A", address: "203.0.113.10", absent: true},
@@ -259,7 +259,7 @@ resource "namecheap_dns_record" "lifecycle" {
 			{
 				// Importing what Terraform already manages must reproduce the same
 				// state, which is what makes the ID format trustworthy.
-				ResourceName:      "namecheap_dns_record.lifecycle",
+				ResourceName:      "namecheap_domain_host_record.lifecycle",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -271,7 +271,7 @@ resource "namecheap_dns_record" "lifecycle" {
 	})
 }
 
-// TestAccNamecheapDNSRecordRoundTrips is the test the case-preservation and
+// TestAccNamecheapDomainHostRecordRoundTrips is the test the case-preservation and
 // trailing-dot handling rest on. Both are claims about what the *real* API does
 // with a value on its way in and out: it lower-cases a host, and it appends a dot
 // to a hostname-valued target. The mock reproduces both, and this proves the mock
@@ -282,18 +282,18 @@ resource "namecheap_dns_record" "lifecycle" {
 // which for a ForceNew field means destroying and recreating a live record on
 // every apply. resource.Test fails a step whose post-apply plan is non-empty, so
 // an apply that survives here is the assertion.
-func TestAccNamecheapDNSRecordRoundTrips(t *testing.T) {
+func TestAccNamecheapDomainHostRecordRoundTrips(t *testing.T) {
 	// Deliberately mixed case, and a CNAME target written the way a configuration
 	// writes one — without the trailing dot Namecheap stores.
 	config := fmt.Sprintf(`
-resource "namecheap_dns_record" "cname" {
+resource "namecheap_domain_host_record" "cname" {
   domain   = %[1]q
   hostname = "TF-DNSREC-Alias"
   type     = "CNAME"
   address  = "hosting.example.com"
 }
 
-resource "namecheap_dns_record" "txt" {
+resource "namecheap_domain_host_record" "txt" {
   domain   = %[1]q
   hostname = "tf-dnsrec-txt"
   type     = "TXT"
@@ -309,13 +309,13 @@ resource "namecheap_dns_record" "txt" {
 				Config: config,
 				Check: resource.ComposeTestCheckFunc(
 					// State keeps what the configuration said, capitals and all.
-					resource.TestCheckResourceAttr("namecheap_dns_record.cname", "hostname", "TF-DNSREC-Alias"),
-					resource.TestCheckResourceAttr("namecheap_dns_record.cname", "address", "hosting.example.com"),
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.cname", "hostname", "TF-DNSREC-Alias"),
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.cname", "address", "hosting.example.com"),
 					// The ID stays canonical regardless.
-					resource.TestCheckResourceAttr("namecheap_dns_record.cname", "id",
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.cname", "id",
 						strings.ToLower(*testAccDomain)+"/CNAME/tf-dnsrec-alias/hosting.example.com"),
 					// A TXT value with spaces must survive the round trip verbatim.
-					resource.TestCheckResourceAttr("namecheap_dns_record.txt", "address", "v=spf1 include:example.com -all"),
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.txt", "address", "v=spf1 include:example.com -all"),
 					// And the zone holds the API's own spelling of both.
 					checkLiveZone(t,
 						liveRecordWant{host: "tf-dnsrec-alias", recordType: "CNAME", address: "hosting.example.com"},
@@ -363,7 +363,7 @@ func checkLiveTrailingDot(t *testing.T, host, recordType string) resource.TestCh
 	}
 }
 
-// TestAccNamecheapDNSRecordMXPreference covers the mail case against the real API,
+// TestAccNamecheapDomainHostRecordMXPreference covers the mail case against the real API,
 // which is where the SDK's own validation is least settled (see
 // go-namecheap-sdk#162): it ties MX records to the zone's EmailType, and whether
 // those rules match the live API is an open question.
@@ -382,11 +382,11 @@ func checkLiveTrailingDot(t *testing.T, host, recordType string) resource.TestCh
 //   - Changing an MX record's preference in place. Same signature, and the reason
 //     this test creates its backup MX rather than editing one.
 //
-// Neither is a provider defect — TestAccMockDNSRecordMXPreferenceChangesInPlace and
-// TestAccMockDNSRecordMXPreferenceIsPartOfIdentity pin the resource's side of both
+// Neither is a provider defect — TestAccMockDomainHostRecordMXPreferenceChangesInPlace and
+// TestAccMockDomainHostRecordMXPreferenceIsPartOfIdentity pin the resource's side of both
 // against a faithful mock — and neither is proof about production, which may not
 // behave like the sandbox.
-func TestAccNamecheapDNSRecordMXPreference(t *testing.T) {
+func TestAccNamecheapDomainHostRecordMXPreference(t *testing.T) {
 	primaryMailHost := "mail1." + *testAccDomain
 	mailHost := "mail2." + *testAccDomain
 
@@ -411,7 +411,7 @@ func TestAccNamecheapDNSRecordMXPreference(t *testing.T) {
 
 	config := func(pref int) string {
 		return fmt.Sprintf(`
-resource "namecheap_dns_record" "backup_mx" {
+resource "namecheap_domain_host_record" "backup_mx" {
   domain   = %[1]q
   hostname = "@"
   type     = "MX"
@@ -430,10 +430,10 @@ resource "namecheap_dns_record" "backup_mx" {
 				// preference is what tells it from the seeded primary.
 				Config: config(20),
 				Check: resource.ComposeTestCheckFunc(
-					resource.TestCheckResourceAttr("namecheap_dns_record.backup_mx", "mx_pref", "20"),
+					resource.TestCheckResourceAttr("namecheap_domain_host_record.backup_mx", "mx_pref", "20"),
 					checkLiveZone(t,
 						liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: 20},
-						liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: dnsRecordFixedMXPref},
+						liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: hostRecordFixedMXPref},
 					),
 				),
 			},
@@ -443,7 +443,7 @@ resource "namecheap_dns_record" "backup_mx" {
 		// set the API refuses outright, which is how the identity bug announced
 		// itself.
 		CheckDestroy: checkLiveZone(t,
-			liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: dnsRecordFixedMXPref},
+			liveRecordWant{host: "@", recordType: "MX", address: primaryMailHost, mxPref: hostRecordFixedMXPref},
 			liveRecordWant{host: "@", recordType: "MX", address: mailHost, mxPref: 20, absent: true},
 		),
 	})
@@ -481,7 +481,7 @@ func probeSameExchangeMXPair(t *testing.T, exchange string) {
 	stored := make([]string, 0, 2)
 	for _, record := range zone {
 		if derefString(record.Type) == namecheap.RecordTypeMX &&
-			dnsRecordNormalizedAddress(derefString(record.Address)) == dnsRecordNormalizedAddress(exchange) {
+			hostRecordNormalizedAddress(derefString(record.Address)) == hostRecordNormalizedAddress(exchange) {
 			stored = append(stored, fmt.Sprintf("pref=%d ttl=%d", derefInt(record.MXPref), derefInt(record.TTL)))
 		}
 	}
@@ -495,7 +495,7 @@ func probeSameExchangeMXPair(t *testing.T, exchange string) {
 	if len(stored) > 1 {
 		// It did store both: take the probe's own record back out again.
 		if _, err := namecheapSDKClient.DomainsDNS.DeleteRecordsWithContext(
-			context.Background(), *testAccDomain, dnsRecordSelector(backup),
+			context.Background(), *testAccDomain, hostRecordSelector(backup),
 			namecheap.WithEmailType(namecheap.EmailTypeMX)); err != nil {
 			t.Errorf("MX pair probe: failed to remove the record it added to %s: %v", *testAccDomain, err)
 		}
@@ -505,7 +505,7 @@ func probeSameExchangeMXPair(t *testing.T, exchange string) {
 // probeMXPreferenceChange records what the live API does with an in-place change to
 // an MX record's preference: add one at 20, then upsert it to 30, exactly as the
 // resource's update does. The provider's own behaviour here is proven against the
-// mock (TestAccMockDNSRecordMXPreferenceChangesInPlace) — the open question is
+// mock (TestAccMockDomainHostRecordMXPreferenceChangesInPlace) — the open question is
 // whether the sandbox can carry the change at all, since the SDK verifies a write
 // by re-reading the zone and reports any difference as a lost race.
 //
@@ -529,7 +529,7 @@ func probeMXPreferenceChange(t *testing.T, exchange string) {
 	changed := record
 	changed.MXPref = namecheap.UInt8(30)
 	_, upsertErr := namecheapSDKClient.DomainsDNS.UpsertRecordsWithContext(
-		context.Background(), *testAccDomain, dnsRecordSelector(record),
+		context.Background(), *testAccDomain, hostRecordSelector(record),
 		[]namecheap.DomainsDNSHostRecord{changed},
 		namecheap.WithEmailType(namecheap.EmailTypeMX))
 
@@ -541,7 +541,7 @@ func probeMXPreferenceChange(t *testing.T, exchange string) {
 		leftover := record
 		leftover.MXPref = namecheap.UInt8(pref)
 		if _, err := namecheapSDKClient.DomainsDNS.DeleteRecordsWithContext(
-			context.Background(), *testAccDomain, dnsRecordSelector(leftover),
+			context.Background(), *testAccDomain, hostRecordSelector(leftover),
 			namecheap.WithEmailType(namecheap.EmailTypeMX)); err != nil {
 			t.Logf("MX preference probe: could not remove %q at preference %d: %v", exchange, pref, err)
 		}
@@ -557,7 +557,7 @@ func liveMXSummary(exchange string) string {
 	entries := make([]string, 0, 2)
 	for _, record := range zone {
 		if derefString(record.Type) == namecheap.RecordTypeMX &&
-			dnsRecordNormalizedAddress(derefString(record.Address)) == dnsRecordNormalizedAddress(exchange) {
+			hostRecordNormalizedAddress(derefString(record.Address)) == hostRecordNormalizedAddress(exchange) {
 			entries = append(entries, fmt.Sprintf("pref=%d ttl=%d", derefInt(record.MXPref), derefInt(record.TTL)))
 		}
 	}
@@ -567,9 +567,9 @@ func liveMXSummary(exchange string) string {
 	return strings.Join(entries, ", ")
 }
 
-// dnsRecordNormalizedAddress exposes the SDK's address normalization for the probe's
+// hostRecordNormalizedAddress exposes the SDK's address normalization for the probe's
 // comparison, so a trailing dot the API adds does not read as a different host.
-func dnsRecordNormalizedAddress(address string) string {
+func hostRecordNormalizedAddress(address string) string {
 	return derefString(namecheap.NormalizeRecord(namecheap.DomainsDNSHostRecord{
 		Address: namecheap.String(address),
 	}).Address)
@@ -596,13 +596,13 @@ func liveEmailTypeOrDefault(t *testing.T) string {
 	return *resp.DomainDNSGetHostsResult.EmailType
 }
 
-// TestAccNamecheapDNSRecordRefusals covers the three cases where the right answer
+// TestAccNamecheapDomainHostRecordRefusals covers the three cases where the right answer
 // against the real API is to refuse and explain, not to write. Each one, written
 // anyway, produces two records in the zone that no selector can separate — the
 // resource would be wedged, fixable only in the dashboard.
 //
 // These steps are cheap: they fail during the identity lookup, before any write.
-func TestAccNamecheapDNSRecordRefusals(t *testing.T) {
+func TestAccNamecheapDomainHostRecordRefusals(t *testing.T) {
 	// Two records on ONE host: the update guard has to be reached by changing
 	// `address`, which is updated in place. Changing `hostname` would be a
 	// replacement and would exercise create's guard all over again.
@@ -614,7 +614,7 @@ func TestAccNamecheapDNSRecordRefusals(t *testing.T) {
 
 	adopted := func(address string) string {
 		return fmt.Sprintf(`
-resource "namecheap_dns_record" "adopted" {
+resource "namecheap_domain_host_record" "adopted" {
   domain   = %[1]q
   hostname = %[2]q
   type     = "A"
@@ -636,7 +636,7 @@ resource "namecheap_dns_record" "adopted" {
 			{
 				// So take ownership of it the way the error says to.
 				Config:             adopted("203.0.113.60"),
-				ResourceName:       "namecheap_dns_record.adopted",
+				ResourceName:       "namecheap_domain_host_record.adopted",
 				ImportState:        true,
 				ImportStateId:      strings.ToLower(*testAccDomain) + "/A/" + host + "/203.0.113.60",
 				ImportStatePersist: true,
