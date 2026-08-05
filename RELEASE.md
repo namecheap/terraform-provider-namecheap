@@ -9,7 +9,7 @@ Three workflows participate:
 
 | Workflow | Trigger | Role |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | PRs, push to any branch | Lint, vet, unit tests, acceptance tests |
+| [`ci.yml`](.github/workflows/ci.yml) | PRs, push to `master`, manual | Lint, vet, unit tests, acceptance tests (see [CI.md](CI.md)) |
 | [`versioning.yml`](.github/workflows/versioning.yml) | `ci.yml` success on `master` | Runs release-please to open/update the Release PR |
 | [`release.yml`](.github/workflows/release.yml) | push of a `v*` tag | GoReleaser build + GPG sign + SBOM + attestation |
 
@@ -26,7 +26,11 @@ release-please parses to compute the version bump.
    `versioning.yml` runs release-please, which computes the next SemVer bump
    (`fix:` → patch, `feat:` → minor, `feat!:`/`BREAKING CHANGE:` → major),
    updates `CHANGELOG.md` and `.release-please-manifest.json`, and opens or
-   updates a PR titled `chore(master): release X.Y.Z`.
+   updates a PR titled `chore(master): release X.Y.Z`. On the Release PR
+   itself (and its merge commit) CI's `changes` gate skips all test jobs —
+   the diff is changelog + manifest only, already-tested code — and the
+   always-run "CI OK" job concludes the run green so `workflow_run` still
+   fires; see [CI.md](CI.md).
 3. **Maintainer merges the Release PR** when the accumulated changes are worth
    shipping. This is the only manual gate. Merging tags the commit `vX.Y.Z`.
 4. **`release.yml` publishes** the binaries for the new tag, and the Terraform

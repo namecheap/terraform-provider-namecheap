@@ -97,9 +97,11 @@ resource "namecheap_domain_host_record" "www" {
 
 ### Testing
 
-Every pull request runs a fast, credential-free mock-backed acceptance suite
-(`make testacc-mock`) on GitHub-hosted runners across a Terraform + OpenTofu
-version matrix:
+Every code-touching pull request runs a fast, credential-free mock-backed
+acceptance suite (`make testacc-mock`) on GitHub-hosted runners across a
+Terraform + OpenTofu version matrix (PRs touching only root-level markdown,
+`LICENSE`, or the release-please manifest skip the test jobs — see
+[CI.md](CI.md)):
 
 | Engine | Versions tested in CI |
 | --- | --- |

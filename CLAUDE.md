@@ -58,6 +58,8 @@ The `docs/` directory (`index.md`, `guides/`, `resources/`) is reserved for Terr
 ## Pull Requests
 
 - All CI checks must pass before merge (unit tests, acceptance tests, CodeQL, DCO).
+- CI is gated on changed paths (see `CI.md`): a PR touching only root-level markdown, `LICENSE`, or `.release-please-manifest.json` skips every test job — those show as **skipped** with a green "CI OK", which is expected, not a regression. `docs/`, `templates/` and `examples/` count as code and run the full pipeline.
+- When editing `.github/workflows/ci.yml`: every job must be listed in the `ci-ok` job's `needs:`; new expensive jobs take the gate (`needs: changes` + `if: needs.changes.outputs.code == 'true'`); never add `paths`/`paths-ignore` to the triggers and never gate `stop-runner` on `changes`. Rationale and invariants live in `CI.md`.
 - PRs should include both unit tests and Terraform acceptance tests where applicable.
 - Acceptance tests use `resource.Test()` with `TestStep` — see `namecheap/provider_test.go` for examples.
 - `SECURITY_COMPLIANCE.md` is the authoritative reference for the compliance gates a PR is judged against (dependency drift, vulnerability/license scans, SBOM, supply-chain pinning). Check it before proposing anything that touches `go.mod`, CI workflows, or action pins.
