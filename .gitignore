@@ -36,6 +36,7 @@ website/vendor
 
 terraform-provider-namecheap
 coverage.out
+coverage-acceptance.out
 
 # Agents settings
 .claude/settings.local.json

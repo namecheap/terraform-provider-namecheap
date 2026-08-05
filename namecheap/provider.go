@@ -129,6 +129,7 @@ func Provider() *schema.Provider {
 			"namecheap_personal_nameserver": resourceNamecheapPersonalNameserver(),
 			"namecheap_domain_contacts":     resourceNamecheapDomainContacts(),
 			"namecheap_email_forwarding":    resourceNamecheapEmailForwarding(),
+			"namecheap_domain_host_record":  resourceNamecheapDomainHostRecord(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"namecheap_domain":          dataSourceNamecheapDomain(),

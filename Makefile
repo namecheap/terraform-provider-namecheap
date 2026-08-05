@@ -26,8 +26,15 @@ testacc-sandbox:
 # `testacc` build tag so the NAMECHEAP_API_URL endpoint override is compiled in,
 # and a CLI binary. Honors a pre-set TF_ACC_TERRAFORM_PATH (so CI can point it at
 # terraform or tofu); otherwise falls back to the terraform on PATH.
+#
+# It writes its own coverage profile, separate from `test`'s. The provider runs
+# in-process under the SDKv2 test harness, so this suite is what exercises the
+# CRUD paths — a resource's Create/Read/Update/Delete are only reachable through
+# real Terraform. Uploading only `test`'s profile reports those paths as untested
+# when they are the most thoroughly tested code in the repo, so CI sends both (see
+# the Codecov step in ci.yml).
 testacc-mock:
-	TF_ACC=1 TF_ACC_TERRAFORM_PATH="$${TF_ACC_TERRAFORM_PATH:-$$(command -v terraform)}" go test -tags testacc ./namecheap -v -run='^TestAccMock' -count=1 -timeout=10m
+	TF_ACC=1 TF_ACC_TERRAFORM_PATH="$${TF_ACC_TERRAFORM_PATH:-$$(command -v terraform)}" go test -tags testacc ./namecheap -v -run='^TestAccMock' -count=1 -timeout=10m -covermode=atomic -coverprofile=coverage-acceptance.out
 
 build:
 	go build -o ${BINARY}

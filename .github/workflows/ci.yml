@@ -76,10 +76,33 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Set up Terraform
+        # For the mock acceptance suite below, which drives a real CLI. Wrapper
+        # off so the Makefile sees terraform's real exit codes.
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Mock acceptance tests (coverage)
+        # Runs on EVERY pull request, unlike the acceptance_mock matrix job below
+        # (forks and Dependabot only) and the live sandbox suite (same-repo only,
+        # and built without the `testacc` tag so it cannot see these tests at all).
+        # Without this step a same-repo PR never executes the mock suite.
+        #
+        # It is also where the CRUD coverage comes from: a resource's
+        # Create/Read/Update/Delete are only reachable through real Terraform, so
+        # `make test` alone reports them as untested. One engine is enough here —
+        # engine/version compatibility is the matrix job's job, not coverage's.
+        run: make testacc-mock
+
       - name: Upload coverage to Codecov
+        # Both profiles go up in ONE call so Codecov merges them into a single
+        # report and computes one status. Two separate uploads would each trigger
+        # a status calculation, and the first — unit-only — would report the CRUD
+        # paths as uncovered until the second arrived.
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
-          files: coverage.out
+          files: coverage.out,coverage-acceptance.out
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
@@ -380,10 +403,15 @@ jobs:
     # with NO secrets, and a terraform + OpenTofu version matrix that guards
     # against engine/version-specific plan or state regressions.
     #
-    # This is the FALLBACK path for pull requests that cannot reach the live
-    # sandbox suite below: fork PRs (secrets are redacted for them) and Dependabot
-    # PRs (same). Same-repo, non-Dependabot PRs run the live sandbox suite
-    # instead, so the two never both run on one PR.
+    # What this adds over the `check` job — which now runs the same suite on every
+    # PR, for coverage — is the engine/version matrix: the oldest supported
+    # Terraform, the newest, and OpenTofu. `check` proves the suite passes; this
+    # proves it passes on every engine the provider claims to support.
+    #
+    # It is also the FALLBACK acceptance path for pull requests that cannot reach
+    # the live sandbox suite below: fork PRs (secrets are redacted for them) and
+    # Dependabot PRs (same). Same-repo, non-Dependabot PRs run the live sandbox
+    # suite instead, so those two never both run on one PR.
     name: Mock acceptance (${{ matrix.engine }} ${{ matrix.version }})
     needs: [check]
     if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
