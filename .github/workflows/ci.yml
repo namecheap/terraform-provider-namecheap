@@ -1,5 +1,14 @@
 name: CI
 
+# No workflow-level paths-ignore here, on purpose. This workflow's jobs are
+# required status checks, and a path-filtered required check is never reported
+# on PRs that touch only excluded files, which blocks them from merging
+# permanently. It would also stop versioning.yml's `workflow_run: [CI]` trigger
+# from firing on pushes that only touch release files, breaking the
+# release-please -> tag -> GoReleaser chain. Instead, the `changes` job below
+# detects what changed and the expensive jobs skip themselves via `if:` —
+# skipped checks DO satisfy branch protection, and the workflow still completes
+# so workflow_run still fires.
 on:
   # Post-merge run only: PR branches are covered by pull_request, so each PR
   # runs CI once. Pre-PR branches: use workflow_dispatch.
@@ -36,9 +45,54 @@ env:
 # queue step in start-runner below.
 
 jobs:
+  # Gate job: decides whether the jobs below actually need to run for this
+  # change. `code` is false only when the diff touches nothing but root-level
+  # markdown (README/CHANGELOG/...), LICENSE, or the release-please manifest —
+  # most notably the release-please Release PR (CHANGELOG.md +
+  # .release-please-manifest.json) and its merge to master, which previously
+  # re-ran the full pipeline — self-hosted EC2 acceptance run included — twice
+  # per release on code that was already tested. docs/** and templates/**
+  # deliberately count as code: docs/ is published to the Terraform Registry at
+  # each release tag, so doc changes get the full pipeline like any
+  # user-visible change.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter reads PR files via the API on pull_request events
+    outputs:
+      # workflow_dispatch is a maintainer explicitly asking for a full run (the
+      # documented path for live acceptance on Dependabot branches — see
+      # CLAUDE.md), and paths-filter has no base to diff against there anyway,
+      # so dispatch runs always count as code and bypass the filter entirely.
+      code: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter-code.outputs.code }}
+    steps:
+      # Checkout is required for push events, where paths-filter diffs with git
+      # (pull_request events use the API and would not need it).
+      - uses: actions/checkout@v7
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+
+      # With predicate-quantifier=every a file counts as `code` only if it
+      # matches ALL patterns, i.e. it is none of the ignored kinds. `*.md`
+      # (no globstar) matches root-level markdown only, so nested markdown —
+      # docs/**, templates/** — still counts as code on purpose.
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        id: filter-code
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '!*.md'
+              - '!LICENSE'
+              - '!.release-please-manifest.json'
+
   check:
     name: Check
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -125,6 +179,8 @@ jobs:
     # dev_overrides config, so this job is fork-safe.
     name: Docs
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -163,6 +219,8 @@ jobs:
     # audits) can consume a signed inventory without re-running scans.
     name: Security scan (Trivy)
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -252,6 +310,8 @@ jobs:
     # so detection stays current regardless of the pinned binary version.
     name: Security scan (govulncheck)
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -307,9 +367,11 @@ jobs:
     # in the summary via needs.*.result, so a green comment can never mask a red
     # gate.
     name: Security scan summary
-    needs: [security, govulncheck]
+    needs: [changes, security, govulncheck]
     # Run even when a gate above failed — that's when the summary matters most.
-    if: ${{ !cancelled() }}
+    # But not when the changes gate skipped the scans entirely: there are no
+    # scan artifacts to summarize on a docs-only change.
+    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read # checkout + read go.mod for the dependency overview
@@ -413,8 +475,8 @@ jobs:
     # Dependabot PRs (same). Same-repo, non-Dependabot PRs run the live sandbox
     # suite instead, so those two never both run on one PR.
     name: Mock acceptance (${{ matrix.engine }} ${{ matrix.version }})
-    needs: [check]
-    if: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
+    needs: [changes, check]
+    if: ${{ needs.changes.outputs.code == 'true' && github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -473,14 +535,17 @@ jobs:
 
   start-runner:
     name: Start self-hosted EC2 runner
-    needs: [check, security, govulncheck]
+    needs: [changes, check, security, govulncheck]
     # The live-API sandbox pipeline needs secrets.* (AWS creds, whitelisted EIP,
     # NAMECHEAP_API_KEY), so it only runs where secrets are available AND the
     # code is trusted: same-repo PRs, pushes to master (post-merge), and manual
     # workflow_dispatch (write access required, so always a maintainer). Never
     # fork PRs (redacted secrets; served by acceptance_mock instead) nor
-    # Dependabot events (same).
-    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
+    # Dependabot events (same). The changes-gate term additionally skips the
+    # whole EC2 lifecycle — and its per-run AWS cost — when the diff touches
+    # only root markdown/LICENSE/the release-please manifest (most notably the
+    # Release PR and its merge commit).
+    if: ${{ needs.changes.outputs.code == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -643,10 +708,11 @@ jobs:
   acceptance_test:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
-    needs: start-runner
-    # Same gate as start-runner: same-repo PRs + pushes to master + manual
-    # dispatch, never forks/Dependabot (those get acceptance_mock instead).
-    if: ${{ github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
+    needs: [changes, start-runner]
+    # Same gate as start-runner: changes-gate `code` + same-repo PRs + pushes
+    # to master + manual dispatch, never forks/Dependabot (those get
+    # acceptance_mock instead).
+    if: ${{ needs.changes.outputs.code == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
     steps:
       # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
       # Runs before our own scripts exist on disk, so it — not a custom
@@ -848,7 +914,12 @@ jobs:
     # Runs whenever a runner was actually started, regardless of the triggering
     # event. The instance-id guard is the real safety condition: it is non-empty
     # only when start-runner ran (same-repo PR or push to master), so this
-    # correctly tears the runner down for both those cases and no-ops otherwise.
+    # correctly tears the runner down for both those cases and no-ops otherwise
+    # — including when start-runner was skipped by the changes gate: always()
+    # keeps this condition evaluating even then, and the empty instance-id
+    # makes it skip cleanly rather than fail or hang. Deliberately NOT gated
+    # on needs.changes.outputs.code: if a runner exists it must be stopped,
+    # no matter what the gate said.
     if: ${{ always() && needs.start-runner.outputs.ec2-instance-id != '' }}
     steps:
       - name: Generate GitHub App token
@@ -878,3 +949,61 @@ jobs:
           github-token: ${{ steps.app-token.outputs.token }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
+
+  # Summary job with two purposes:
+  # 1. A workflow run whose jobs were ALL skipped by the gate would otherwise
+  #    have no executed job, making the run-level conclusion (which gates
+  #    versioning.yml via workflow_run) ambiguous. This job executes on every
+  #    run that isn't cancelled, so the run always concludes success/failure.
+  #    `!cancelled()` rather than `always()`: a superseded PR run cancelled by
+  #    the concurrency group skips this job instead of spending a runner to
+  #    post a red check on a dead SHA (checks are evaluated per-SHA, so the
+  #    replacement run supplies the required check).
+  # 2. Branch protection can require just this one check instead of listing
+  #    every job: it fails if any needed job failed or was cancelled, and
+  #    passes when jobs succeeded or were legitimately skipped — by the
+  #    changes gate, or by the pre-existing fork/Dependabot/event conditions
+  #    on acceptance_mock and the EC2 jobs.
+  # Every job in this workflow MUST be listed in `needs` below; the first
+  # step asserts that, so a job missing from the list fails this check
+  # instead of silently escaping it.
+  ci-ok:
+    name: CI OK
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - check
+      - docs
+      - security
+      - govulncheck
+      - security-report
+      - acceptance_mock
+      - start-runner
+      - acceptance_test
+      - stop-runner
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # "CI OK" only guards the jobs listed in its `needs`. A job added to the
+      # workflow but not to that list could fail without turning this check
+      # red — the exact gap this job exists to close — so assert the two lists
+      # match instead of relying on the note in CI.md.
+      - name: Assert every job is watched by this gate
+        run: |
+          watched=$(yq '.jobs.ci-ok.needs[]' .github/workflows/ci.yml | sort)
+          all=$(yq '.jobs | keys | .[]' .github/workflows/ci.yml | grep -vx 'ci-ok' | sort)
+          if ! diff <(echo "$all") <(echo "$watched"); then
+            echo "::error::ci.yml jobs and ci-ok's needs list have drifted (< missing from needs, > stale entry)."
+            exit 1
+          fi
+
+      - name: Check results of all jobs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if ! echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")' > /dev/null; then
+            echo "::error::One or more CI jobs failed or were cancelled — see the results above."
+            exit 1
+          fi

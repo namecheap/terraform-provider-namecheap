@@ -160,6 +160,14 @@ disk; `git checkout -- docs/` restores it.
 
 ### What runs on your PR
 
+If your PR touches only root-level markdown (`README.md`, `CHANGELOG.md`,
+...), `LICENSE`, or `.release-please-manifest.json`, CI's `changes` gate
+skips every test job — they report "skipped", the "CI OK" summary check
+passes, and the PR is mergeable. Anything else (code, workflows, and notably
+`docs/`, `templates/` and `examples/`, which are registry-published or
+type-checked deliverables) runs the full pipeline described below. See
+[CI.md](CI.md) for the mechanics.
+
 Every pull request — **including PRs from forks** — runs, on GitHub-hosted
 runners with no secrets:
 

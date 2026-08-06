@@ -27,8 +27,11 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
 
 ## Vulnerability, misconfig, secret, and license scanning
 
-- [Trivy](https://trivy.dev) runs on every push in the `security` job with
-  `scanners: vuln,misconfig,secret,license` (#166, #176).
+- [Trivy](https://trivy.dev) runs on every code-touching push and PR in the
+  `security` job with `scanners: vuln,misconfig,secret,license` (#166, #176).
+  Changes gated away as non-code — root-level markdown, `LICENSE`, the
+  release-please manifest — skip the scan jobs (see [CI.md](CI.md)); nothing
+  in that set can alter the module graph or the shipped artifacts.
 - Gate: `CRITICAL,HIGH` with `ignore-unfixed: true` — unfixable advisories
   surface in the run log but don't block merges.
 - License policy lives in [`trivy.yaml`](trivy.yaml) at repo root. Denylist
@@ -39,7 +42,7 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   (package + license combination) to `trivy.yaml`, with a justification and
   a reviewer from outside the requesting team.
 - [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) runs on
-  every push in the `govulncheck` job as a Go-native gate complementary to
+  every code-touching push and PR in the `govulncheck` job as a Go-native gate complementary to
   Trivy (#233). It performs call-graph **reachability** analysis against the Go
   vulnerability database (<https://vuln.go.dev>) and the standard library for
   the pinned Go toolchain, and **fails the build when a vulnerable symbol is
