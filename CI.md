@@ -101,10 +101,14 @@ regardless of anything else in the run. The nightly
 
 ### The CI OK job
 
-`ci-ok` (check name "CI OK") runs `if: always()`, checks every other job's
-result, and fails if any of them failed or was cancelled ("skipped" is fine —
-whether from the gate or from the pre-existing fork/Dependabot conditions).
-It exists because:
+`ci-ok` (check name "CI OK") runs on every non-cancelled run
+(`if: ${{ !cancelled() }}` — a superseded PR run cancelled by the concurrency
+group skips it instead of posting a red check on a dead SHA), checks every
+other job's result, and fails if any of them failed or was cancelled
+("skipped" is fine — whether from the gate or from the pre-existing
+fork/Dependabot conditions). It also asserts that its own `needs:` list
+matches the workflow's job list, so a newly added job can't silently escape
+its watch. It exists because:
 
 - a run whose jobs were **all** skipped needs at least one executed job for
   the run-level conclusion — which gates Versioning — to be a deterministic
@@ -131,7 +135,8 @@ GoReleaser start that much sooner.
 - **Don't add `paths`/`paths-ignore` to `ci.yml` triggers** (see above).
 - **Keep `ci-ok` in `needs` sync**: every job added to `ci.yml` must also be
   added to the `ci-ok` `needs:` list. "CI OK" only guards the jobs it
-  watches.
+  watches. This is enforced — `ci-ok`'s first step diffs its `needs:`
+  against the workflow's job list and fails on drift.
 - **New expensive jobs should take the gate**: `needs: changes` +
   `if: needs.changes.outputs.code == 'true'` (combined with any
   event/actor conditions the job needs, as `start-runner` does).
