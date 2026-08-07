@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.1](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.7.0...v2.7.1) (2026-08-04)
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/hashicorp/terraform-plugin-log from 0.10.0 to 0.11.0 ([#311](https://github.com/namecheap/terraform-provider-namecheap/issues/311)) ([c06e9b9](https://github.com/namecheap/terraform-provider-namecheap/commit/c06e9b9ba97c2c140711b2c9ba1516cd88265162))
+
 ## [2.7.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.6.2...v2.7.0) (2026-08-01)
 
 
