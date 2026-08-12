@@ -518,15 +518,20 @@ jobs:
       - name: Mock acceptance tests
         # ENGINE comes from the workflow-defined matrix (trusted), not from any
         # ${{ github.event.* }} value, so it is safe to branch on in the shell.
-        # OpenTofu resolves provider source addresses more strictly than
-        # Terraform, so the test harness is pointed at an address it accepts.
+        # TF_ACC_PROVIDER_HOST retargets the reattached provider's address at
+        # the OpenTofu registry. Do NOT also set TF_ACC_PROVIDER_NAMESPACE: with
+        # it unset the harness registers the provider under both default
+        # namespaces ("-" and "hashicorp"), which is what import steps that
+        # carry an explicit Config resolve to — terraform-plugin-testing writes
+        # those configs verbatim, without the required_providers source it
+        # injects into apply steps, so a custom namespace 404s against the real
+        # registry (see TestAccMockDomainHostRecordImportFormats).
         env:
           ENGINE: ${{ matrix.engine }}
         run: |
           if [ "${ENGINE}" = "opentofu" ]; then
             bin="$(command -v tofu)"
             export TF_ACC_PROVIDER_HOST="registry.opentofu.org"
-            export TF_ACC_PROVIDER_NAMESPACE="namecheap"
           else
             bin="$(command -v terraform)"
           fi
