@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.8.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.7.0...v2.8.0) (2026-08-12)
+
+
+### Features
+
+* add namecheap_dns_record for per-record DNS management ([#310](https://github.com/namecheap/terraform-provider-namecheap/issues/310)) ([889c7f9](https://github.com/namecheap/terraform-provider-namecheap/commit/889c7f9610d85d9d26981821df6d98bf98e7f406))
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/go-git/go-git/v5 from 5.19.1 to 5.19.2 ([#316](https://github.com/namecheap/terraform-provider-namecheap/issues/316)) ([1aa7b58](https://github.com/namecheap/terraform-provider-namecheap/commit/1aa7b5839f7dd02fc2e1d3687e5024849bc5008b))
+* **deps:** bump github.com/hashicorp/terraform-plugin-log from 0.10.0 to 0.11.0 ([#311](https://github.com/namecheap/terraform-provider-namecheap/issues/311)) ([c06e9b9](https://github.com/namecheap/terraform-provider-namecheap/commit/c06e9b9ba97c2c140711b2c9ba1516cd88265162))
+
 ## [2.7.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.6.2...v2.7.0) (2026-08-01)
 
 
