@@ -13,9 +13,9 @@ import (
 
 // TestAccMockDataSourceDomain reads a single domain via namecheap_domain against
 // the stateful mock and asserts the exported attributes. It exercises the
-// two-call design end-to-end: the DNS-oriented fields come from
-// namecheap.domains.getInfo and the lifecycle fields (created/expires/is_locked/
-// auto_renew/whois_guard/is_expired) come from namecheap.domains.getList.
+// two-call design end-to-end: getInfo supplies almost everything (DNS fields,
+// dates, whois_guard), while namecheap.domains.getList supplies only the two
+// booleans getInfo lacks (is_locked/auto_renew).
 func TestAccMockDataSourceDomain(t *testing.T) {
 	m := newNamecheapMock(t)
 	const domain = "info-example.com"
@@ -25,10 +25,15 @@ func TestAccMockDataSourceDomain(t *testing.T) {
 		ProviderType:  "CUSTOM",
 		IsUsingOurDNS: false,
 		Nameservers:   []string{"ns1.example.net", "ns2.example.net"},
+		Created:       "06/02/2021",
+		Expires:       "06/02/2099",
+		WhoisGuard:    "True", // getInfo vocabulary; must surface as ENABLED
 	})
-	// Seed the portfolio listing so the getList-sourced lifecycle fields resolve.
+	// Seed the portfolio listing for the two getList-sourced booleans. Its
+	// dates/whois state differ from getInfo's on purpose: the checks below
+	// prove getInfo is the source for those attributes now.
 	m.seedPortfolio(0,
-		mockPortfolioDomain{ID: "10", Name: domain, User: "mock-user", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "ENABLED", IsExpired: false, IsLocked: true, AutoRenew: true, IsPremium: true, IsOurDNS: false},
+		mockPortfolioDomain{ID: "10", Name: domain, User: "mock-user", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: false, IsLocked: true, AutoRenew: true, IsPremium: true, IsOurDNS: false},
 	)
 
 	resource.Test(t, resource.TestCase{
@@ -50,13 +55,15 @@ data "namecheap_domain" "test" {
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "nameservers.#", "2"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "nameservers.0", "ns1.example.net"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "nameservers.1", "ns2.example.net"),
-					// getList-sourced lifecycle fields.
+					// getInfo-sourced lifecycle fields (the seeded portfolio row
+					// carries different values, proving the source).
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "created", "2021-06-02T00:00:00Z"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "expires", "2099-06-02T00:00:00Z"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_expired", "false"),
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "whois_guard", "ENABLED"),
+					// getList-sourced booleans (the only listing-dependent fields).
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_locked", "true"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "auto_renew", "true"),
-					resource.TestCheckResourceAttr("data.namecheap_domain.test", "whois_guard", "ENABLED"),
 				),
 			},
 		},
