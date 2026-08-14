@@ -54,23 +54,113 @@ func startDataSourceServer(t *testing.T, handler func(command string, r *http.Re
 
 // --- XML builders (mirror the real API envelopes the SDK parses) ------------
 
-func xmlGetInfo(domain string, isPremium, isPremiumDNS bool, providerType string, isOurDNS bool, nameservers []string) string {
-	var ns []string
-	for _, n := range nameservers {
-		ns = append(ns, fmt.Sprintf(`<Nameserver>%s</Nameserver>`, n))
+// dsGetInfo drives xmlGetInfo, mirroring the real getInfo response shape (SDK
+// v2.10.1 maps the full subtree). Zero-valued optional fields omit their XML.
+type dsGetInfo struct {
+	Domain              string
+	Status              string // "" omits the Status attribute (the sandbox omits it too)
+	OwnerName           string
+	IsOwner             bool
+	IsPremium           bool
+	Created             string // MM/DD/YYYY; "" omits the element
+	Expires             string // MM/DD/YYYY; "" omits the element
+	WhoisEnabled        string // "" omits the whole Whoisguard element
+	WhoisExpires        string // MM/DD/YYYY
+	WhoisEmail          string
+	ForwardedTo         string
+	PremiumDNS          bool // IsActive; false also renders the -1 sentinel subscription
+	SubscriptionID      int
+	PremiumDNSAutoRenew bool
+	PremiumDNSExpires   string
+	ProviderType        string
+	IsOurDNS            bool
+	EmailType           string
+	HostCount           int
+	Nameservers         []string
+	RightsAll           string // "" renders <Modificationrights />; "true"/"false" sets the attr
+	Rights              [][2]string
+}
+
+func xmlGetInfo(g dsGetInfo) string {
+	var b strings.Builder
+
+	statusAttr := ""
+	if g.Status != "" {
+		statusAttr = fmt.Sprintf(` Status="%s"`, g.Status)
 	}
-	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+	fmt.Fprintf(&b, `<?xml version="1.0" encoding="utf-8"?>
 <ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
   <Errors />
   <CommandResponse Type="namecheap.domains.getInfo">
-    <DomainGetInfoResult DomainName="%s" IsPremium="%t">
-      <PremiumDnsSubscription><IsActive>%t</IsActive></PremiumDnsSubscription>
-      <DnsDetails ProviderType="%s" IsUsingOurDNS="%t">
+    <DomainGetInfoResult%s ID="1706717" DomainName="%s" OwnerName="%s" IsOwner="%t" IsPremium="%t">
+      <DomainDetails>`, statusAttr, g.Domain, g.OwnerName, g.IsOwner, g.IsPremium)
+	if g.Created != "" {
+		fmt.Fprintf(&b, `<CreatedDate>%s</CreatedDate>`, g.Created)
+	}
+	if g.Expires != "" {
+		fmt.Fprintf(&b, `<ExpiredDate>%s</ExpiredDate>`, g.Expires)
+	}
+	b.WriteString(`<NumYears>1</NumYears></DomainDetails>
+      <LockDetails />`)
+
+	if g.WhoisEnabled != "" {
+		fmt.Fprintf(&b, `
+      <Whoisguard Enabled="%s"><ID>53536</ID>`, g.WhoisEnabled)
+		if g.WhoisExpires != "" {
+			fmt.Fprintf(&b, `<ExpiredDate>%s</ExpiredDate>`, g.WhoisExpires)
+		}
+		if g.WhoisEmail != "" || g.ForwardedTo != "" {
+			fmt.Fprintf(&b, `<EmailDetails WhoisGuardEmail="%s" ForwardedTo="%s" LastAutoEmailChangeDate="" AutoEmailChangeFrequencyDays="0" />`, g.WhoisEmail, g.ForwardedTo)
+		}
+		b.WriteString(`</Whoisguard>`)
+	}
+
+	subID := g.SubscriptionID
+	if subID == 0 {
+		subID = -1
+	}
+	fmt.Fprintf(&b, `
+      <PremiumDnsSubscription><UseAutoRenew>%t</UseAutoRenew><SubscriptionId>%d</SubscriptionId><CreatedDate>0001-01-01T00:00:00</CreatedDate><ExpirationDate>%s</ExpirationDate><IsActive>%t</IsActive></PremiumDnsSubscription>`,
+		g.PremiumDNSAutoRenew, subID, orDefault(g.PremiumDNSExpires, "0001-01-01T00:00:00"), g.PremiumDNS)
+
+	var ns []string
+	for _, n := range g.Nameservers {
+		ns = append(ns, fmt.Sprintf(`<Nameserver>%s</Nameserver>`, n))
+	}
+	fmt.Fprintf(&b, `
+      <DnsDetails ProviderType="%s" IsUsingOurDNS="%t" HostCount="%d" EmailType="%s" DynamicDNSStatus="false" IsFailover="false">
         %s
-      </DnsDetails>
+      </DnsDetails>`, g.ProviderType, g.IsOurDNS, g.HostCount, orDefault(g.EmailType, "No Email Service"), strings.Join(ns, "\n        "))
+
+	if g.RightsAll == "" && len(g.Rights) == 0 {
+		b.WriteString(`
+      <Modificationrights />`)
+	} else {
+		attr := ""
+		if g.RightsAll != "" {
+			attr = fmt.Sprintf(` All="%s"`, g.RightsAll)
+		}
+		fmt.Fprintf(&b, `
+      <Modificationrights%s>`, attr)
+		for _, r := range g.Rights {
+			fmt.Fprintf(&b, `<Rights Type="%s">%s</Rights>`, r[0], r[1])
+		}
+		b.WriteString(`</Modificationrights>`)
+	}
+
+	b.WriteString(`
     </DomainGetInfoResult>
   </CommandResponse>
-</ApiResponse>`, domain, isPremium, isPremiumDNS, providerType, isOurDNS, strings.Join(ns, "\n        "))
+</ApiResponse>`)
+	return b.String()
+}
+
+// orDefault returns s, or def when s is empty.
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }
 
 // dsDomainRow is a single portfolio row for building a getList response.
@@ -148,10 +238,24 @@ func TestDataSourceDomainRead_Success(t *testing.T) {
 	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
 		switch command {
 		case "namecheap.domains.getInfo":
-			return xmlGetInfo(domain, true, true, "CUSTOM", false, []string{"ns1.example.net", "ns2.example.net"})
+			return xmlGetInfo(dsGetInfo{
+				Domain: domain, Status: "Ok", OwnerName: "apiuser", IsOwner: true, IsPremium: true,
+				Created: "06/02/2021", Expires: "06/02/2099",
+				WhoisEnabled: "True", WhoisExpires: "06/02/2027",
+				WhoisEmail: "guard@whoisguard.example", ForwardedTo: "real@example.com",
+				PremiumDNS: true, SubscriptionID: 4756, PremiumDNSAutoRenew: true, PremiumDNSExpires: "2027-06-02T00:00:00",
+				ProviderType: "CUSTOM", IsOurDNS: false, EmailType: "FWD", HostCount: 2,
+				Nameservers: []string{"ns1.example.net", "ns2.example.net"},
+				RightsAll:   "false", Rights: [][2]string{{"dns", "OK"}, {"rlock", "OK"}},
+			})
 		case "namecheap.domains.getList":
+			// Deliberately different dates and whois state than getInfo: the
+			// assertions below prove getInfo is now the source for those fields
+			// and the listing supplies only is_expired/is_locked/auto_renew.
+			// IsExpired=true contradicts getInfo's 2099 expiry on purpose — the
+			// listing's own flag must win over the date-derived fallback.
 			return xmlGetListPage([]dsDomainRow{
-				{ID: "42", Name: domain, User: "u", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "ENABLED", IsLocked: true, AutoRenew: true, IsOurDNS: true},
+				{ID: "42", Name: domain, User: "u", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: true, IsLocked: true, AutoRenew: true, IsOurDNS: true},
 			}, 1, 1, domainsPageSize)
 		}
 		return apiErrorXML("1010101", "unexpected command "+command)
@@ -167,14 +271,32 @@ func TestDataSourceDomainRead_Success(t *testing.T) {
 	assert.Equal(t, true, d.Get("is_premium"))
 	assert.Equal(t, true, d.Get("is_premium_dns"))
 	assert.Equal(t, []interface{}{"ns1.example.net", "ns2.example.net"}, d.Get("nameservers"))
-	// getList-sourced lifecycle fields (the gap this change closes).
+	// Lifecycle fields now sourced from getInfo, not the listing (the listing
+	// row above carries different values on purpose).
 	assert.Equal(t, "2099-06-02T00:00:00Z", d.Get("expires"))
 	assert.Equal(t, "2021-06-02T00:00:00Z", d.Get("created"))
+	assert.Equal(t, "ENABLED", d.Get("whois_guard"), "True from getInfo must map onto the documented vocabulary")
+	assert.Greater(t, d.Get("expires_in_days").(int), 0)
+	// Listing-sourced fields. is_expired must be the listing's own flag, not the
+	// date-derived fallback (getInfo's 2099 expiry would say false).
+	assert.Equal(t, true, d.Get("is_expired"), "the listing's IsExpired flag must override the date-derived fallback")
 	assert.Equal(t, true, d.Get("is_locked"))
 	assert.Equal(t, true, d.Get("auto_renew"))
-	assert.Equal(t, "ENABLED", d.Get("whois_guard"))
-	assert.Equal(t, false, d.Get("is_expired"))
-	assert.Greater(t, d.Get("expires_in_days").(int), 0)
+	// New getInfo attributes.
+	assert.Equal(t, "Ok", d.Get("status"))
+	assert.Equal(t, "apiuser", d.Get("owner_name"))
+	assert.Equal(t, true, d.Get("is_owner"))
+	assert.Equal(t, "2027-06-02T00:00:00Z", d.Get("whois_guard_expires"))
+	assert.Equal(t, "guard@whoisguard.example", d.Get("whois_guard_email"))
+	assert.Equal(t, "real@example.com", d.Get("whois_guard_forwarded_to"))
+	assert.Equal(t, true, d.Get("premium_dns_auto_renew"))
+	assert.Equal(t, "2027-06-02T00:00:00Z", d.Get("premium_dns_expires"), "the subscription date must be normalized to RFC3339 like every other date attribute")
+	assert.Equal(t, "FWD", d.Get("email_type"))
+	assert.Equal(t, 2, d.Get("host_count"))
+	assert.Equal(t, false, d.Get("dynamic_dns_status"))
+	assert.Equal(t, false, d.Get("is_failover"))
+	assert.Equal(t, false, d.Get("modification_rights_all"))
+	assert.Equal(t, map[string]interface{}{"dns": "OK", "rlock": "OK"}, d.Get("modification_rights"))
 	assert.Equal(t, domain, d.Id())
 }
 
@@ -193,12 +315,19 @@ func TestDataSourceDomainRead_NotFound(t *testing.T) {
 func TestDataSourceDomainRead_LifecycleMissing(t *testing.T) {
 	const domain = "example.com"
 	// getInfo confirms the domain exists, but the portfolio listing returns a
-	// different domain, so the exact-match finds nothing: lifecycle fields stay
-	// at their zero values and the read still succeeds.
+	// different domain, so the exact-match finds nothing: the listing-sourced
+	// booleans stay at their zero values (with a warning) while every
+	// getInfo-sourced field is still populated, and the read succeeds.
 	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
 		switch command {
 		case "namecheap.domains.getInfo":
-			return xmlGetInfo(domain, false, false, "NAMECHEAP", true, []string{"dns1.registrar-servers.com"})
+			return xmlGetInfo(dsGetInfo{
+				Domain: domain, OwnerName: "apiuser",
+				Created: "06/02/2021", Expires: "06/02/2099",
+				WhoisEnabled: "NotAlloted",
+				ProviderType: "NAMECHEAP", IsOurDNS: true,
+				Nameservers: []string{"dns1.registrar-servers.com"},
+			})
 		case "namecheap.domains.getList":
 			return xmlGetListPage([]dsDomainRow{
 				{ID: "7", Name: "other-domain.com", User: "u", Created: "01/01/2020", Expires: "01/01/2030"},
@@ -211,8 +340,76 @@ func TestDataSourceDomainRead_LifecycleMissing(t *testing.T) {
 	diags := dataSourceNamecheapDomainRead(context.Background(), d, client)
 	require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
 	assert.Equal(t, "NAMECHEAP", d.Get("dns_provider_type"))
-	assert.Equal(t, "", d.Get("expires"), "lifecycle field should be empty when the domain is absent from the listing")
-	assert.Equal(t, "", d.Get("whois_guard"))
+	// getInfo-sourced fields survive a portfolio miss.
+	assert.Equal(t, "2099-06-02T00:00:00Z", d.Get("expires"))
+	assert.Equal(t, "NOTPRESENT", d.Get("whois_guard"), "NotAlloted from getInfo must map onto the documented vocabulary")
+	// Only the listing-sourced booleans degrade to zero values; is_expired keeps
+	// the fallback derived from getInfo's expiry date (2099 -> not expired).
+	assert.Equal(t, false, d.Get("is_expired"))
+	assert.Equal(t, false, d.Get("is_locked"))
+	assert.Equal(t, false, d.Get("auto_renew"))
+	// The -1 sentinel subscription must not surface its auto-renew flag or its
+	// "0001-01-01T00:00:00" never-expires date.
+	assert.Equal(t, false, d.Get("premium_dns_auto_renew"))
+	assert.Equal(t, "", d.Get("premium_dns_expires"))
+	assert.Equal(t, "", d.Get("whois_guard_expires"))
+}
+
+// TestDataSourceDomainRead_ExpiredFallback covers is_expired when the domain is
+// absent from the portfolio listing, so the listing's own flag is unavailable
+// and the value is derived from getInfo's expiry date and status.
+func TestDataSourceDomainRead_ExpiredFallback(t *testing.T) {
+	const domain = "example.com"
+	cases := []struct {
+		name    string
+		info    dsGetInfo
+		days    int // expected sign of expires_in_days; 0 skips the check
+		expired bool
+	}{
+		{
+			name:    "past expiry date",
+			info:    dsGetInfo{Domain: domain, Status: "Ok", Created: "01/01/2019", Expires: "01/01/2020", ProviderType: "NAMECHEAP", IsOurDNS: true},
+			days:    -1,
+			expired: true,
+		},
+		{
+			name: "status Expired with future date",
+			info: dsGetInfo{Domain: domain, Status: "Expired", Created: "06/02/2021", Expires: "06/02/2099", ProviderType: "NAMECHEAP", IsOurDNS: true},
+			days: 1,
+			// The status verdict wins even though the date has not passed yet.
+			expired: true,
+		},
+		{
+			name:    "status Expired without dates",
+			info:    dsGetInfo{Domain: domain, Status: "Expired", ProviderType: "NAMECHEAP", IsOurDNS: true},
+			expired: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+				switch command {
+				case "namecheap.domains.getInfo":
+					return xmlGetInfo(tc.info)
+				case "namecheap.domains.getList":
+					// Portfolio miss: the listing cannot supply IsExpired.
+					return xmlGetListPage(nil, 0, 1, domainsPageSize)
+				}
+				return apiErrorXML("1010101", "unexpected command "+command)
+			})
+
+			d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomain().Schema, map[string]interface{}{"domain": domain})
+			diags := dataSourceNamecheapDomainRead(context.Background(), d, client)
+			require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
+			assert.Equal(t, tc.expired, d.Get("is_expired"))
+			if tc.days < 0 {
+				assert.Less(t, d.Get("expires_in_days").(int), 0)
+			} else if tc.days > 0 {
+				assert.Greater(t, d.Get("expires_in_days").(int), 0)
+			}
+		})
+	}
 }
 
 func TestDataSourceDomainRead_GetListError(t *testing.T) {
@@ -220,7 +417,7 @@ func TestDataSourceDomainRead_GetListError(t *testing.T) {
 	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
 		switch command {
 		case "namecheap.domains.getInfo":
-			return xmlGetInfo(domain, false, false, "NAMECHEAP", true, nil)
+			return xmlGetInfo(dsGetInfo{Domain: domain, ProviderType: "NAMECHEAP", IsOurDNS: true})
 		case "namecheap.domains.getList":
 			return apiErrorXML("4022336", "portfolio listing failed")
 		}

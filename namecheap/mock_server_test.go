@@ -136,6 +136,13 @@ type mockDomainInfo struct {
 	ProviderType  string
 	IsUsingOurDNS bool
 	Nameservers   []string
+	// Full getInfo response fields (SDK v2.10.1 maps the whole subtree).
+	// Created/Expires are MM/DD/YYYY; empty strings omit the elements.
+	Created string
+	Expires string
+	// WhoisGuard uses getInfo's vocabulary: "True", "False" or "NotAlloted".
+	// Empty omits the Whoisguard element entirely.
+	WhoisGuard string
 }
 
 // newNamecheapMock starts a stateful mock server and registers its shutdown
@@ -621,20 +628,37 @@ func (m *namecheapMock) renderGetInfoXML(domain string) string {
 		nsLines = append(nsLines, fmt.Sprintf(`<Nameserver>%s</Nameserver>`, ns))
 	}
 
+	var details string
+	if info.Created != "" {
+		details += fmt.Sprintf(`<CreatedDate>%s</CreatedDate>`, info.Created)
+	}
+	if info.Expires != "" {
+		details += fmt.Sprintf(`<ExpiredDate>%s</ExpiredDate>`, info.Expires)
+	}
+
+	whois := ""
+	if info.WhoisGuard != "" {
+		whois = fmt.Sprintf(`<Whoisguard Enabled="%s"><ID>1</ID></Whoisguard>`, info.WhoisGuard)
+	}
+
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
 <ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
   <Errors />
   <CommandResponse Type="namecheap.domains.getInfo">
     <DomainGetInfoResult DomainName="%s" IsPremium="%t">
+      <DomainDetails>%s</DomainDetails>
+      <LockDetails />
+      %s
       <PremiumDnsSubscription>
         <IsActive>%t</IsActive>
       </PremiumDnsSubscription>
       <DnsDetails ProviderType="%s" IsUsingOurDNS="%t">
         %s
       </DnsDetails>
+      <Modificationrights />
     </DomainGetInfoResult>
   </CommandResponse>
-</ApiResponse>`, domain, info.IsPremium, info.IsPremiumDNS, info.ProviderType, info.IsUsingOurDNS, strings.Join(nsLines, "\n        "))
+</ApiResponse>`, domain, info.IsPremium, details, whois, info.IsPremiumDNS, info.ProviderType, info.IsUsingOurDNS, strings.Join(nsLines, "\n        "))
 }
 
 // renderGetBalancesXML renders the account funds for namecheap.users.getBalances.
