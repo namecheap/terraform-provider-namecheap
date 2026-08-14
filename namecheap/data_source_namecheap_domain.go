@@ -105,11 +105,11 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 		return dataSourceDomainReadError(domain, err)
 	}
 
-	if resp == nil || resp.DomainDNSGetListResult == nil {
+	if resp == nil || resp.Result() == nil {
 		return diag.Errorf("Namecheap returned no information for domain %q; it may not exist or may not be associated with this account", domain)
 	}
 
-	info := resp.DomainDNSGetListResult
+	info := resp.Result()
 
 	if info.IsPremium != nil {
 		_ = data.Set("is_premium", *info.IsPremium)
