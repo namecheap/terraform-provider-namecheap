@@ -13,11 +13,14 @@ import (
 
 // domainLifecycleAttrs are the attributes exported by the namecheap_domain data
 // source that originate from the portfolio listing (namecheap.domains.getList)
-// rather than from getInfo. Since getInfo's full response mapping (SDK v2.10.1)
-// only the registrar-lock and domain auto-renew booleans still require the
-// listing; everything else comes from getInfo directly.
+// rather than from getInfo. Since SDK v2.10.1 maps getInfo's full response,
+// only the registrar-lock and domain auto-renew booleans (which getInfo does
+// not carry at all) and is_expired still come from the listing. is_expired is
+// listed here so the API's own flag — which accounts for renewal grace periods
+// and matches the namecheap_domains data source — overwrites the fallback value
+// derived from getInfo's expiry date and status.
 var domainLifecycleAttrs = []string{
-	"is_locked", "auto_renew",
+	"is_expired", "is_locked", "auto_renew",
 }
 
 // fetchAllDomains pages through namecheap.domains.getList for the given filters,
@@ -93,10 +96,11 @@ func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, d
 
 	return diag.Diagnostics{{
 		Severity: diag.Warning,
-		Summary:  fmt.Sprintf("Lifecycle fields unavailable for domain %q", domain),
+		Summary:  fmt.Sprintf("Registrar lock and auto-renew unavailable for domain %q", domain),
 		Detail: "getInfo confirmed the domain exists, but it did not appear in the " +
-			"namecheap.domains.getList portfolio listing, so the listing-sourced fields " +
-			"(is_locked, auto_renew) were left at their zero values. " +
+			"namecheap.domains.getList portfolio listing, so is_locked and auto_renew " +
+			"were left at their zero values and is_expired was derived from the expiry " +
+			"date and status instead of the listing's own flag. " +
 			"This is unexpected; please report it if it persists.",
 	}}
 }
@@ -124,6 +128,23 @@ func formatDateTime(dt *namecheap.DateTime) string {
 		return ""
 	}
 	return dt.Time.UTC().Format(time.RFC3339)
+}
+
+// formatPremiumDNSDate renders a PremiumDnsSubscription date — an ISO string
+// without a zone designator, e.g. "2027-06-02T00:00:00" — as RFC3339 (UTC), so
+// premium_dns_expires matches the format of every other date attribute. The
+// zero time ("0001-01-01T00:00:00", the API's "never" sentinel, which can
+// appear even on a live subscription) renders as an empty string. A value that
+// fails to parse is passed through verbatim rather than dropped.
+func formatPremiumDNSDate(s string) string {
+	t, err := time.Parse("2006-01-02T15:04:05", s)
+	if err != nil {
+		return s
+	}
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // daysUntil returns the whole number of calendar days from now until target,

@@ -14,8 +14,8 @@ import (
 // TestAccMockDataSourceDomain reads a single domain via namecheap_domain against
 // the stateful mock and asserts the exported attributes. It exercises the
 // two-call design end-to-end: getInfo supplies almost everything (DNS fields,
-// dates, whois_guard), while namecheap.domains.getList supplies only the two
-// booleans getInfo lacks (is_locked/auto_renew).
+// dates, whois_guard), while namecheap.domains.getList supplies the two booleans
+// getInfo lacks (is_locked/auto_renew) plus the authoritative is_expired flag.
 func TestAccMockDataSourceDomain(t *testing.T) {
 	m := newNamecheapMock(t)
 	const domain = "info-example.com"
@@ -29,11 +29,13 @@ func TestAccMockDataSourceDomain(t *testing.T) {
 		Expires:       "06/02/2099",
 		WhoisGuard:    "True", // getInfo vocabulary; must surface as ENABLED
 	})
-	// Seed the portfolio listing for the two getList-sourced booleans. Its
-	// dates/whois state differ from getInfo's on purpose: the checks below
-	// prove getInfo is the source for those attributes now.
+	// Seed the portfolio listing for the getList-sourced fields. Its dates and
+	// whois state differ from getInfo's on purpose: the checks below prove
+	// getInfo is the source for those attributes now. IsExpired=true contradicts
+	// getInfo's 2099 expiry so the check proves the listing's own flag wins over
+	// the date-derived fallback.
 	m.seedPortfolio(0,
-		mockPortfolioDomain{ID: "10", Name: domain, User: "mock-user", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: false, IsLocked: true, AutoRenew: true, IsPremium: true, IsOurDNS: false},
+		mockPortfolioDomain{ID: "10", Name: domain, User: "mock-user", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: true, IsLocked: true, AutoRenew: true, IsPremium: true, IsOurDNS: false},
 	)
 
 	resource.Test(t, resource.TestCase{
@@ -59,9 +61,10 @@ data "namecheap_domain" "test" {
 					// carries different values, proving the source).
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "created", "2021-06-02T00:00:00Z"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "expires", "2099-06-02T00:00:00Z"),
-					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_expired", "false"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "whois_guard", "ENABLED"),
-					// getList-sourced booleans (the only listing-dependent fields).
+					// getList-sourced fields (the only listing-dependent ones).
+					// is_expired is the listing's flag, not the derived fallback.
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_expired", "true"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_locked", "true"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "auto_renew", "true"),
 				),

@@ -13,9 +13,12 @@ import (
 // dataSourceNamecheapDomain exposes read-only information about a single domain.
 //
 // Almost everything comes from one namecheap.domains.getInfo call: DNS details,
-// dates, privacy (Whoisguard), ownership, and modification rights. Only
-// is_locked and auto_renew still require the namecheap.domains.getList
-// portfolio listing — getInfo does not return those two booleans.
+// dates, privacy (Whoisguard), ownership, and modification rights. The
+// namecheap.domains.getList portfolio listing still supplies is_locked and
+// auto_renew (getInfo does not return those two booleans) and the authoritative
+// is_expired flag — the API's own verdict, which accounts for renewal grace
+// periods that date arithmetic cannot see. On a portfolio miss, is_expired
+// falls back to a value derived from the expiry date and domain status.
 func dataSourceNamecheapDomain() *schema.Resource {
 	return &schema.Resource{
 		Description: "Reads a single domain on the account: its DNS provider and nameservers, plus lifecycle fields such as expiry, registrar lock and auto-renew.",
@@ -66,12 +69,12 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"expires_in_days": {
 				Type:        schema.TypeInt,
 				Computed:    true,
-				Description: "Whole calendar days until the domain expires (negative if already expired).",
+				Description: "Whole calendar days until the domain expires (negative if already expired). 0 with an empty expires means the API did not report an expiry date.",
 			},
 			"is_expired": {
 				Type:        schema.TypeBool,
 				Computed:    true,
-				Description: "Whether the domain has expired.",
+				Description: "Whether the domain has expired, as reported by the portfolio listing (accounts for renewal grace periods); derived from the expiry date and status when the domain is missing from the listing.",
 			},
 			"is_locked": {
 				Type:        schema.TypeBool,
@@ -101,7 +104,7 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"whois_guard_forwarded_to": {
 				Type:        schema.TypeString,
 				Computed:    true,
-				Description: "The real address the privacy-protection email forwards to.",
+				Description: "The real address the privacy-protection email forwards to. Note that this address is stored in the Terraform state.",
 			},
 			"status": {
 				Type:        schema.TypeString,
@@ -126,7 +129,7 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"premium_dns_expires": {
 				Type:        schema.TypeString,
 				Computed:    true,
-				Description: "Expiration timestamp of the PremiumDNS subscription as reported by the API; empty when there is no subscription.",
+				Description: "Expiration date of the PremiumDNS subscription as an RFC3339 timestamp (UTC); empty when there is no subscription or the API reports no expiry.",
 			},
 			"email_type": {
 				Type:        schema.TypeString,
@@ -191,17 +194,20 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 		_ = data.Set("is_owner", *info.IsOwner)
 	}
 
+	expired := isStatusExpired(info.Status)
 	if dd := info.DomainDetails; dd != nil {
 		_ = data.Set("created", formatDateTime(dd.CreatedDate))
 		_ = data.Set("expires", formatDateTime(dd.ExpiredDate))
 		if dd.ExpiredDate != nil && !dd.ExpiredDate.IsZero() {
 			days := daysUntil(dd.ExpiredDate.Time, time.Now().UTC())
 			_ = data.Set("expires_in_days", days)
-			_ = data.Set("is_expired", days < 0 || isStatusExpired(info.Status))
-		} else {
-			_ = data.Set("is_expired", isStatusExpired(info.Status))
+			expired = expired || days < 0
 		}
 	}
+	// Fallback only: when the domain is found in the portfolio listing,
+	// setDomainLifecycleFromList below overwrites is_expired with the API's own
+	// flag, which stays authoritative (it accounts for renewal grace periods).
+	_ = data.Set("is_expired", expired)
 
 	if wg := info.WhoisGuard; wg != nil {
 		if wg.Enabled != nil {
@@ -229,7 +235,7 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 				_ = data.Set("premium_dns_auto_renew", *sub.UseAutoRenew)
 			}
 			if sub.ExpirationDate != nil {
-				_ = data.Set("premium_dns_expires", *sub.ExpirationDate)
+				_ = data.Set("premium_dns_expires", formatPremiumDNSDate(*sub.ExpirationDate))
 			}
 		}
 	}
@@ -266,17 +272,19 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 			rights := make(map[string]interface{}, len(*mr.Rights))
 			for _, r := range *mr.Rights {
 				if r.Type != nil {
-					rights[*r.Type] = derefString(r.Value)
+					// Value is XML chardata; trim in case the API pretty-prints.
+					rights[*r.Type] = strings.TrimSpace(derefString(r.Value))
 				}
 			}
 			_ = data.Set("modification_rights", rights)
 		}
 	}
 
-	// getInfo does not carry the registrar-lock and domain auto-renew booleans.
-	// Fetch just those two from the account portfolio listing. getInfo above has
-	// already confirmed the domain exists, so a portfolio miss leaves them at
-	// their zero values (with a warning) rather than failing the whole lookup.
+	// getInfo does not carry the registrar-lock and domain auto-renew booleans,
+	// and its is_expired can only be derived. Fetch those three from the account
+	// portfolio listing. getInfo above has already confirmed the domain exists,
+	// so a portfolio miss leaves the booleans at their zero values and is_expired
+	// at the derived fallback (with a warning) rather than failing the lookup.
 	lifecycleDiags := setDomainLifecycleFromList(ctx, client, data, domain)
 	if lifecycleDiags.HasError() {
 		return lifecycleDiags
