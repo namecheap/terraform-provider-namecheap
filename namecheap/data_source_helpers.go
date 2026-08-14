@@ -13,11 +13,11 @@ import (
 
 // domainLifecycleAttrs are the attributes exported by the namecheap_domain data
 // source that originate from the portfolio listing (namecheap.domains.getList)
-// rather than from getInfo. They are a subset of domainPortfolioElemSchema so
-// the single-domain and portfolio shapes stay consistent.
+// rather than from getInfo. Since getInfo's full response mapping (SDK v2.10.1)
+// only the registrar-lock and domain auto-renew booleans still require the
+// listing; everything else comes from getInfo directly.
 var domainLifecycleAttrs = []string{
-	"created", "expires", "expires_in_days",
-	"is_expired", "is_locked", "auto_renew", "whois_guard",
+	"is_locked", "auto_renew",
 }
 
 // fetchAllDomains pages through namecheap.domains.getList for the given filters,
@@ -95,9 +95,9 @@ func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, d
 		Severity: diag.Warning,
 		Summary:  fmt.Sprintf("Lifecycle fields unavailable for domain %q", domain),
 		Detail: "getInfo confirmed the domain exists, but it did not appear in the " +
-			"namecheap.domains.getList portfolio listing, so the lifecycle fields " +
-			"(created, expires, expires_in_days, is_expired, is_locked, auto_renew, whois_guard) " +
-			"were left empty. This is unexpected; please report it if it persists.",
+			"namecheap.domains.getList portfolio listing, so the listing-sourced fields " +
+			"(is_locked, auto_renew) were left at their zero values. " +
+			"This is unexpected; please report it if it persists.",
 	}}
 }
 
@@ -117,9 +117,10 @@ func dataSourceDomainReadError(domain string, err error) diag.Diagnostics {
 // formatDateTime renders a Namecheap DateTime as an RFC3339 string. Namecheap
 // returns lifecycle dates as calendar dates (the SDK parses "MM/DD/YYYY" with
 // time.Parse, yielding midnight UTC), so the RFC3339 output is timezone-stable.
-// A nil pointer renders as an empty string.
+// A nil pointer renders as an empty string, as does the zero time — since SDK
+// v2.10.1 an empty date element decodes to the zero value instead of erroring.
 func formatDateTime(dt *namecheap.DateTime) string {
-	if dt == nil {
+	if dt == nil || dt.IsZero() {
 		return ""
 	}
 	return dt.Time.UTC().Format(time.RFC3339)
