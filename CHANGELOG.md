@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.8.0...v2.9.0) (2026-08-14)
+
+
+### Features
+
+* read the full domain info from getInfo and expose privacy, ownership, and rights attributes ([#320](https://github.com/namecheap/terraform-provider-namecheap/issues/320)) ([b42b1a7](https://github.com/namecheap/terraform-provider-namecheap/commit/b42b1a715febbba1e19228290ab2566955735bea))
+
 ## [2.8.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.7.0...v2.8.0) (2026-08-12)
 
 
