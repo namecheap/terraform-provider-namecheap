@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.1](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.0...v2.9.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/stretchr/testify from 1.11.1 to 1.12.0 ([#322](https://github.com/namecheap/terraform-provider-namecheap/issues/322)) ([7abe284](https://github.com/namecheap/terraform-provider-namecheap/commit/7abe2843860c15895d09849f3896e79b7d90a41d))
+
 ## [2.9.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.8.0...v2.9.0) (2026-08-14)
 
 
