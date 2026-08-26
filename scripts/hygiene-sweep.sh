@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Warm-pool runners reuse the same disk across jobs (job N+1 runs on job N's
-# disk), so repo code, per-job $HOME, and stray dotfiles must never survive
-# outside the run that created them. "pre" self-heals a crashed/cancelled
-# prior run (which would have skipped its own if: always() cleanup) by
-# warning and wiping any leftover content before the new job uses the path.
-# "post" silently wipes the same paths at the end of every job so nothing
-# sits on the stopped instance's disk during the idle window until the next
+# Repo code, per-job $HOME, and stray dotfiles must never survive outside
+# the run that created them (defense in depth kept from the warm-pool era,
+# when job N+1 ran on job N's disk; each run now gets a fresh instance).
+# "pre" self-heals a crashed/cancelled prior run (which would have skipped
+# its own if: always() cleanup) by warning and wiping any leftover content
+# before the new job uses the path. "post" silently wipes the same paths at
+# the end of every job so nothing sits on the instance's disk after the
 # run. Both modes leave every listed path existing and empty, so a healthy
 # prior run's "post" is exactly what makes the next run's "pre" find nothing
 # to warn about.

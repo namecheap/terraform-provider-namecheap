@@ -186,21 +186,19 @@ The live-API sandbox suite (`acceptance_test`, on the self-hosted EC2 runner) is
 fork PRs. So for a fork contribution, the mock suite is the acceptance signal;
 a maintainer validates against the live sandbox before merge.
 
-Since #279, the self-hosted EC2 runner behind `acceptance_test` is kept in a
-warm pool: it's stopped (not terminated) after each push and reused by the
-next one, so most pushes warm-start in seconds instead of paying the cold-boot
-tax every time. A full ~2-4 minute cold boot still happens on the first push
-after the nightly drain, or once the runner's 360-minute/20-cycle warm-reuse
-limit is hit. This is only possible because the sandbox pipeline is
-push-only and never runs fork/PR code, as above — that's what makes it safe
-for one job's disk to carry over to the next; fork PRs keep going through
-`acceptance_mock`, unchanged either way. Per-job disk (the checked-out
-workspace, `$HOME`, dotfiles) is wiped both before and after every run — only
-the Go/Terraform toolchain and build caches persist across a stop/start
-cycle. To force a clean cold boot (e.g. while debugging a toolchain issue),
-trigger [`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml)
-via `workflow_dispatch` with `mode: nightly-drain`; leave `dry_run: true`
-(the default) to preview what it would do first.
+The self-hosted EC2 runner behind `acceptance_test` is launched fresh for
+every run and terminated afterwards, so each job starts from a pristine
+disk. (The #279 warm pool — stop/start reuse between runs — was removed
+under DEVOPS-22119: on this repo's baked AMI a warm restart measured no
+faster than the ~70-second cold launch, while parking the instance added a
+stop-wait to every run.) Fork PRs keep going through `acceptance_mock`,
+unchanged. Per-job disk (the checked-out workspace, `$HOME`, dotfiles) is
+still wiped both before and after every run as defense in depth. A scheduled
+leak reaper
+([`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml),
+every 30 minutes; `workflow_dispatch` with `dry_run: true` by default for a
+manual preview) terminates any instance a crashed or cancelled run leaves
+behind.
 
 Definition of done for a change to provider behavior: unit tests **and** a
 mock-backed `TestAccMock*` case cover it, and both pass locally

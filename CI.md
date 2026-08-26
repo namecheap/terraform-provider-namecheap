@@ -15,7 +15,7 @@ mechanics.
 | Versioning | `.github/workflows/versioning.yml` | After every CI run on `master` (`workflow_run`), manual | release-please: opens/updates the Release PR; creates the `vX.Y.Z` tag when it merges |
 | Release | `.github/workflows/release.yml` | Push of a `v*` tag | GoReleaser: builds, GPG-signs, attests and publishes binaries + release SBOM |
 | PR Title Check | `.github/workflows/pr-title.yml` | PR | Enforces Conventional Commit PR titles (they become the squash-commit subjects release-please reads) |
-| Cleanup EC2 runners | `.github/workflows/cleanup-ec2-runners.yml` | Cron (nightly drain + 30-min leak reaper), manual | Lifecycle backstop for the warm-pool sandbox runner |
+| Cleanup EC2 runners | `.github/workflows/cleanup-ec2-runners.yml` | Cron (30-min leak reaper), manual | Terminates EC2 runner instances leaked by crashed/cancelled runs |
 
 Checks that live outside these workflows: CodeQL (GitHub default setup), the
 DCO bot, and the `security/snyk (Namecheap)` integration.
@@ -96,8 +96,8 @@ condition and is **not** gated on `changes`: `always()` keeps the condition
 evaluating even when `start-runner` was skipped by the gate, and the empty
 `ec2-instance-id` output then makes it skip cleanly instead of failing or
 hanging. Conversely, whenever a runner **was** started, stop-runner still runs
-regardless of anything else in the run. The nightly
-`cleanup-ec2-runners.yml` drain is unaffected either way.
+regardless of anything else in the run. The scheduled
+`cleanup-ec2-runners.yml` leak reaper is unaffected either way.
 
 ### The CI OK job
 
@@ -124,7 +124,7 @@ its watch. It exists because:
 For every Release PR and every Release-PR merge, the gate removes: a full
 hosted-runner pass (check + docs + two security scans + summary), one
 start/stop cycle of the EC2 sandbox runner (billed instance time plus the
-cold-boot or warm-start overhead), one pass of the ~10-minute live sandbox
+boot overhead), one pass of the ~10-minute live sandbox
 suite, and one slot in the single-EIP acceptance queue. Post-merge release
 latency drops accordingly: after merging a Release PR, CI concludes in
 under a minute instead of after a full acceptance pass, so the tag and

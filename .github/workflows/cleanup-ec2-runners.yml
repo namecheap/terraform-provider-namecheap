@@ -1,51 +1,25 @@
 name: Cleanup EC2 runners
 
-# Daily lifecycle backstop for the warm-pool sandbox runner started in ci.yml
-# (see start-runner / stop-runner, `reuse: stop` + `reuse-pool-tag:
-# sandbox-acceptance`). A warm/stopped instance is never re-terminated by its
-# own TTL on subsequent warm boots (max-lifetime-minutes only arms on the
-# FIRST cold boot), so something outside ci.yml has to guarantee the pool is
-# drained at least once a day (G7) and that crashed/cancelled leftovers don't
-# linger for hours (belt-and-braces on top of ci.yml's own pre/post hygiene
-# sweeps). EIP release for the warm-pool instance now happens exclusively as
-# an automatic AWS side effect of instance termination, which only occurs
-# here, in the nightly full drain below -- the EIP (eipalloc-1796f61b, this
-# repo's dedicated whitelisted sandbox IP) stays attached to the pool instance
-# across every warm stop/start cycle in between. This workflow never touches
-# the EIP directly.
+# Lifecycle backstop for the ephemeral sandbox runner started in ci.yml (see
+# start-runner / stop-runner). Every run launches a fresh instance and
+# terminates it in stop-runner, so under normal operation there is nothing to
+# clean up; this reaper catches crashed/cancelled leftovers (a stop-runner
+# that never ran, a wedged bootstrap) so they don't bill for hours (G7). EIP
+# release happens as an automatic AWS side effect of instance termination;
+# this workflow never touches the EIP directly.
 #
-# Two passes share this one workflow:
-#   - nightly full drain (7 23 * * * UTC, i.e. right after the working day
-#     ends; :07 offset from the top of the hour per the same GitHub
-#     scheduling-congestion advice as the leak reaper below -- and observed
-#     schedule delays run to hours, so an early-off-peak slot keeps the drain
-#     landing well before the next workday starts): tiny
-#     reaper-stopped-max-age so the day's pool instance -- stopped anywhere
-#     from seconds to ~24h earlier -- is always past the threshold and gets
-#     terminated.
-#   - leak reaper (7,37 * * * * UTC, i.e. every 30 min offset from :00/:30 per
-#     GitHub's documented advice on avoiding top-of-hour/half-hour scheduling
-#     congestion): the action's own default reaper-stopped-max-age, catching
-#     crashed/cancelled leftovers without draining the warm pool mid-day.
+# Schedule: every 30 min at :07/:37 UTC, offset from :00/:30 per GitHub's
+# documented advice on avoiding top-of-hour/half-hour scheduling congestion.
+# The action's own default thresholds apply.
 #
-# workflow_dispatch lets either pass be triggered/inspected manually, and
+# workflow_dispatch lets the reaper be triggered/inspected manually, and
 # defaults to dry-run so an operator can preview behavior before relying on
-# the schedules (see the issue's verification plan).
+# the schedule.
 on:
   schedule:
-    - cron: "7 23 * * *" # nightly full drain, UTC (end of workday)
     - cron: "7,37 * * * *" # leak reaper, every 30 min, UTC
   workflow_dispatch:
     inputs:
-      mode:
-        description: >-
-          Which pass to run. Ignored on schedule-triggered runs, where the
-          pass is derived from which cron fired (see "Determine pass" below).
-        type: choice
-        options:
-          - nightly-drain
-          - leak-reap
-        default: leak-reap
       dry_run:
         description: >-
           Preview what would run without calling any live cleanup action.
@@ -78,63 +52,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Determine pass
-        id: pass
-        # The cron strings below must match `on.schedule` above byte-for-byte
-        # -- this is the only place cron strings are compared. A
-        # workflow_dispatch run (github.event.schedule unset) falls through
-        # to the manually-chosen mode. github.event.schedule / inputs.mode are
-        # passed in via `env:` rather than interpolated directly into the
-        # shell script, per the repo-wide "no ${{ github.event.* }} in run:"
-        # rule in SECURITY_COMPLIANCE.md (this value is never fork/attacker
-        # controlled -- it's one of this same workflow's own cron strings, or
-        # unset -- but keeping the pattern consistent costs nothing).
-        env:
-          EVENT_SCHEDULE: ${{ github.event.schedule }}
-          DISPATCH_MODE: ${{ inputs.mode }}
-        run: |
-          if [ "${EVENT_SCHEDULE}" = "7 23 * * *" ]; then
-            echo "kind=nightly-drain" >> "$GITHUB_OUTPUT"
-          elif [ "${EVENT_SCHEDULE}" = "7,37 * * * *" ]; then
-            echo "kind=leak-reap" >> "$GITHUB_OUTPUT"
-          else
-            echo "kind=${DISPATCH_MODE}" >> "$GITHUB_OUTPUT"
-          fi
-
       # Dry-run guards are written as explicit boolean expressions rather than
-      # relying on `inputs.dry_run != true` truthiness/coercion: every live
-      # step's condition is `(schedule-triggered OR dry_run explicitly false)`
-      # ANDed with the matching pass kind; every placeholder step negates only
-      # the schedule/dry_run half, keeping the same kind check, so exactly one
-      # of the two ever fires for a given pass.
-
-      - name: Nightly full drain
-        if: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'nightly-drain' }}
-        # reaper-stopped-max-age is deliberately tiny (1) so the day's pool
-        # instance -- stopped anywhere from seconds to ~24h earlier -- is
-        # always older than the threshold and gets terminated.
-        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
-        with:
-          mode: cleanup
-          github-token: ${{ steps.app-token.outputs.token }}
-          reaper-stopped-max-age: 1
-
-      - name: Nightly full drain (dry run)
-        if: ${{ !(github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'nightly-drain' }}
-        run: |
-          echo "DRY RUN: would run mode:cleanup reaper-stopped-max-age=1"
+      # relying on `inputs.dry_run != true` truthiness/coercion: the live step
+      # runs when schedule-triggered OR dry_run is explicitly false; the
+      # placeholder negates exactly that, so exactly one of the two ever fires.
 
       - name: Leak reaper
-        # No reaper-stopped-max-age override here -- the action's own default
-        # threshold applies, per the issue's "default thresholds" requirement
-        # for this pass.
-        if: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'leak-reap' }}
-        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false }}
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}
 
       - name: Leak reaper (dry run)
-        if: ${{ !(github.event_name == 'schedule' || inputs.dry_run == false) && steps.pass.outputs.kind == 'leak-reap' }}
+        if: ${{ !(github.event_name == 'schedule' || inputs.dry_run == false) }}
         run: |
-          echo "DRY RUN: would run mode:cleanup (default reaper-stopped-max-age)"
+          echo "DRY RUN: would run mode:cleanup (default thresholds)"
