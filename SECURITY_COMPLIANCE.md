@@ -203,7 +203,11 @@ below for the lifecycle/cleanup/EIP mechanics:
   `ahmadnassri/action-workflow-queue` (a single EIP can't serve two runners at
   once); there is no explicit release step anywhere — release happens as an
   automatic AWS side effect of `stop-runner` terminating the instance at the
-  end of every run (or of the leak reaper terminating a leaked one).
+  end of every run (or of the leak reaper terminating a leaked one). Because
+  that release only lands when the old instance reaches `terminated`,
+  `start-runner`'s "Wait for the sandbox EIP to be free" step polls
+  `DescribeAddresses` before launching, so a back-to-back run doesn't race
+  the previous instance's shutdown for the association.
 - **IAM prerequisite.** The CI AWS identity (`sys_github_runner_provisioner`)
   needs the full set below for the EIP + diagnostics model; an
   admin granting less will hit `UnauthorizedOperation` mid-cycle (see the

@@ -585,6 +585,33 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+      - name: Wait for the sandbox EIP to be free
+        # stop-runner's terminate is fire-and-forget, and the workflow queue
+        # above only waits for the older RUN to finish -- not for its
+        # instance to reach `terminated`, which is when AWS auto-releases
+        # the EIP. A back-to-back run can therefore arrive here while the
+        # previous instance is still shutting down with the EIP attached.
+        # The action's own AssociateAddress does not set AllowReassociation
+        # and swallows the failure with a warning, so the run would only
+        # fail later (and less obviously) at acceptance_test's "Verify
+        # sandbox EIP" gate. Poll here instead: a single read-only
+        # DescribeAddresses call when the EIP is already free (the common
+        # case), a short wait only under genuine back-to-back contention.
+        # On timeout, proceed anyway -- the action will warn and the verify
+        # gate still fails cleanly.
+        run: |
+          for i in $(seq 1 24); do
+            assoc="$(aws ec2 describe-addresses \
+              --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
+              --query 'Addresses[0].AssociationId' --output text)"
+            if [ -z "$assoc" ] || [ "$assoc" = "None" ]; then
+              echo "Sandbox EIP is free."
+              exit 0
+            fi
+            echo "Sandbox EIP still associated (${assoc}); waiting for the previous instance to finish terminating (${i}/24)..."
+            sleep 5
+          done
+          echo "::warning::Sandbox EIP still associated after 120s; proceeding — the launch will warn and the acceptance \"Verify sandbox EIP\" gate will fail cleanly if the association cannot be made."
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
