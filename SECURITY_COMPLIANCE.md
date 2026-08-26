@@ -229,13 +229,22 @@ below for the lifecycle/cleanup/EIP mechanics:
     output — the exact symptom seen earlier in this PR).
 - **Leak reaper.**
   [`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml) runs
-  `mode: cleanup` every 30 minutes (`7,37 * * * *` UTC, the action's default
-  thresholds) to terminate crashed/cancelled leftovers whose stop-runner
-  never ran. (The former nightly full-drain pass existed only to empty the
-  warm pool and was removed with it.) The reaper never touches the EIP
-  directly — it is released as an automatic AWS side effect of instance
-  termination. `workflow_dispatch` exposes a `dry_run` input (default
-  `true`) for safe manual runs.
+  `mode: cleanup` every 30 minutes (`7,37 * * * *` UTC) to terminate
+  leftovers whose stop-runner never ran. (The former nightly full-drain pass
+  existed only to empty the warm pool and was removed with it.) Because the
+  single whitelisted EIP makes any leaked instance an acceptance *outage*
+  rather than just a billing leak, both thresholds are set tighter than the
+  action's defaults: `reaper-stopped-max-age: 1` (nothing legitimate is ever
+  `stopped` in terminate-per-run mode, so a stopped instance — e.g. a legacy
+  warm-pool leftover parked by a pre-cutover run, EIP still attached — is
+  drained on the next tick instead of blocking every run for up to ~24h at
+  the 1440 default) and `max-age-minutes: 20` (a leaked *running* instance
+  is reaped within ~20 min + the 30-min cadence + schedule lag, worst case
+  ~1h, instead of ~2.5h at the 120 default; busy runners are never reaped
+  and the action's 15-min grace floor protects in-flight starts). The
+  reaper never touches the EIP directly — it is released as an automatic
+  AWS side effect of instance termination. `workflow_dispatch` exposes a
+  `dry_run` input (default `true`) for safe manual runs.
 - **One EIP per repo (no cross-repo mutex).** `eipalloc-1796f61b` was
   previously shared with `namecheap/mcp-server-namecheap`'s acceptance
   workflow, which could silently reassociate ("steal") it mid-run. That is

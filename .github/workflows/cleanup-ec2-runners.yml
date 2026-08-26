@@ -10,7 +10,24 @@ name: Cleanup EC2 runners
 #
 # Schedule: every 30 min at :07/:37 UTC, offset from :00/:30 per GitHub's
 # documented advice on avoiding top-of-hour/half-hour scheduling congestion.
-# The action's own default thresholds apply.
+#
+# Thresholds are deliberately tighter than the action's defaults, because
+# with a single whitelisted EIP a leaked instance is an acceptance OUTAGE
+# (it holds the EIP every run needs), not just a billing leak:
+#   - reaper-stopped-max-age: 1 — nothing legitimate is ever `stopped` in
+#     terminate-per-run mode (cold launch / terminate / TTL / cleanup never
+#     call StopInstances), so any stopped instance is a legacy warm-pool
+#     leftover (parked by a pre-cutover master/branch run, EIP still
+#     attached) or an anomaly; drain it on the next tick. At the action's
+#     1440 default such an instance would block every acceptance run for up
+#     to ~24h (decideReap skips `stopped` within max-age before any runner
+#     check).
+#   - max-age-minutes: 20 — a leaked RUNNING instance (start-runner killed
+#     after launch, wedged job) is reaped within ~20 min + the 30-min cron
+#     cadence + schedule lag (worst case ~1h) instead of the default 120's
+#     ~2.5h. Safe: busy runners are never reaped, and deregistered-runner
+#     reaping has the action's 15-min grace floor protecting in-flight
+#     starts.
 #
 # workflow_dispatch lets the reaper be triggered/inspected manually, and
 # defaults to dry-run so an operator can preview behavior before relying on
@@ -63,8 +80,13 @@ jobs:
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}
+          # See the header comment for why both thresholds are tighter than
+          # the action's defaults (single-EIP outage math, legacy warm-pool
+          # leftovers).
+          reaper-stopped-max-age: 1
+          max-age-minutes: 20
 
       - name: Leak reaper (dry run)
         if: ${{ !(github.event_name == 'schedule' || inputs.dry_run == false) }}
         run: |
-          echo "DRY RUN: would run mode:cleanup (default thresholds)"
+          echo "DRY RUN: would run mode:cleanup reaper-stopped-max-age=1 max-age-minutes=20"
