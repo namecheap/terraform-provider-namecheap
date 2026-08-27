@@ -485,7 +485,7 @@ jobs:
           - engine: terraform
             version: "1.5.7" # minimum supported Terraform
           - engine: terraform
-            version: "1.15.5" # latest pinned series (mirrors the sandbox job)
+            version: "1.16.0" # latest pinned series (mirrors the sandbox job)
           - engine: opentofu
             version: "1.12.3" # latest OpenTofu
     steps:
@@ -733,8 +733,8 @@ jobs:
           # are picked up automatically and never fail. A newer minor/major
           # release (1.16.0, 2.0.0) fails the build instead, so a maintainer can
           # review possible behavior changes before bumping tf_minor/tf_fallback.
-          tf_minor="1.15"
-          tf_fallback="1.15.5" # install target when the lookup is unavailable
+          tf_minor="1.16"
+          tf_fallback="1.16.0" # install target when the lookup is unavailable
           # checkpoint API == the source `terraform` itself uses for upgrade
           # notices (stable GA only, never RCs); current_version is the newest
           # stable, so when our series is current it IS the latest patch.
