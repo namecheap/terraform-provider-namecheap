@@ -561,14 +561,13 @@ jobs:
       public-ip: ${{ steps.eip-ip.outputs.public-ip }}
     steps:
       - name: Wait for older acceptance runs to finish (single sandbox EIP)
-        # The acceptance pipeline uses one whitelisted Elastic IP and one
-        # warm-pool instance; two runs at once would both try to attach that
-        # EIP and start that instance, fighting over them. Queue this run (FIFO,
-        # no cancellation) behind any older in-progress CI run so only one holds
-        # the sandbox EIP at a time. The older run frees it when its stop-runner
-        # stops the pooled instance (reuse: stop, not terminate — the EIP stays
-        # attached to the stopped instance); this run's "Pre-attach sandbox EIP"
-        # step then re-attaches it before start-up.
+        # The acceptance pipeline uses one whitelisted Elastic IP; two runs at
+        # once would both try to associate it. Queue this run (FIFO, no
+        # cancellation) behind any older in-progress CI run so only one holds
+        # the sandbox EIP at a time. The older run frees it when its
+        # stop-runner terminates the instance (termination auto-disassociates
+        # the EIP back to the account); this run's launch then associates it
+        # via eip-allocation-id.
         uses: ahmadnassri/action-workflow-queue@542658b3a8270cac81ae15d401b0d974732808ac # v1.2.0
         with:
           timeout: 1800000 # 30 min cap for a backlog of queued acceptance runs
@@ -586,67 +585,36 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-      - name: Pre-attach sandbox EIP to the warm-pool instance
-        # Warm-restart fix. The action associates the EIP itself only on a COLD
-        # launch (eip-allocation-id); on a warm restart it just StartInstances
-        # the pooled instance and assumes the EIP is still attached -- but it
-        # can drift off while the instance sits stopped, landing the runner on a
-        # non-whitelisted auto-assigned IP. Associating AFTER mode:start is not
-        # an option: it changes the public IP of an already-registered runner
-        # and severs its connection to GitHub (the job then hangs). So attach
-        # the EIP to the stopped pool instance HERE, before the action starts
-        # it, so it boots with the whitelisted IP and registers on it.
-        #
-        # The filter also matches `stopping` (unlike the action's own
-        # findStoppedPoolInstance, which matches `stopped` only): the previous
-        # run's stop-runner can return while its instance is still stopping,
-        # and a run queued right behind it would then see an "empty" pool and
-        # cold-launch a duplicate that nothing drains until the nightly pass
-        # (observed 2026-07-10: stop at 08:45:51, next run's lookup at
-        # 08:46:04 -> pool_empty -> second instance all day). When the chosen
-        # instance is still stopping, wait for it to finish stopping so the
-        # action's own lookup finds it. ec2-github-runner#69 fixes the same
-        # race action-side (mode:stop waits for `stopped`); this is the
-        # consumer-side belt to that suspender, and it also covers older
-        # action pins. No match => cold launch, where eip-allocation-id
-        # handles association.
-        env:
-          POOL_TAG: sandbox-acceptance
-          INSTANCE_TYPE: t3.medium
+      - name: Wait for the sandbox EIP to be free
+        # stop-runner's terminate is fire-and-forget, and the workflow queue
+        # above only waits for the older RUN to finish -- not for its
+        # instance to reach `terminated`, which is when AWS auto-releases
+        # the EIP. A back-to-back run can therefore arrive here while the
+        # previous instance is still shutting down with the EIP attached.
+        # The action's own AssociateAddress does not set AllowReassociation
+        # and swallows the failure with a warning, so the run would only
+        # fail later (and less obviously) at acceptance_test's "Verify
+        # sandbox EIP" gate. Poll here instead: a single read-only
+        # DescribeAddresses call when the EIP is already free (the common
+        # case), a short wait only under genuine back-to-back contention.
+        # On timeout, proceed anyway -- the action will warn and the verify
+        # gate still fails cleanly.
         run: |
-          pairs="$(aws ec2 describe-instances \
-            --filters "Name=tag:ec2-github-runner:managed,Values=true" \
-                      "Name=tag:ec2-github-runner:repository,Values=${GITHUB_REPOSITORY}" \
-                      "Name=tag:ec2-github-runner:pool,Values=${POOL_TAG}" \
-                      "Name=instance-state-name,Values=stopped,stopping" \
-                      "Name=instance-type,Values=${INSTANCE_TYPE}" \
-            --query 'Reservations[].Instances[].[InstanceId,State.Name]' --output text)"
-          count="$(printf '%s' "$pairs" | grep -c . || true)"
-          if [ "$count" = "0" ]; then
-            echo "No stopped or stopping warm-pool instance; cold launch will associate the EIP via eip-allocation-id."
-            exit 0
-          fi
-          if [ "$count" != "1" ]; then
-            echo "::warning::Found ${count} warm-pool instances ($(printf '%s' "$pairs" | tr '\n\t' ' :')); the reaper is not draining them. Pre-attaching to the first reusable one; the acceptance \"Verify sandbox EIP\" gate will fail cleanly if the action reuses a different one."
-          fi
-          # Prefer an already-stopped instance (no wait); otherwise take the
-          # stopping one and wait out its transition.
-          target="$(printf '%s\n' "$pairs" | awk '$2 == "stopped" { print $1; exit }')"
-          if [ -z "$target" ]; then
-            target="$(printf '%s\n' "$pairs" | awk '$2 == "stopping" { print $1; exit }')"
-            echo "Warm-pool instance ${target} is still stopping; waiting for it to reach stopped."
-            if ! aws ec2 wait instance-stopped --instance-ids "$target"; then
-              echo "::warning::Instance ${target} did not reach stopped in time; falling back to a cold launch (eip-allocation-id associates the EIP there). The stuck instance is left for the reaper."
+          for i in $(seq 1 24); do
+            assoc="$(aws ec2 describe-addresses \
+              --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
+              --query 'Addresses[0].AssociationId' --output text)"
+            if [ -z "$assoc" ] || [ "$assoc" = "None" ]; then
+              echo "Sandbox EIP is free."
               exit 0
             fi
-          fi
-          aws ec2 associate-address \
-            --allocation-id "$SANDBOX_EIP_ALLOCATION_ID" \
-            --instance-id "$target" --allow-reassociation >/dev/null
-          echo "Pre-attached ${SANDBOX_EIP_ALLOCATION_ID} to stopped warm-pool instance ${target}."
+            echo "Sandbox EIP still associated (${assoc}); waiting for the previous instance to finish terminating (${i}/24)..."
+            sleep 5
+          done
+          echo "::warning::Sandbox EIP still associated after 120s; proceeding — the launch will warn and the acceptance \"Verify sandbox EIP\" gate will fail cleanly if the association cannot be made."
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
         with:
           mode: start
           github-token: ${{ steps.app-token.outputs.token }}
@@ -658,32 +626,25 @@ jobs:
           ec2-instance-type: t3.medium
           subnet-id: subnet-01c4ff5a
           security-group-id: sg-106ec76d
-          reuse: stop
-          reuse-pool-tag: sandbox-acceptance
           iam-role-name: AmazonSSMRoleForInstancesQuickSetup
           # SSE-EBS on the runner's root volume. Uses the launch
           # account's default aws/ebs KMS key; AMI snapshot-id is
           # dropped so AWS re-encrypts at launch time.
           encrypt-ebs: "true"
-          # Runs once, as root, on the cold-launch bootstrap only (not on
-          # every warm restart) -- but /opt/ci persists across stop/start on
-          # the same root volume, so a one-time chown here is all the
-          # unprivileged `runner` user needs to create JOB_HOME under it for
-          # every subsequent job. Without this, scripts/hygiene-sweep.sh's
-          # `mkdir -p /opt/ci/jobs/current` fails outright: /opt is root-owned
-          # 755, and the actions-runner process (and everything run.sh spawns)
-          # runs as the unprivileged `runner` user, which has no write access
-          # to create a new directory directly under /opt.
+          # Runs once, as root, during the launch bootstrap. Without this,
+          # scripts/hygiene-sweep.sh's `mkdir -p /opt/ci/jobs/current` fails
+          # outright: /opt is root-owned 755, and the actions-runner process
+          # (and everything run.sh spawns) runs as the unprivileged `runner`
+          # user, which has no write access to create a new directory
+          # directly under /opt.
           pre-runner-script: |
             mkdir -p /opt/ci
             chown -R runner:runner /opt/ci
           # The action associates this EIP early in its own bootstrap, which is
           # what gives the instance outbound internet connectivity while it
-          # registers the runner -- on a cold launch, and (since the EIP is left
-          # attached across stop/start) implicitly on a warm restart too. The
-          # single whitelisted sandbox EIP is also what the Namecheap sandbox
-          # API allows, so this association is load-bearing for the acceptance
-          # tests, not just for bootstrap.
+          # registers the runner. The single whitelisted sandbox EIP is also
+          # what the Namecheap sandbox API allows, so this association is
+          # load-bearing for the acceptance tests, not just for bootstrap.
           eip-allocation-id: ${{ env.SANDBOX_EIP_ALLOCATION_ID }}
           aws-resource-tags: >
             [
@@ -696,10 +657,9 @@ jobs:
         # the source of truth for the IP the Namecheap sandbox API allows) so
         # acceptance_test's credential-free "Verify sandbox EIP" gate can check
         # the runner's actual public IP against it. The EIP is already attached
-        # by this point -- via eip-allocation-id on a cold launch, or the
-        # "Pre-attach sandbox EIP" step above on a warm restart -- so this only
-        # reads and publishes; it never re-associates a running/registered
-        # instance (doing so would change its IP and sever the runner).
+        # by this point via eip-allocation-id, so this only reads and
+        # publishes; it never re-associates a running/registered instance
+        # (doing so would change its IP and sever the runner).
         run: |
           ip="$(aws ec2 describe-addresses \
             --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
@@ -722,7 +682,7 @@ jobs:
       # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
       # Runs before our own scripts exist on disk, so it — not a custom
       # pre-checkout script — is what guarantees a clean $GITHUB_WORKSPACE at
-      # the start of every run, warm-pool reuse included.
+      # the start of every run.
       - uses: actions/checkout@v7
         with:
           clean: true
@@ -737,8 +697,8 @@ jobs:
         # terraform-plugin-testing's scratch dirs both default to $TMPDIR, and
         # without this they'd write to /tmp, which neither this sweep nor the
         # post-job sweep below ever touches -- leaving test artifacts/tfstate
-        # on the reused warm-pool disk. Nesting it under JOB_HOME means it's
-        # wiped for free by the same pre/post sweep of that path.
+        # outside the swept path. Nesting it under JOB_HOME means it's wiped
+        # for free by the same pre/post sweep of that path.
         run: |
           scripts/hygiene-sweep.sh pre /opt/ci/jobs/current
           mkdir -p /opt/ci/jobs/current/tmp
@@ -946,11 +906,9 @@ jobs:
         # "Configure AWS credentials" above doesn't skip stopping the
         # instance.
         if: always()
-        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2 @ 2026-07-10: warm-pool reuse:stop reliability fixes (#67/#68/#69)
+        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
         with:
           mode: stop
-          reuse: stop
-          reuse-pool-tag: sandbox-acceptance
           github-token: ${{ steps.app-token.outputs.token }}
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
