@@ -69,13 +69,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # Dry-run guards are written as explicit boolean expressions rather than
-      # relying on `inputs.dry_run != true` truthiness/coercion: the live step
-      # runs when schedule-triggered OR dry_run is explicitly false; the
-      # placeholder negates exactly that, so exactly one of the two ever fires.
-
       - name: Leak reaper
-        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false }}
         uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
         with:
           mode: cleanup
@@ -85,8 +79,11 @@ jobs:
           # leftovers).
           reaper-stopped-max-age: 1
           max-age-minutes: 20
-
-      - name: Leak reaper (dry run)
-        if: ${{ !(github.event_name == 'schedule' || inputs.dry_run == false) }}
-        run: |
-          echo "DRY RUN: would run mode:cleanup reaper-stopped-max-age=1 max-age-minutes=20"
+          # Schedule runs are always live; manual dispatch defaults to a
+          # preview unless the operator flips dry_run off. This is the
+          # action's own dry-run (would-reap table, no terminations), not an
+          # echo placeholder — so a manual preview exercises the App token,
+          # the AWS credentials, and the real decision logic, and a broken
+          # credential is caught by a preview instead of by the next live
+          # scheduled run.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
