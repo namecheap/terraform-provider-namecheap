@@ -601,9 +601,18 @@ jobs:
         # gate still fails cleanly.
         run: |
           for i in $(seq 1 24); do
-            assoc="$(aws ec2 describe-addresses \
+            # Assignment inside the condition so a CLI failure (throttling,
+            # expired token, network blip) is handled here instead of
+            # aborting the whole job under the shell's -e: this step's
+            # contract is poll, warn, proceed — never turn a lookup hiccup
+            # into a red run of its own.
+            if ! assoc="$(aws ec2 describe-addresses \
               --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
-              --query 'Addresses[0].AssociationId' --output text)"
+              --query 'Addresses[0].AssociationId' --output text)"; then
+              echo "::warning::describe-addresses failed (attempt ${i}/24); retrying."
+              sleep 5
+              continue
+            fi
             if [ -z "$assoc" ] || [ "$assoc" = "None" ]; then
               echo "Sandbox EIP is free."
               exit 0
