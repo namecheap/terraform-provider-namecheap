@@ -163,8 +163,9 @@ below for the lifecycle/cleanup/EIP mechanics:
   launch, while parking the instance added a 22-152s stop-wait to every run
   and an EIP-drift failure class. A fresh disk per run also removes the
   job-N+1-runs-on-job-N's-disk state carry-over the warm pool had to
-  document and sweep around; the sandbox pipeline remains **push-only and
-  never runs fork/PR code** (see
+  document and sweep around; the sandbox pipeline **never runs fork
+  (untrusted) code** — it runs only for same-repo pull requests, pushes to
+  master, and manual dispatch (see
   [fork-safe PR gating](#fork-safe-pull-request-ci) below). The action's
   `max-lifetime-minutes` TTL (default 360) still arms on every launch as a
   self-destruct backstop for instances whose stop-runner never ran.
@@ -268,9 +269,11 @@ secrets:
 - The trigger is `pull_request`, **never `pull_request_target`** — fork code runs
   only on GitHub-hosted runners with a read-only token and `secrets.*` redacted.
 - The secret-bound EC2 sandbox jobs (`start-runner`, `acceptance_test`,
-  `stop-runner`) are gated `github.event_name == 'push'`, so untrusted fork code
-  never reaches the self-hosted runner, the whitelisted Elastic IP, or the AWS /
-  Namecheap credentials. They keep running on every in-repo push, unchanged.
+  `stop-runner`) are gated on trusted code only: same-repo `pull_request`
+  events (`head.repo.full_name == github.repository`), pushes to master, and
+  `workflow_dispatch` — never Dependabot, never fork PRs. Untrusted fork code
+  therefore never reaches the self-hosted runner, the whitelisted Elastic IP,
+  or the AWS / Namecheap credentials.
 - The `acceptance_mock` job provides the fork-facing acceptance signal: it runs
   on `pull_request` on GitHub-hosted `ubuntu-latest`, references no `secrets.*`,
   and drives the in-process mock (see
