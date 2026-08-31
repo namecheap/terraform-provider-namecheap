@@ -5,7 +5,7 @@ require (
 	github.com/hashicorp/terraform-plugin-log v0.11.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
-	github.com/namecheap/go-namecheap-sdk/v2 v2.10.2
+	github.com/namecheap/go-namecheap-sdk/v2 v2.10.3
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -88,6 +88,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-go 1.26.3
+go 1.26.6
 
 tool github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
