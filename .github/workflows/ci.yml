@@ -597,8 +597,14 @@ jobs:
         # sandbox EIP" gate. Poll here instead: a single read-only
         # DescribeAddresses call when the EIP is already free (the common
         # case), a short wait only under genuine back-to-back contention.
-        # On timeout, proceed anyway -- the action will warn and the verify
-        # gate still fails cleanly.
+        # On timeout, proceed anyway: if the EIP is still attached at launch
+        # the action's AssociateAddress fails warn-only, the instance boots
+        # without its whitelisted egress IP (the EIP is its only egress
+        # during bootstrap), the runner never registers, and start-runner
+        # fails on the action's ~5.5-min registration timeout with the
+        # instance terminated by cleanup-on-start-failure. Only if the
+        # subnet auto-assigns a public IP does the run instead reach
+        # acceptance_test's "Verify sandbox EIP" gate.
         run: |
           for i in $(seq 1 24); do
             # Assignment inside the condition so a CLI failure (throttling,
@@ -620,7 +626,7 @@ jobs:
             echo "Sandbox EIP still associated (${assoc}); waiting for the previous instance to finish terminating (${i}/24)..."
             sleep 5
           done
-          echo "::warning::Sandbox EIP still associated after 120s; proceeding — the launch will warn and the acceptance \"Verify sandbox EIP\" gate will fail cleanly if the association cannot be made."
+          echo "::warning::Sandbox EIP still associated after 120s; proceeding. If it is still attached at launch, AssociateAddress fails warn-only and the instance boots without its whitelisted egress IP — expect start-runner to fail at the action's registration timeout (or, with an auto-assigned public IP, at the acceptance \"Verify sandbox EIP\" gate)."
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
@@ -665,16 +671,27 @@ jobs:
         # Publish the whitelisted EIP's public IP (from the allocation itself,
         # the source of truth for the IP the Namecheap sandbox API allows) so
         # acceptance_test's credential-free "Verify sandbox EIP" gate can check
-        # the runner's actual public IP against it. The EIP is already attached
-        # by this point via eip-allocation-id, so this only reads and
-        # publishes; it never re-associates a running/registered instance
-        # (doing so would change its IP and sever the runner).
+        # the runner's actual public IP against it. Also ASSERT the
+        # association: the action's AssociateAddress is warn-only, so without
+        # this check start-runner could report success while the EIP points
+        # at some other (or no) instance and the failure would surface later
+        # and less legibly. This step still only reads; it never
+        # re-associates a running/registered instance (doing so would change
+        # its IP and sever the runner).
+        env:
+          LAUNCHED_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
         run: |
-          ip="$(aws ec2 describe-addresses \
+          out="$(aws ec2 describe-addresses \
             --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
-            --query 'Addresses[0].PublicIp' --output text)"
+            --query 'Addresses[0].[PublicIp,InstanceId]' --output text)"
+          ip="$(printf '%s' "$out" | cut -f1)"
+          assoc_instance="$(printf '%s' "$out" | cut -f2)"
           if [ -z "$ip" ] || [ "$ip" = "None" ]; then
             echo "::error::Could not resolve a public IP for allocation ${SANDBOX_EIP_ALLOCATION_ID}."
+            exit 1
+          fi
+          if [ "$assoc_instance" != "$LAUNCHED_INSTANCE_ID" ]; then
+            echo "::error::Sandbox EIP ${SANDBOX_EIP_ALLOCATION_ID} is associated with '${assoc_instance}', not the launched runner instance '${LAUNCHED_INSTANCE_ID}' — the action's warn-only AssociateAddress did not take effect."
             exit 1
           fi
           echo "public-ip=${ip}" >> "$GITHUB_OUTPUT"
