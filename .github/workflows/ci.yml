@@ -586,47 +586,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Wait for the sandbox EIP to be free
-        # TEMPORARY consumer-side shim for namecheap/ec2-github-runner#76:
-        # the action's AssociateAddress has no retry, no AllowReassociation,
-        # and downgrades failure to a warning. Delete this step once that
-        # issue is fixed and the pin is bumped.
-        #
-        # stop-runner's terminate is fire-and-forget, and the workflow queue
-        # above only waits for the older RUN to finish -- not for its
-        # instance to reach `terminated`, which is when AWS auto-releases
-        # the EIP. A back-to-back run can therefore arrive here while the
-        # previous instance is still shutting down with the EIP attached.
-        # The action's own AssociateAddress does not set AllowReassociation
-        # and swallows the failure with a warning, so the run would only
-        # fail later (and less obviously) at acceptance_test's "Verify
-        # sandbox EIP" gate. Poll here instead: a single read-only
-        # DescribeAddresses call when the EIP is already free (the common
-        # case), a short wait only under genuine back-to-back contention.
-        # On timeout, proceed anyway: if the EIP is still attached at launch
-        # the action's AssociateAddress fails warn-only, the instance boots
-        # without its whitelisted egress IP (the EIP is its only egress
-        # during bootstrap), the runner never registers, and start-runner
-        # fails on the action's ~5.5-min registration timeout with the
-        # instance terminated by cleanup-on-start-failure. Only if the
-        # subnet auto-assigns a public IP does the run instead reach
-        # acceptance_test's "Verify sandbox EIP" gate.
+        # TEMPORARY shim for namecheap/ec2-github-runner#76 — delete once
+        # fixed upstream and the pin is bumped. stop-runner's terminate is
+        # fire-and-forget and AWS releases the EIP only when the instance
+        # reaches `terminated`, so a back-to-back run can race the previous
+        # instance's shutdown. The action's AssociateAddress (no retry, no
+        # AllowReassociation, warn-only) loses that race silently and the
+        # runner boots without its whitelisted egress IP and never
+        # registers. One read-only poll when the EIP is free (the common
+        # case); waits only under contention; on timeout, warn and proceed.
         run: |
-          # Budget sized ABOVE the observed stop->terminated latency band
-          # (22-152s, see SECURITY_COMPLIANCE.md): the previous 120s cap was
-          # below its documented upper bound, so a slow shutdown burned a
-          # whole launch. The wait is only ever paid under back-to-back
-          # contention, so a generous cap is free in the common case. All
-          # three uses (loop bound, sleep, warning text) derive from these
-          # two variables — change them here only.
+          # Cap sized above the observed stop->terminated band (22-152s,
+          # see SECURITY_COMPLIANCE.md); only ever paid under contention.
+          # Loop bound, sleep, and warning all derive from these two values.
           timeout_s=300
           interval_s=5
           attempts=$(( timeout_s / interval_s ))
           for i in $(seq 1 "$attempts"); do
-            # Assignment inside the condition so a CLI failure (throttling,
-            # expired token, network blip) is handled here instead of
-            # aborting the whole job under the shell's -e: this step's
-            # contract is poll, warn, proceed — never turn a lookup hiccup
-            # into a red run of its own.
+            # Assignment in the condition: a CLI failure (throttle, expired
+            # token) is a retryable poll tick, not a job failure under -e.
             if ! assoc="$(aws ec2 describe-addresses \
               --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
               --query 'Addresses[0].AssociationId' --output text)"; then
@@ -641,7 +619,7 @@ jobs:
             echo "Sandbox EIP still associated (${assoc}); waiting for the previous instance to finish terminating (${i}/${attempts})..."
             sleep "$interval_s"
           done
-          echo "::warning::Sandbox EIP still associated after ${timeout_s}s; proceeding. If it is still attached at launch, AssociateAddress fails warn-only and the instance boots without its whitelisted egress IP — expect start-runner to fail at the action's registration timeout (or, with an auto-assigned public IP, at the acceptance \"Verify sandbox EIP\" gate)."
+          echo "::warning::Sandbox EIP still associated after ${timeout_s}s; proceeding — if it is still attached at launch, expect start-runner to fail at the action's registration timeout (the EIP is the runner's only whitelisted egress)."
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
@@ -683,16 +661,13 @@ jobs:
             ]
       - name: Resolve sandbox EIP public IP
         id: eip-ip
-        # Publish the whitelisted EIP's public IP (from the allocation itself,
-        # the source of truth for the IP the Namecheap sandbox API allows) so
-        # acceptance_test's credential-free "Verify sandbox EIP" gate can check
-        # the runner's actual public IP against it. Also ASSERT the
-        # association: the action's AssociateAddress is warn-only, so without
-        # this check start-runner could report success while the EIP points
-        # at some other (or no) instance and the failure would surface later
-        # and less legibly. This step still only reads; it never
-        # re-associates a running/registered instance (doing so would change
-        # its IP and sever the runner).
+        # Publish the whitelisted EIP's public IP for acceptance_test's
+        # credential-free "Verify sandbox EIP" gate, and ASSERT the
+        # association points at the launched instance — the action's
+        # AssociateAddress is warn-only, so without this check start-runner
+        # could go green with the EIP attached elsewhere. Read-only: never
+        # re-associates (that would change a registered runner's IP and
+        # sever it).
         env:
           LAUNCHED_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
         run: |
