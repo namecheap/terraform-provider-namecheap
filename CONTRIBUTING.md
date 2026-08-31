@@ -189,10 +189,10 @@ sandbox before merge.
 
 The self-hosted EC2 runner behind `acceptance_test` is launched fresh for
 every run and terminated afterwards, so each job starts from a pristine
-disk. (The #279 warm pool — stop/start reuse between runs — was removed
-under DEVOPS-22119: on this repo's baked AMI a warm restart measured no
-faster than the ~70-second cold launch, while parking the instance added a
-stop-wait to every run.) Fork PRs keep going through `acceptance_mock`,
+disk (the #279 warm pool was removed under DEVOPS-22119 — measurements and
+rationale live in
+[SECURITY_COMPLIANCE.md](SECURITY_COMPLIANCE.md#runner-lifecycle-hygiene-sweeps-and-the-sandbox-eip)).
+Fork PRs keep going through `acceptance_mock`,
 unchanged. Per-job disk (the checked-out workspace, `$HOME`, dotfiles) is
 still wiped both before and after every run as defense in depth. A scheduled
 leak reaper
