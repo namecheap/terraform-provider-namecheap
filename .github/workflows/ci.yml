@@ -32,7 +32,8 @@ env:
   # Sourced from a repo variable (not a literal) so another repo can adopt this
   # workflow with its own dedicated EIP without editing YAML — mirroring the
   # `vars.APP_CLIENT_ID` pattern used elsewhere. cleanup-ec2-runners.yml does
-  # not declare this; it only mentions the allocation in a prose comment.
+  # not declare or use this: EIP release there only ever happens as an
+  # automatic AWS side effect of instance termination.
   SANDBOX_EIP_ALLOCATION_ID: ${{ vars.SANDBOX_EIP_ALLOCATION_ID }}
 
 # This workflow intentionally has NO top-level `concurrency` group. A shared
@@ -859,10 +860,11 @@ jobs:
 
       - name: Post-job hygiene sweep
         # Last step, if: always() — this is what actually satisfies G6 ("no
-        # code/env/secrets survive on the stopped disk"), since it runs before
-        # the instance goes idle/stopped. The next run's checkout clean: true
-        # only protects that NEXT run's start, not this run's stopped-disk
-        # window. Guards for the one case where the script itself can't be on
+        # code/env/secrets survive the job"): it runs while the job still
+        # owns the instance, covering the window between job end and
+        # stop-runner's terminate. The next run's checkout clean: true only
+        # protects that NEXT run's start (on its own fresh instance), not
+        # this window. Guards for the one case where the script itself can't be on
         # disk: checkout (the job's first step) failing outright. In that case
         # nothing meaningful was written to JOB_HOME this run (HOME is only
         # repointed there by "Pre-job hygiene sweep", which never got to run
