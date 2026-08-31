@@ -606,7 +606,17 @@ jobs:
         # subnet auto-assigns a public IP does the run instead reach
         # acceptance_test's "Verify sandbox EIP" gate.
         run: |
-          for i in $(seq 1 24); do
+          # Budget sized ABOVE the observed stop->terminated latency band
+          # (22-152s, see SECURITY_COMPLIANCE.md): the previous 120s cap was
+          # below its documented upper bound, so a slow shutdown burned a
+          # whole launch. The wait is only ever paid under back-to-back
+          # contention, so a generous cap is free in the common case. All
+          # three uses (loop bound, sleep, warning text) derive from these
+          # two variables — change them here only.
+          timeout_s=300
+          interval_s=5
+          attempts=$(( timeout_s / interval_s ))
+          for i in $(seq 1 "$attempts"); do
             # Assignment inside the condition so a CLI failure (throttling,
             # expired token, network blip) is handled here instead of
             # aborting the whole job under the shell's -e: this step's
@@ -615,18 +625,18 @@ jobs:
             if ! assoc="$(aws ec2 describe-addresses \
               --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
               --query 'Addresses[0].AssociationId' --output text)"; then
-              echo "::warning::describe-addresses failed (attempt ${i}/24); retrying."
-              sleep 5
+              echo "::warning::describe-addresses failed (attempt ${i}/${attempts}); retrying."
+              sleep "$interval_s"
               continue
             fi
             if [ -z "$assoc" ] || [ "$assoc" = "None" ]; then
               echo "Sandbox EIP is free."
               exit 0
             fi
-            echo "Sandbox EIP still associated (${assoc}); waiting for the previous instance to finish terminating (${i}/24)..."
-            sleep 5
+            echo "Sandbox EIP still associated (${assoc}); waiting for the previous instance to finish terminating (${i}/${attempts})..."
+            sleep "$interval_s"
           done
-          echo "::warning::Sandbox EIP still associated after 120s; proceeding. If it is still attached at launch, AssociateAddress fails warn-only and the instance boots without its whitelisted egress IP — expect start-runner to fail at the action's registration timeout (or, with an auto-assigned public IP, at the acceptance \"Verify sandbox EIP\" gate)."
+          echo "::warning::Sandbox EIP still associated after ${timeout_s}s; proceeding. If it is still attached at launch, AssociateAddress fails warn-only and the instance boots without its whitelisted egress IP — expect start-runner to fail at the action's registration timeout (or, with an auto-assigned public IP, at the acceptance \"Verify sandbox EIP\" gate)."
       - name: Start EC2 runner
         id: start-ec2-runner
         uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
