@@ -586,6 +586,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Wait for the sandbox EIP to be free
+        # TEMPORARY consumer-side shim for namecheap/ec2-github-runner#76:
+        # the action's AssociateAddress has no retry, no AllowReassociation,
+        # and downgrades failure to a warning. Delete this step once that
+        # issue is fixed and the pin is bumped.
+        #
         # stop-runner's terminate is fire-and-forget, and the workflow queue
         # above only waits for the older RUN to finish -- not for its
         # instance to reach `terminated`, which is when AWS auto-releases
