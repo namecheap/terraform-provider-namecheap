@@ -124,8 +124,8 @@ its watch. It exists because:
 For every Release PR and every Release-PR merge, the gate removes: a full
 hosted-runner pass (check + docs + two security scans + summary), one
 start/stop cycle of the EC2 sandbox runner (billed instance time plus the
-boot overhead), one pass of the ~10-minute live sandbox
-suite, and one slot in the single-EIP acceptance queue. Post-merge release
+boot overhead), one pass of the ~10-minute live sandbox suite, and one slot
+in the single-EIP acceptance queue. Post-merge release
 latency drops accordingly: after merging a Release PR, CI concludes in
 under a minute instead of after a full acceptance pass, so the tag and
 GoReleaser start that much sooner.

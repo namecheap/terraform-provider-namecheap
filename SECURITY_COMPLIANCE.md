@@ -168,16 +168,18 @@ rationale:
   `max-lifetime-minutes` TTL (default 360) still arms on every launch as a
   self-destruct backstop for instances whose stop-runner never ran.
 - **Per-job hygiene sweeps.** Defense in depth kept from the warm-pool era —
-  cheap, and self-diagnosing even on a fresh instance. The checked-out
-  workspace and the per-job `$HOME` at `/opt/ci/jobs/current` are wiped by
-  `scripts/hygiene-sweep.sh` both before ("pre", which also emits a
-  `::warning::` and self-heals if it finds leftovers from a crashed or
-  cancelled prior run that skipped its own cleanup) and after ("post",
-  `if: always()`, the step that guarantees no code, env vars, or secrets
-  remain on the disk) every job. The initial workspace freshness guarantee
-  at the very start of a run instead comes from `actions/checkout`'s own
-  `clean: true`, since our script can't run before the repo it lives in has
-  been checked out.
+  cheap, and the "post" pass is still load-bearing: it wipes the job's
+  footprint while the job still owns the instance, covering the window
+  between job end and stop-runner's terminate. The checked-out workspace and
+  the per-job `$HOME` at `/opt/ci/jobs/current` are swept by
+  `scripts/hygiene-sweep.sh` both before ("pre", which lays out JOB_HOME;
+  its leftover `::warning::` is inert on a fresh instance and would only
+  fire again if disks were ever reused) and after ("post", `if: always()`,
+  the step that guarantees no code, env vars, or secrets remain on the
+  disk) every job. The initial workspace freshness guarantee at the very
+  start of a run instead comes from `actions/checkout`'s own `clean: true`,
+  since our script can't run before the repo it lives in has been checked
+  out.
 - **Dedicated sandbox EIP.** The whitelisted Elastic IP
   (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input,
   which associates it during every launch — that is what gives the instance
