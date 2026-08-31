@@ -180,18 +180,19 @@ runners with no secrets:
   sandbox. `check` proves the suite passes; this proves it passes on every engine
   the provider supports.
 
-The live-API sandbox suite (`acceptance_test`, on the self-hosted EC2 runner) is
-**push-only** — it runs on branch pushes within this repository, not on
-`pull_request` events, because it needs secrets that GitHub does not expose to
-fork PRs. So for a fork contribution, the mock suite is the acceptance signal;
-a maintainer validates against the live sandbox before merge.
+The live-API sandbox suite (`acceptance_test`, on the self-hosted EC2 runner)
+runs only for code from this repository — same-repo pull requests, pushes to
+master, and manual dispatch — and **never for fork PRs**, because it needs
+secrets that GitHub does not expose to forks. So for a fork contribution, the
+mock suite is the acceptance signal; a maintainer validates against the live
+sandbox before merge.
 
 The self-hosted EC2 runner behind `acceptance_test` is launched fresh for
 every run and terminated afterwards, so each job starts from a pristine
-disk. (The #279 warm pool — stop/start reuse between runs — was removed
-under DEVOPS-22119: on this repo's baked AMI a warm restart measured no
-faster than the ~70-second cold launch, while parking the instance added a
-stop-wait to every run.) Fork PRs keep going through `acceptance_mock`,
+disk (the #279 warm pool was removed under DEVOPS-22119 — measurements and
+rationale live in
+[SECURITY_COMPLIANCE.md](SECURITY_COMPLIANCE.md#runner-lifecycle-hygiene-sweeps-and-the-sandbox-eip)).
+Fork PRs keep going through `acceptance_mock`,
 unchanged. Per-job disk (the checked-out workspace, `$HOME`, dotfiles) is
 still wiped both before and after every run as defense in depth. A scheduled
 leak reaper
