@@ -128,12 +128,10 @@ before `tar -xzf` / `unzip` runs.
 
 The acceptance-test job runs on a fresh EC2 instance launched by the
 self-hosted runner action for every run and terminated by `stop-runner`
-afterwards. (The #279 warm pool — stop/start reuse between runs — was removed
-under DEVOPS-22119: on this repo's baked AMI a warm restart measured no faster
-than a cold launch, while parking the instance added a stop-wait to every
-run.) See
+afterwards (the #279 warm pool was removed under DEVOPS-22119). See
 [Runner lifecycle, hygiene sweeps, and the sandbox EIP](#runner-lifecycle-hygiene-sweeps-and-the-sandbox-eip)
-below for the lifecycle/cleanup/EIP mechanics:
+below for the lifecycle/cleanup/EIP mechanics and the removal's measured
+rationale:
 
 - Runner binary version is controlled via the SHA-pinned
   `namecheap/ec2-github-runner` action (currently bundles
@@ -163,22 +161,25 @@ below for the lifecycle/cleanup/EIP mechanics:
   launch, while parking the instance added a 22-152s stop-wait to every run
   and an EIP-drift failure class. A fresh disk per run also removes the
   job-N+1-runs-on-job-N's-disk state carry-over the warm pool had to
-  document and sweep around; the sandbox pipeline remains **push-only and
-  never runs fork/PR code** (see
+  document and sweep around; the sandbox pipeline **never runs fork
+  (untrusted) code** — it runs only for same-repo pull requests, pushes to
+  master, and manual dispatch (see
   [fork-safe PR gating](#fork-safe-pull-request-ci) below). The action's
   `max-lifetime-minutes` TTL (default 360) still arms on every launch as a
   self-destruct backstop for instances whose stop-runner never ran.
 - **Per-job hygiene sweeps.** Defense in depth kept from the warm-pool era —
-  cheap, and self-diagnosing even on a fresh instance. The checked-out
-  workspace and the per-job `$HOME` at `/opt/ci/jobs/current` are wiped by
-  `scripts/hygiene-sweep.sh` both before ("pre", which also emits a
-  `::warning::` and self-heals if it finds leftovers from a crashed or
-  cancelled prior run that skipped its own cleanup) and after ("post",
-  `if: always()`, the step that guarantees no code, env vars, or secrets
-  remain on the disk) every job. The initial workspace freshness guarantee
-  at the very start of a run instead comes from `actions/checkout`'s own
-  `clean: true`, since our script can't run before the repo it lives in has
-  been checked out.
+  cheap, and the "post" pass is still load-bearing: it wipes the job's
+  footprint while the job still owns the instance, covering the window
+  between job end and stop-runner's terminate. The checked-out workspace and
+  the per-job `$HOME` at `/opt/ci/jobs/current` are swept by
+  `scripts/hygiene-sweep.sh` both before ("pre", which lays out JOB_HOME;
+  its leftover `::warning::` is inert on a fresh instance and would only
+  fire again if disks were ever reused) and after ("post", `if: always()`,
+  the step that guarantees no code, env vars, or secrets remain on the
+  disk) every job. The initial workspace freshness guarantee at the very
+  start of a run instead comes from `actions/checkout`'s own `clean: true`,
+  since our script can't run before the repo it lives in has been checked
+  out.
 - **Dedicated sandbox EIP.** The whitelisted Elastic IP
   (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input,
   which associates it during every launch — that is what gives the instance
@@ -210,8 +211,10 @@ below for the lifecycle/cleanup/EIP mechanics:
   the previous instance's shutdown for the association.
 - **IAM prerequisite.** The CI AWS identity (`sys_github_runner_provisioner`)
   needs the full set below for the EIP + diagnostics model; an
-  admin granting less will hit `UnauthorizedOperation` mid-cycle (see the
-  policy-diff comment on #281 for the ready-to-apply statements):
+  admin granting less will hit `UnauthorizedOperation` mid-cycle. The list
+  below is authoritative. (The policy-diff comment on #281 predates the
+  warm-pool removal and re-grants the revoked trio below — do **not** apply
+  it as-is.)
   - **Instance lifecycle:** `ec2:RunInstances`,
     `ec2:TerminateInstances`, `ec2:CreateTags`, `ec2:DescribeImages`,
     `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus`.
@@ -219,8 +222,12 @@ below for the lifecycle/cleanup/EIP mechanics:
     `ec2:ModifyInstanceAttribute` were needed only by the removed warm pool
     and can be revoked.)
   - **EIP:** `ec2:AssociateAddress` (the action attaches the EIP during
-    launch) and `ec2:DescribeAddresses` (the
-    "Resolve sandbox EIP public IP" step). `ec2:DisassociateAddress` is
+    launch — warn-only and without `AllowReassociation`, the behavior
+    tracked upstream as ec2-github-runner#76) and `ec2:DescribeAddresses`,
+    consumed by both of `start-runner`'s EIP steps: "Wait for the sandbox
+    EIP to be free" (the run's first caller, polling before launch) and
+    "Resolve sandbox EIP public IP" (which fails the job outright if the
+    grant is missing). `ec2:DisassociateAddress` is
     **not** required — the cross-repo EIP reaper that used it was removed with
     the mutex.
   - **Bootstrap diagnostics:** `ec2:GetConsoleOutput` and `ec2:DescribeTags`,
@@ -268,9 +275,11 @@ secrets:
 - The trigger is `pull_request`, **never `pull_request_target`** — fork code runs
   only on GitHub-hosted runners with a read-only token and `secrets.*` redacted.
 - The secret-bound EC2 sandbox jobs (`start-runner`, `acceptance_test`,
-  `stop-runner`) are gated `github.event_name == 'push'`, so untrusted fork code
-  never reaches the self-hosted runner, the whitelisted Elastic IP, or the AWS /
-  Namecheap credentials. They keep running on every in-repo push, unchanged.
+  `stop-runner`) are gated on trusted code only: same-repo `pull_request`
+  events (`head.repo.full_name == github.repository`), pushes to master, and
+  `workflow_dispatch` — never Dependabot, never fork PRs. Untrusted fork code
+  therefore never reaches the self-hosted runner, the whitelisted Elastic IP,
+  or the AWS / Namecheap credentials.
 - The `acceptance_mock` job provides the fork-facing acceptance signal: it runs
   on `pull_request` on GitHub-hosted `ubuntu-latest`, references no `secrets.*`,
   and drives the in-process mock (see
