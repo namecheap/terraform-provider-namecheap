@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.3](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.2...v2.9.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* **deps:** bump google.golang.org/grpc from 1.83.1 to 1.83.2 ([#348](https://github.com/namecheap/terraform-provider-namecheap/issues/348)) ([68b5768](https://github.com/namecheap/terraform-provider-namecheap/commit/68b57680284a42be7b4bea92cb196b955bcc7b84))
+
 ## [2.9.2](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.1...v2.9.2) (2026-08-31)
 
 
