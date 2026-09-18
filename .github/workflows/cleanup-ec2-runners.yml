@@ -70,7 +70,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Leak reaper
-        uses: namecheap/ec2-github-runner@54ee3e45b519c062993c2b01eb77552fcc329b9d # v4.0.2
+        uses: namecheap/ec2-github-runner@ef481107b2622473cc380d3b8c949d0c219da996 # v4.0.3
         with:
           mode: cleanup
           github-token: ${{ steps.app-token.outputs.token }}
