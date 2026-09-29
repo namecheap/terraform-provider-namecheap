@@ -38,7 +38,7 @@ func TestReadImportMode_NamecheapDNS_ConvertsModeToMerge(t *testing.T) {
 
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+	assert.Equal(t, string(ncModeMerge), data.Get("mode").(string))
 }
 
 func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
@@ -62,7 +62,7 @@ func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
 
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+	assert.Equal(t, string(ncModeMerge), data.Get("mode").(string))
 }
 
 func TestResourceRecordCreate_MergeWithRecords(t *testing.T) {
@@ -849,7 +849,7 @@ func TestReadImportMode_MarksRecordsAdopted(t *testing.T) {
 	// What the importer hands to Read: only the ID and the internal IMPORT mode.
 	data := resourceNamecheapDomainRecords().Data(&terraform.InstanceState{
 		ID:         "test.com",
-		Attributes: map[string]string{"domain": "test.com", "mode": ncModeImport},
+		Attributes: map[string]string{"domain": "test.com", "mode": string(ncModeImport)},
 	})
 
 	diags := resourceRecordRead(context.TODO(), data, newTestClient(server.URL))
@@ -857,7 +857,7 @@ func TestReadImportMode_MarksRecordsAdopted(t *testing.T) {
 
 	state := data.State()
 	assert.Equal(t, "true", state.Attributes["adopted"], "IMPORT read must persist the adopted marker")
-	assert.Equal(t, ncModeMerge, state.Attributes["mode"])
+	assert.Equal(t, string(ncModeMerge), state.Attributes["mode"])
 	assert.Equal(t, "1", state.Attributes["record.#"])
 }
 
@@ -884,7 +884,7 @@ func TestReadMergeMode_PreservesAdoptedMarker(t *testing.T) {
 	// refresh from that persisted state exactly as Terraform would.
 	imported := resource.Data(&terraform.InstanceState{
 		ID:         "test.com",
-		Attributes: map[string]string{"domain": "test.com", "mode": ncModeImport},
+		Attributes: map[string]string{"domain": "test.com", "mode": string(ncModeImport)},
 	})
 	diags := resourceRecordRead(context.TODO(), imported, newTestClient(server.URL))
 	assert.False(t, diags.HasError())
@@ -896,6 +896,6 @@ func TestReadMergeMode_PreservesAdoptedMarker(t *testing.T) {
 
 	state := refreshed.State()
 	assert.Equal(t, "true", state.Attributes["adopted"], "MERGE read must carry the persisted adopted marker through")
-	assert.Equal(t, ncModeMerge, state.Attributes["mode"])
+	assert.Equal(t, string(ncModeMerge), state.Attributes["mode"])
 	assert.Equal(t, "1", state.Attributes["record.#"])
 }
