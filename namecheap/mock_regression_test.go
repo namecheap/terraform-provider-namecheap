@@ -402,4 +402,45 @@ resource "namecheap_domain_records" "test" {
 			},
 		})
 	})
+
+	// An externally delegated domain (custom nameservers) adopted with the
+	// portfolio config declares nothing, so settling ownership must not touch
+	// the delegation: the pre-existing "custom DNS but no nameservers declared"
+	// reset would otherwise switch the domain to Namecheap default DNS.
+	t.Run("regression_355_merge_import_custom_ns_keeps_delegation", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, nil, "NONE", []string{"ns1.example-dns.net", "ns2.example-dns.net"})
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckNameservers(m, domain, "ns1.example-dns.net", "ns2.example-dns.net"),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckNameservers(m, domain, "ns1.example-dns.net", "ns2.example-dns.net"),
+						mockCheckCommandCount(m, "namecheap.domains.dns.setDefault", 0),
+						mockCheckCommandCount(m, "namecheap.domains.dns.setCustom", 0),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+						resource.TestCheckResourceAttr(resourceName, "nameservers.#", "0"),
+					),
+				},
+			},
+		})
+	})
 }

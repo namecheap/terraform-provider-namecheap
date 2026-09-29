@@ -193,3 +193,14 @@ resource "namecheap_domain_records" "test" {
 		},
 	})
 }
+
+// mockCheckCommandCount asserts the mock received exactly n requests for the
+// given API command since it was created.
+func mockCheckCommandCount(m *namecheapMock, command string, n int) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		if got := m.commandCount(command); got != n {
+			return fmt.Errorf("%s called %d time(s), want %d", command, got, n)
+		}
+		return nil
+	}
+}

@@ -384,10 +384,15 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	// then reset nameservers before applying records.
 	// This case is possible when user removed nameservers lines and pasted records, so before applying records,
 	// we must reset nameservers to defaults, otherwise we will face API exception
+	//
+	// Settling an import in MERGE mode with no records declared needs no write
+	// at all, so a delegation adopted from an externally hosted domain must stay
+	// as it was found (#355).
+	keepAdoptedDelegation := mode == ncModeMerge && adopted && newRecordsLen == 0
 	if (mode == ncModeOverwrite && oldNameserversLen != 0 && newNameserversLen == 0) ||
 		// This condition resolves the issue if a user set up records on TF file, but in fact, manually enabled custom DNS.
 		// Before applying records, we have to set default DNS
-		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
+		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0 && !keepAdoptedDelegation) {
 		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
 			return diagFromClientError(err)
