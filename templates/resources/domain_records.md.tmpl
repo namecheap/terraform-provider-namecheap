@@ -57,6 +57,11 @@ configuration leaving state. That first apply settles ownership:
 - In `MERGE` mode the undeclared records are **released, not deleted**: they
   disappear from state, stay live at Namecheap, and the apply prints a warning
   listing them. A `terraform destroy` before that first apply deletes nothing.
+- Adoption never removes a live record. `MERGE` identifies a record by
+  hostname, type **and** address, so a declared record whose address differs
+  from the live one is added alongside it, and the live one is released from
+  state and named in the warning. Correct the address in the configuration to
+  match the zone, or remove the stale record at Namecheap yourself.
 - In `OVERWRITE` mode the resource owns the entire zone, so undeclared records
   are deleted, with the usual warning listing them and offering paste-ready
   `record` blocks.

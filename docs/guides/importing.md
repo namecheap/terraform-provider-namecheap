@@ -129,7 +129,10 @@ large portfolio that can brush against Namecheap's per-minute rate limit; the
    owns. A common difference in that plan is records that exist at Namecheap
    but are absent from your configuration. In `MERGE` mode the plan shows them
    leaving *state* only: the apply releases them, prints a warning listing
-   them, and leaves them untouched at Namecheap. In `OVERWRITE` mode the
+   them, and leaves them untouched at Namecheap. That includes a live record
+   that matches a declared one by hostname and type but not by address: the
+   declared record is added next to it, nothing is replaced, so check the
+   warning for records you meant to change rather than add. In `OVERWRITE` mode the
    resource owns the entire zone, so the apply deletes them; the provider warns
    and lists them, with paste-ready `record` blocks so you can adopt rather
    than lose them.

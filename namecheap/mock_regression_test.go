@@ -564,4 +564,61 @@ resource "namecheap_domain_records" "test" {
 			},
 		})
 	})
+
+	// MERGE identifies a record by hostname, type and address, and adoption never
+	// removes a live record. A declared record whose address differs from the
+	// live one is therefore added alongside it; the live one is released from
+	// state (and named in the warning), not replaced. Pins the documented
+	// behaviour so a change to it is deliberate.
+	t.Run("regression_355_merge_import_differing_address_adds_alongside", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.11", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			// Destroy removes only the record the resource applied.
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				mockCheckHostCount(m, domain, 2),
+				mockCheckHostContains(m, domain, "www", "A", "203.0.113.11"),
+				mockCheckHostContains(m, domain, "home", "A", "203.0.113.20"),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckHostCount(m, domain, 3),
+						mockCheckHostContains(m, domain, "www", "A", "203.0.113.10"),
+						mockCheckHostContains(m, domain, "www", "A", "203.0.113.11"),
+						mockCheckHostContains(m, domain, "home", "A", "203.0.113.20"),
+						resource.TestCheckResourceAttr(resourceName, "record.#", "1"),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+					),
+				},
+			},
+		})
+	})
 }
