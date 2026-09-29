@@ -108,8 +108,9 @@ resource "namecheap_domain_records" "portfolio" {
 zone, so an apply against a configuration that does not yet list every existing
 record will **delete** the records you did not write down — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite). Adopt in
-`MERGE`, confirm the plan is empty, and switch mode later if you want full
-ownership.
+`MERGE`, apply once to settle ownership (that first plan is never empty, see
+[After importing](#after-importing)), confirm the plan after it is empty, and
+switch mode later if you want full ownership.
 
 -> A portfolio import reads the account listing plus one call per domain. On a
 large portfolio that can brush against Namecheap's per-minute rate limit; the
