@@ -346,16 +346,8 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	newNameserversLen := len(newNameservers)
 
 	// Records and nameservers adopted by `terraform import` were found, not
-	// applied, so MERGE must not treat them as owned: the merge runs against
-	// the configuration itself, releasing anything undeclared from state
-	// without touching it at Namecheap (#355).
+	// applied, so the first apply must not treat them as owned (#355).
 	adopted := data.Get("adopted").(bool)
-	previousRecordsMerge := oldRecords
-	previousNameserversMerge := oldNameservers
-	if adopted {
-		previousRecordsMerge = newRecords
-		previousNameserversMerge = newNameservers
-	}
 
 	var emailType *string
 
@@ -380,26 +372,25 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		return diag.Errorf("Unable to read DNS state for domain %s: the domain may not exist or may have been removed from the account", domain)
 	}
 
+	if mode == ncModeMerge && adopted {
+		return settleMergeImport(ctx, data, domain, emailType, *nsResponse.DomainDNSGetListResult.IsUsingOurDNS, client)
+	}
+
 	// If the previous state contains nameservers, but the new one does not contain,
 	// then reset nameservers before applying records.
 	// This case is possible when user removed nameservers lines and pasted records, so before applying records,
 	// we must reset nameservers to defaults, otherwise we will face API exception
-	//
-	// Settling an import in MERGE mode with no records declared needs no write
-	// at all, so a delegation adopted from an externally hosted domain must stay
-	// as it was found (#355).
-	keepAdoptedDelegation := mode == ncModeMerge && adopted && newRecordsLen == 0
 	if (mode == ncModeOverwrite && oldNameserversLen != 0 && newNameserversLen == 0) ||
 		// This condition resolves the issue if a user set up records on TF file, but in fact, manually enabled custom DNS.
 		// Before applying records, we have to set default DNS
-		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0 && !keepAdoptedDelegation) {
+		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
 		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
 			return diagFromClientError(err)
 		}
 	}
 
-	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 && !adopted {
+	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 {
 		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
@@ -407,27 +398,8 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, nsDiags...)
 	}
 
-	if mode == ncModeMerge && adopted {
-		released, err := releasedRecords(oldRecords, newRecords)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-		if len(released) > 0 {
-			diags = append(diags, buildReleasedRecordsWarning(domain, released))
-		}
-		if released := releasedNameservers(convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers)); len(released) > 0 {
-			diags = append(diags, buildReleasedNameserversWarning(domain, released))
-		}
-	}
-
-	// Settling an import only needs a write when a declared record is not
-	// already live exactly as declared (state was refreshed against the zone)
-	// or a declared email_type must be applied; released records need none.
-	// Comparing whole set elements keeps ttl and mx_pref changes in scope.
-	declaredNotLive := newRecordsRaw.(*schema.Set).Difference(oldRecordsRaw.(*schema.Set)).Len()
-	settleRecordsWrite := newRecordsLen != 0 && (declaredNotLive != 0 || data.HasChange("email_type"))
-	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) && (!adopted || settleRecordsWrite) {
-		recordDiags := updateRecordsMerge(ctx, domain, emailType, previousRecordsMerge, newRecords, client)
+	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) {
+		recordDiags := updateRecordsMerge(ctx, domain, emailType, oldRecords, newRecords, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
@@ -459,11 +431,8 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, nsDiags...)
 	}
 
-	// As with records, settling an import writes nameservers only when a
-	// declared one is not already live; releasing undeclared ones needs no write.
-	declaredNameserversNotLive := releasedNameservers(convertInterfacesToString(newNameservers), convertInterfacesToString(oldNameservers))
-	if mode == ncModeMerge && newNameserversLen != 0 && (!adopted || len(declaredNameserversNotLive) != 0) {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(previousNameserversMerge), convertInterfacesToString(newNameservers), client)
+	if mode == ncModeMerge && newNameserversLen != 0 {
+		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -489,17 +458,6 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		}
 	}
 
-	// Settling an import that declares email_type but no records: the adopted
-	// records stay in the zone untouched and only the email type is written (#355).
-	if mode == ncModeMerge && adopted && emailType != nil && data.HasChange("email_type") &&
-		newRecordsLen == 0 && oldRecordsLen != 0 && oldNameserversLen == 0 && newNameserversLen == 0 {
-		recordDiags := updateRecordsMerge(ctx, domain, emailType, nil, nil, client)
-		if recordDiags.HasError() {
-			return recordDiags
-		}
-		diags = append(diags, recordDiags...)
-	}
-
 	// For overwrite mode, when no nameservers and records, and email type is not set, then we have to reset it to NONE
 	if emailType == nil && mode == ncModeOverwrite && oldNameserversLen == 0 && newNameserversLen == 0 && oldRecordsLen == 0 && newRecordsLen == 0 {
 		recordDiags := createRecordsOverwrite(ctx, domain, nil, []interface{}{}, nil, client)
@@ -507,6 +465,83 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 			return recordDiags
 		}
 		diags = append(diags, recordDiags...)
+	}
+
+	// Ownership is settled once the first apply after import succeeds.
+	_ = data.Set("adopted", false)
+
+	return diags
+}
+
+// settleMergeImport is the first MERGE apply after `terraform import` (#355).
+// The imported records and nameservers were found, not applied, so nothing
+// undeclared is owned: it leaves state with a warning and stays as it is at
+// Namecheap. Only what the configuration declares and the zone does not
+// already have is written. The caller holds the domain lock.
+func settleMergeImport(ctx context.Context, data *schema.ResourceData, domain string, emailType *string, usingOurDNS bool, client *namecheap.Client) diag.Diagnostics {
+	oldRecordsRaw, newRecordsRaw := data.GetChange("record")
+	oldNameserversRaw, newNameserversRaw := data.GetChange("nameservers")
+
+	oldRecords := oldRecordsRaw.(*schema.Set)
+	declaredRecords := newRecordsRaw.(*schema.Set)
+	oldNameservers := convertInterfacesToString(oldNameserversRaw.(*schema.Set).List())
+	declaredNameservers := convertInterfacesToString(newNameserversRaw.(*schema.Set).List())
+
+	var diags diag.Diagnostics
+
+	oldRecordsList := oldRecords.List()
+	declaredRecordsList := declaredRecords.List()
+	releasedRecs, err := releasedRecords(*convertRecordTypeSetToDomainRecords(&oldRecordsList), *convertRecordTypeSetToDomainRecords(&declaredRecordsList))
+	if err != nil {
+		return diagFromClientError(err)
+	}
+	if len(releasedRecs) > 0 {
+		diags = append(diags, buildReleasedRecordsWarning(domain, releasedRecs))
+	}
+	if releasedNS := releasedNameservers(oldNameservers, declaredNameservers); len(releasedNS) > 0 {
+		diags = append(diags, buildReleasedNameserversWarning(domain, releasedNS))
+	}
+
+	// State was refreshed against the zone, so a declared record absent from
+	// it is not live exactly as declared. Whole set elements are compared so
+	// a ttl or mx_pref change counts too.
+	recordsNeedWrite := declaredRecords.Difference(oldRecords).Len() > 0
+	emailTypeNeedsWrite := emailType != nil && data.HasChange("email_type")
+
+	switch {
+	case declaredRecords.Len() > 0 && (recordsNeedWrite || emailTypeNeedsWrite):
+		// Hosting records needs Namecheap DNS, so a domain found on custom
+		// nameservers with none declared is reset first, as any MERGE apply does.
+		if !usingOurDNS && len(declaredNameservers) == 0 {
+			if _, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain); err != nil {
+				return diagFromClientError(err)
+			}
+		}
+		// Passing the declared records as both previous and current re-asserts
+		// them: a live record matching a declared one is replaced by the
+		// declared version, everything else in the zone stays.
+		recordDiags := updateRecordsMerge(ctx, domain, emailType, declaredRecordsList, declaredRecordsList, client)
+		if recordDiags.HasError() {
+			return recordDiags
+		}
+		diags = append(diags, recordDiags...)
+
+	case declaredRecords.Len() == 0 && emailTypeNeedsWrite && len(oldNameservers) == 0 && len(declaredNameservers) == 0:
+		// Only the email type changes; the adopted records stay in the zone.
+		recordDiags := updateRecordsMerge(ctx, domain, emailType, nil, nil, client)
+		if recordDiags.HasError() {
+			return recordDiags
+		}
+		diags = append(diags, recordDiags...)
+	}
+
+	// Same rule for nameservers: write only when a declared one is not live.
+	if len(releasedNameservers(declaredNameservers, oldNameservers)) > 0 {
+		nsDiags := updateNameserversMerge(ctx, domain, declaredNameservers, declaredNameservers, client)
+		if nsDiags.HasError() {
+			return nsDiags
+		}
+		diags = append(diags, nsDiags...)
 	}
 
 	// Ownership is settled once the first apply after import succeeds.

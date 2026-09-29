@@ -941,23 +941,23 @@ func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *stri
 	return emailType
 }
 
-// releasedRecords returns the records (in raw *schema.Set element form) that are
-// present in previous but absent from current, matched case-insensitively on
-// recordKey like the rest of MERGE mode. Used after an import to name the
-// adopted records the first apply releases from state (#355).
-func releasedRecords(previous []interface{}, current []interface{}) ([]interface{}, error) {
+// releasedRecords returns the records present in previous but absent from
+// current, matched case-insensitively on recordKey like the rest of MERGE mode.
+// Used after an import to name the adopted records the first apply releases
+// from state (#355).
+func releasedRecords(previous []namecheap.DomainsDNSHostRecord, current []namecheap.DomainsDNSHostRecord) ([]namecheap.DomainsDNSHostRecord, error) {
 	currentKeys := map[string]struct{}{}
-	for _, record := range *convertRecordTypeSetToDomainRecords(&current) {
-		key, err := recordKey(&record)
+	for i := range current {
+		key, err := recordKey(&current[i])
 		if err != nil {
 			return nil, err
 		}
 		currentKeys[strings.ToLower(key)] = struct{}{}
 	}
 
-	var released []interface{}
-	for i, record := range *convertRecordTypeSetToDomainRecords(&previous) {
-		key, err := recordKey(&record)
+	var released []namecheap.DomainsDNSHostRecord
+	for i := range previous {
+		key, err := recordKey(&previous[i])
 		if err != nil {
 			return nil, err
 		}
@@ -971,13 +971,13 @@ func releasedRecords(previous []interface{}, current []interface{}) ([]interface
 // buildReleasedRecordsWarning builds the warning emitted by the first MERGE
 // apply after `terraform import` for the adopted records that are not declared
 // in the configuration: they leave Terraform state but stay live at Namecheap.
-func buildReleasedRecordsWarning(domain string, released []interface{}) diag.Diagnostic {
+func buildReleasedRecordsWarning(domain string, released []namecheap.DomainsDNSHostRecord) diag.Diagnostic {
 	var detail strings.Builder
 
 	detail.WriteString("These records were adopted by `terraform import` but are not declared in the configuration. ")
 	detail.WriteString("They were removed from Terraform state and were not deleted at Namecheap:\n\n")
-	for _, record := range *convertRecordTypeSetToDomainRecords(&released) {
-		fmt.Fprintf(&detail, "  %s\n", stringifyNCRecord(&record))
+	for i := range released {
+		fmt.Fprintf(&detail, "  %s\n", stringifyNCRecord(&released[i]))
 	}
 	detail.WriteString("\nAdd them to the configuration to manage them with this resource, or leave them as they are.")
 

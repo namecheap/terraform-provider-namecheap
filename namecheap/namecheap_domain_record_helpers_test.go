@@ -414,9 +414,9 @@ func TestResolveEmailType_MXETypeButOnlyMXRecords(t *testing.T) {
 }
 
 func TestBuildReleasedRecordsWarning(t *testing.T) {
-	released := []interface{}{
-		map[string]interface{}{"hostname": "home", "type": "A", "address": "203.0.113.20", "mx_pref": 10, "ttl": 1800},
-		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.example.com.", "mx_pref": 20, "ttl": 600},
+	released := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("home"), RecordType: namecheap.String("A"), Address: namecheap.String("203.0.113.20")},
+		{HostName: namecheap.String("@"), RecordType: namecheap.String("MX"), Address: namecheap.String("mail.example.com.")},
 	}
 
 	warning := buildReleasedRecordsWarning("example.com", released)
@@ -449,22 +449,22 @@ func TestBuildReleasedNameserversWarning(t *testing.T) {
 }
 
 func TestReleasedRecords_MatchesOnFixedAddressCaseInsensitively(t *testing.T) {
-	previous := []interface{}{
-		map[string]interface{}{"hostname": "mail", "type": "CNAME", "address": "Target.Example.com.", "mx_pref": 10, "ttl": 1800},
-		map[string]interface{}{"hostname": "home", "type": "A", "address": "203.0.113.20", "mx_pref": 10, "ttl": 1800},
+	previous := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("mail"), RecordType: namecheap.String("CNAME"), Address: namecheap.String("Target.Example.com.")},
+		{HostName: namecheap.String("home"), RecordType: namecheap.String("A"), Address: namecheap.String("203.0.113.20")},
 	}
-	current := []interface{}{
-		map[string]interface{}{"hostname": "mail", "type": "CNAME", "address": "target.example.com", "mx_pref": 10, "ttl": 1800},
+	current := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("mail"), RecordType: namecheap.String("CNAME"), Address: namecheap.String("target.example.com")},
 	}
 
 	released, err := releasedRecords(previous, current)
 	assert.NoError(t, err)
-	assert.Equal(t, []interface{}{previous[1]}, released)
+	assert.Equal(t, []namecheap.DomainsDNSHostRecord{previous[1]}, released)
 }
 
 func TestReleasedRecords_SurfacesAddressFixError(t *testing.T) {
-	previous := []interface{}{
-		map[string]interface{}{"hostname": "@", "type": "CAA", "address": "not a caa value", "mx_pref": 10, "ttl": 1800},
+	previous := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("@"), RecordType: namecheap.String("CAA"), Address: namecheap.String("not a caa value")},
 	}
 
 	_, err := releasedRecords(previous, nil)
