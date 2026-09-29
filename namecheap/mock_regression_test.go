@@ -217,6 +217,9 @@ resource "namecheap_domain_records" "test" {
 						mockCheckHostContains(m, domain, "home", "A", "203.0.113.20"),
 						resource.TestCheckResourceAttr(resourceName, "record.#", "1"),
 						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+						// Every declared record is already live as declared, so
+						// releasing home from state needs no zone rewrite.
+						mockCheckCommandCount(m, "namecheap.domains.dns.setHosts", 0),
 					),
 				},
 			},
@@ -502,5 +505,63 @@ resource "namecheap_domain_records" "test" {
 				})
 			})
 		}
+	})
+
+	// A declared record that is live under the same hostname/type/address but
+	// with a different ttl is not yet "as declared": the settle apply must still
+	// write it. Guards the write decision against matching on identity alone.
+	t.Run("regression_355_merge_import_settles_declared_ttl", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+    ttl      = 300
+  }
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckHostCount(m, domain, 2),
+						mockCheckHostContains(m, domain, "home", "A", "203.0.113.20"),
+						func(*terraform.State) error {
+							for _, h := range m.state(domain).hosts {
+								if h.Name == "www" && h.Type == "A" {
+									if h.TTL != 300 {
+										return fmt.Errorf("www A ttl after settle = %d, want 300", h.TTL)
+									}
+									return nil
+								}
+							}
+							return fmt.Errorf("www A record missing after settle")
+						},
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+					),
+				},
+			},
+		})
 	})
 }

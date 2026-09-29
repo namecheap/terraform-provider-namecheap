@@ -413,10 +413,12 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		}
 	}
 
-	// Settling an import only needs a write when there are declared records
-	// to bring in line with the configuration or a declared email_type to
-	// apply; released records need none.
-	settleRecordsWrite := newRecordsLen != 0 && (data.HasChange("record") || data.HasChange("email_type"))
+	// Settling an import only needs a write when a declared record is not
+	// already live exactly as declared (state was refreshed against the zone)
+	// or a declared email_type must be applied; released records need none.
+	// Comparing whole set elements keeps ttl and mx_pref changes in scope.
+	declaredNotLive := newRecordsRaw.(*schema.Set).Difference(oldRecordsRaw.(*schema.Set)).Len()
+	settleRecordsWrite := newRecordsLen != 0 && (declaredNotLive != 0 || data.HasChange("email_type"))
 	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) && (!adopted || settleRecordsWrite) {
 		recordDiags := updateRecordsMerge(ctx, domain, emailType, previousRecordsMerge, newRecords, client)
 		if recordDiags.HasError() {
