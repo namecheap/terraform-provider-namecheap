@@ -9,6 +9,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,7 +38,7 @@ func TestReadImportMode_NamecheapDNS_ConvertsModeToMerge(t *testing.T) {
 
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+	assert.Equal(t, string(ncModeMerge), data.Get("mode").(string))
 }
 
 func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
@@ -61,7 +62,7 @@ func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
 
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
+	assert.Equal(t, string(ncModeMerge), data.Get("mode").(string))
 }
 
 func TestResourceRecordCreate_MergeWithRecords(t *testing.T) {
@@ -825,4 +826,76 @@ func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
 	// unset even though the API reports "MX".
 	assert.Equal(t, "", data.Get("email_type").(string))
 	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
+}
+
+// #355: import adopts the whole live zone into state. The IMPORT read marks the
+// records as adopted so the first MERGE apply/destroy knows they were found,
+// not applied, and must not delete the undeclared ones. The check goes through
+// the state the SDK would persist, not through the in-memory ResourceData.
+func TestReadImportMode_MarksRecordsAdopted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "@", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	// What the importer hands to Read: only the ID and the internal IMPORT mode.
+	data := resourceNamecheapDomainRecords().Data(&terraform.InstanceState{
+		ID:         "test.com",
+		Attributes: map[string]string{"domain": "test.com", "mode": string(ncModeImport)},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, newTestClient(server.URL))
+	assert.False(t, diags.HasError())
+
+	state := data.State()
+	assert.Equal(t, "true", state.Attributes["adopted"], "IMPORT read must persist the adopted marker")
+	assert.Equal(t, string(ncModeMerge), state.Attributes["mode"])
+	assert.Equal(t, "1", state.Attributes["record.#"])
+}
+
+// The refresh that precedes the first plan after import starts from the state
+// the import persisted and runs in MERGE mode. The marker must come out of that
+// refresh's state unchanged, otherwise Update never sees it.
+func TestReadMergeMode_PreservesAdoptedMarker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "@", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	resource := resourceNamecheapDomainRecords()
+
+	// Persist the state an IMPORT read leaves behind, then start the MERGE
+	// refresh from that persisted state exactly as Terraform would.
+	imported := resource.Data(&terraform.InstanceState{
+		ID:         "test.com",
+		Attributes: map[string]string{"domain": "test.com", "mode": string(ncModeImport)},
+	})
+	diags := resourceRecordRead(context.TODO(), imported, newTestClient(server.URL))
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "true", imported.State().Attributes["adopted"])
+
+	refreshed := resource.Data(imported.State())
+	diags = resourceRecordRead(context.TODO(), refreshed, newTestClient(server.URL))
+	assert.False(t, diags.HasError())
+
+	state := refreshed.State()
+	assert.Equal(t, "true", state.Attributes["adopted"], "MERGE read must carry the persisted adopted marker through")
+	assert.Equal(t, string(ncModeMerge), state.Attributes["mode"])
+	assert.Equal(t, "1", state.Attributes["record.#"])
 }

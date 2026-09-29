@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -410,4 +411,62 @@ func TestResolveEmailType_MXETypeButOnlyMXRecords(t *testing.T) {
 	emailType := namecheap.EmailTypeMXE
 	result := resolveEmailType(&records, &emailType)
 	assert.Equal(t, namecheap.EmailTypeNone, *result)
+}
+
+func TestBuildReleasedRecordsWarning(t *testing.T) {
+	released := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("home"), RecordType: namecheap.String("A"), Address: namecheap.String("203.0.113.20")},
+		{HostName: namecheap.String("@"), RecordType: namecheap.String("MX"), Address: namecheap.String("mail.example.com.")},
+	}
+
+	warning := buildReleasedRecordsWarning("example.com", released)
+
+	assert.Equal(t, diag.Warning, warning.Severity)
+	assert.Contains(t, warning.Summary, "example.com")
+	assert.Contains(t, warning.Summary, "2 imported record(s)")
+	assert.Contains(t, warning.Detail, "{hostname = home, type = A, address = 203.0.113.20}")
+	assert.Contains(t, warning.Detail, "{hostname = @, type = MX, address = mail.example.com.}")
+	assert.Contains(t, warning.Detail, "not deleted")
+}
+
+func TestReleasedNameservers(t *testing.T) {
+	released := releasedNameservers(
+		[]string{"ns1.example-dns.net", "NS2.example-dns.net", "ns3.example-dns.net"},
+		[]string{"ns1.example-dns.net", "ns2.example-dns.net"},
+	)
+	assert.Equal(t, []string{"ns3.example-dns.net"}, released)
+}
+
+func TestBuildReleasedNameserversWarning(t *testing.T) {
+	warning := buildReleasedNameserversWarning("example.com", []string{"ns3.example-dns.net", "ns4.example-dns.net"})
+
+	assert.Equal(t, diag.Warning, warning.Severity)
+	assert.Contains(t, warning.Summary, "example.com")
+	assert.Contains(t, warning.Summary, "2 imported nameserver(s)")
+	assert.Contains(t, warning.Detail, "ns3.example-dns.net")
+	assert.Contains(t, warning.Detail, "ns4.example-dns.net")
+	assert.Contains(t, warning.Detail, "still delegated")
+}
+
+func TestReleasedRecords_MatchesOnFixedAddressCaseInsensitively(t *testing.T) {
+	previous := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("mail"), RecordType: namecheap.String("CNAME"), Address: namecheap.String("Target.Example.com.")},
+		{HostName: namecheap.String("home"), RecordType: namecheap.String("A"), Address: namecheap.String("203.0.113.20")},
+	}
+	current := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("mail"), RecordType: namecheap.String("CNAME"), Address: namecheap.String("target.example.com")},
+	}
+
+	released, err := releasedRecords(previous, current)
+	assert.NoError(t, err)
+	assert.Equal(t, []namecheap.DomainsDNSHostRecord{previous[1]}, released)
+}
+
+func TestReleasedRecords_SurfacesAddressFixError(t *testing.T) {
+	previous := []namecheap.DomainsDNSHostRecord{
+		{HostName: namecheap.String("@"), RecordType: namecheap.String("CAA"), Address: namecheap.String("not a caa value")},
+	}
+
+	_, err := releasedRecords(previous, nil)
+	assert.Error(t, err)
 }

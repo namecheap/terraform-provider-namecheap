@@ -108,8 +108,9 @@ resource "namecheap_domain_records" "portfolio" {
 zone, so an apply against a configuration that does not yet list every existing
 record will **delete** the records you did not write down — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite). Adopt in
-`MERGE`, confirm the plan is empty, and switch mode later if you want full
-ownership.
+`MERGE`, apply once to settle ownership (that first plan is never empty, see
+[After importing](#after-importing)), confirm the plan after it is empty, and
+switch mode later if you want full ownership.
 
 -> A portfolio import reads the account listing plus one call per domain. On a
 large portfolio that can brush against Namecheap's per-minute rate limit; the
@@ -123,8 +124,21 @@ large portfolio that can brush against Namecheap's per-minute rate limit; the
 2. A non-empty plan means your configuration differs from what exists. Read each
    proposed change and decide which side is right — sometimes the configuration
    is wrong, sometimes the live state has drifted and the plan is the fix.
-3. For `namecheap_domain_records`, a common first-plan difference is records
-   that exist at Namecheap but are absent from your configuration. In `MERGE`
-   mode they are simply left alone; in `OVERWRITE` mode the provider warns and
-   lists them, with paste-ready `record` blocks so you can adopt rather than
-   lose them.
+3. For `namecheap_domain_records`, the first plan is never empty: import
+   reads the whole live zone into state and marks it `adopted = true`, and the
+   first apply recomputes that flag while settling which records the resource
+   owns. A common difference in that plan is records that exist at Namecheap
+   but are absent from your configuration. In `MERGE` mode the plan shows them
+   leaving *state* only: the apply releases them, prints a warning listing
+   them, and leaves them untouched at Namecheap. That includes a live record
+   that matches a declared one by hostname and type but not by address: the
+   declared record is added next to it, nothing is replaced, so check the
+   warning for records you meant to change rather than add. In `OVERWRITE` mode the
+   resource owns the entire zone, so the apply deletes them; the provider warns
+   and lists them, with paste-ready `record` blocks so you can adopt rather
+   than lose them.
+4. Do not `terraform destroy` a resource that you imported but never applied
+   expecting it to clean up the zone: nothing was managed yet, so the provider
+   deletes nothing, whichever `mode` the configuration declares (import records
+   the resource as `MERGE` until the first apply). Apply once first if you want
+   the resource to own the records you declared.

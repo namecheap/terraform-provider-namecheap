@@ -273,7 +273,7 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		filteredRemoteRecords := filterDefaultParkingRecords(remoteRecordsResponse.DomainDNSGetHostsResult.Hosts, &domain)
 		for _, remoteRecord := range *filteredRemoteRecords {
-			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
+			remoteRecordHash := remoteRecordKey(&remoteRecord)
 			domainRecord := namecheap.DomainsDNSHostRecord{
 				HostName:   remoteRecord.Name,
 				RecordType: remoteRecord.Type,
@@ -287,11 +287,10 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 	}
 
 	for _, record := range *recordsConverted {
-		fixedAddress, err := getFixedAddressOfRecord(&record)
+		recordHash, err := recordKey(&record)
 		if err != nil {
 			return diagFromClientError(err)
 		}
-		recordHash := hashRecord(*record.HostName, *record.RecordType, *fixedAddress)
 
 		if newRecordsMap[recordHash] != nil {
 			return diag.Diagnostics{
@@ -395,15 +394,13 @@ func readRecordsMerge(ctx context.Context, domain string, currentRecords []inter
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		for _, currentRecord := range *currentRecordsConverted {
-			currentRecordAddressFixed, err := getFixedAddressOfRecord(&currentRecord)
+			currentRecordHash, err := recordKey(&currentRecord)
 			if err != nil {
 				return nil, nil, diagFromClientError(err)
 			}
 
-			currentRecordHash := hashRecord(*currentRecord.HostName, *currentRecord.RecordType, *currentRecordAddressFixed)
 			for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
-				remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-				if currentRecordHash == remoteRecordHash {
+				if currentRecordHash == remoteRecordKey(&remoteRecord) {
 					remoteRecord.Address = currentRecord.Address
 					foundRecords = append(foundRecords, *convertDomainRecordDetailedToTypeSetRecord(&remoteRecord))
 					break
@@ -545,15 +542,14 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
-			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
+			remoteRecordHash := remoteRecordKey(&remoteRecord)
 			found := false
 
 			for _, prevRecord := range *previousRecordsMapped {
-				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
+				prevRecordHash, err := recordKey(&prevRecord)
 				if err != nil {
 					return diagFromClientError(err)
 				}
-				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
 				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
 					found = true
 					break
@@ -609,15 +605,14 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
-			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
+			remoteRecordHash := remoteRecordKey(&remoteRecord)
 			found := false
 
 			for _, prevRecord := range *previousRecordsMapped {
-				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
+				prevRecordHash, err := recordKey(&prevRecord)
 				if err != nil {
 					return diagFromClientError(err)
 				}
-				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
 				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
 					found = true
 					break
@@ -689,6 +684,23 @@ func deleteRecordsOverwrite(ctx context.Context, domain string, priorStateRecord
 // hashRecord creates a hash for record by hostname, recordType, and address
 func hashRecord(hostname string, recordType string, address string) string {
 	return fmt.Sprintf("[%s:%s:%s]", hostname, recordType, address)
+}
+
+// recordKey is the identity MERGE mode matches records on: hostname, type and
+// the address after the type-specific fix (trailing dot for CNAME/ALIAS/NS/MX,
+// quotes for CAA). It fails only when the fixer rejects the address.
+func recordKey(record *namecheap.DomainsDNSHostRecord) (string, error) {
+	address, err := getFixedAddressOfRecord(record)
+	if err != nil {
+		return "", err
+	}
+	return hashRecord(*record.HostName, *record.RecordType, *address), nil
+}
+
+// remoteRecordKey is recordKey for a record as GetHosts returns it: the API
+// already stores addresses in their fixed form, so no fixer runs.
+func remoteRecordKey(record *namecheap.DomainsDNSHostRecordDetailed) string {
+	return hashRecord(*record.Name, *record.Type, *record.Address)
 }
 
 func convertRecordTypeSetToDomainRecords(records *[]interface{}) *[]namecheap.DomainsDNSHostRecord {
@@ -927,4 +939,93 @@ func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *stri
 	}
 
 	return emailType
+}
+
+// releasedRecords returns the records present in previous but absent from
+// current, matched case-insensitively on recordKey like the rest of MERGE mode.
+// Used after an import to name the adopted records the first apply releases
+// from state (#355).
+func releasedRecords(previous []namecheap.DomainsDNSHostRecord, current []namecheap.DomainsDNSHostRecord) ([]namecheap.DomainsDNSHostRecord, error) {
+	currentKeys := map[string]struct{}{}
+	for i := range current {
+		key, err := recordKey(&current[i])
+		if err != nil {
+			return nil, err
+		}
+		currentKeys[strings.ToLower(key)] = struct{}{}
+	}
+
+	var released []namecheap.DomainsDNSHostRecord
+	for i := range previous {
+		key, err := recordKey(&previous[i])
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := currentKeys[strings.ToLower(key)]; !ok {
+			released = append(released, previous[i])
+		}
+	}
+	return released, nil
+}
+
+// buildReleasedRecordsWarning builds the warning emitted by the first MERGE
+// apply after `terraform import` for the adopted records that are not declared
+// in the configuration: they leave Terraform state but stay live at Namecheap.
+func buildReleasedRecordsWarning(domain string, released []namecheap.DomainsDNSHostRecord) diag.Diagnostic {
+	var detail strings.Builder
+
+	detail.WriteString("These records were adopted by `terraform import` but are not declared in the configuration. ")
+	detail.WriteString("They were removed from Terraform state and were not deleted at Namecheap:\n\n")
+	for i := range released {
+		fmt.Fprintf(&detail, "  %s\n", stringifyNCRecord(&released[i]))
+	}
+	detail.WriteString("\nAdd them to the configuration to manage them with this resource, or leave them as they are.")
+
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Released %d imported record(s) on %s from Terraform state", len(released), domain),
+		Detail:   detail.String(),
+	}
+}
+
+// releasedNameservers returns the nameservers present in previous but absent
+// from current, compared case-insensitively like the rest of MERGE mode. Used
+// after an import to name the adopted nameservers the first apply releases
+// from state (#355).
+func releasedNameservers(previous []string, current []string) []string {
+	var released []string
+	for _, prev := range previous {
+		found := false
+		for _, cur := range current {
+			if strings.EqualFold(prev, cur) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			released = append(released, prev)
+		}
+	}
+	return released
+}
+
+// buildReleasedNameserversWarning builds the warning emitted by the first MERGE
+// apply after `terraform import` for the adopted nameservers that are not
+// declared in the configuration: they leave Terraform state but the domain
+// stays delegated to them.
+func buildReleasedNameserversWarning(domain string, released []string) diag.Diagnostic {
+	var detail strings.Builder
+
+	detail.WriteString("These nameservers were adopted by `terraform import` but are not declared in the configuration. ")
+	detail.WriteString("They were removed from Terraform state and the domain is still delegated to them:\n\n")
+	for _, ns := range released {
+		fmt.Fprintf(&detail, "  %s\n", ns)
+	}
+	detail.WriteString("\nAdd them to `nameservers` to manage them with this resource, or leave them as they are.")
+
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Released %d imported nameserver(s) on %s from Terraform state", len(released), domain),
+		Detail:   detail.String(),
+	}
 }
