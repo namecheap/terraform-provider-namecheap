@@ -668,4 +668,48 @@ resource "namecheap_domain_records" "test" {
 			},
 		})
 	})
+
+	// Nameservers follow the same rule as records when settling an import:
+	// declared ones that are already live need no write, undeclared ones leave
+	// state (with a warning) and stay live at Namecheap.
+	t.Run("regression_355_merge_import_releases_undeclared_nameservers_without_write", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		live := []string{"ns1.example-dns.net", "ns2.example-dns.net", "ns3.example-dns.net", "ns4.example-dns.net"}
+		m.seed(domain, nil, "NONE", live)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain      = "%s"
+  mode        = "MERGE"
+  nameservers = ["ns1.example-dns.net", "ns2.example-dns.net"]
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			// After settling, the resource owns ns1/ns2 only: destroy removes
+			// those and leaves ns3/ns4 delegated.
+			CheckDestroy: mockCheckNameservers(m, domain, "ns3.example-dns.net", "ns4.example-dns.net"),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckNameservers(m, domain, live...),
+						mockCheckCommandCount(m, "namecheap.domains.dns.setCustom", 0),
+						mockCheckCommandCount(m, "namecheap.domains.dns.setDefault", 0),
+						resource.TestCheckResourceAttr(resourceName, "nameservers.#", "2"),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+					),
+				},
+			},
+		})
+	})
 }

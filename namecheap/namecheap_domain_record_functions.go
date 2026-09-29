@@ -977,3 +977,45 @@ func buildReleasedRecordsWarning(domain string, released []interface{}) diag.Dia
 		Detail:   detail.String(),
 	}
 }
+
+// releasedNameservers returns the nameservers present in previous but absent
+// from current, compared case-insensitively like the rest of MERGE mode. Used
+// after an import to name the adopted nameservers the first apply releases
+// from state (#355).
+func releasedNameservers(previous []string, current []string) []string {
+	var released []string
+	for _, prev := range previous {
+		found := false
+		for _, cur := range current {
+			if strings.EqualFold(prev, cur) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			released = append(released, prev)
+		}
+	}
+	return released
+}
+
+// buildReleasedNameserversWarning builds the warning emitted by the first MERGE
+// apply after `terraform import` for the adopted nameservers that are not
+// declared in the configuration: they leave Terraform state but the domain
+// stays delegated to them.
+func buildReleasedNameserversWarning(domain string, released []string) diag.Diagnostic {
+	var detail strings.Builder
+
+	detail.WriteString("These nameservers were adopted by `terraform import` but are not declared in the configuration. ")
+	detail.WriteString("They were removed from Terraform state and the domain is still delegated to them:\n\n")
+	for _, ns := range released {
+		fmt.Fprintf(&detail, "  %s\n", ns)
+	}
+	detail.WriteString("\nAdd them to `nameservers` to manage them with this resource, or leave them as they are.")
+
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Released %d imported nameserver(s) on %s from Terraform state", len(released), domain),
+		Detail:   detail.String(),
+	}
+}

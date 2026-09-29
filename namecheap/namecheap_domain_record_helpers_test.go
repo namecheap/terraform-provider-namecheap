@@ -428,3 +428,22 @@ func TestBuildReleasedRecordsWarning(t *testing.T) {
 	assert.Contains(t, warning.Detail, "@ MX mail.example.com.")
 	assert.Contains(t, warning.Detail, "not deleted")
 }
+
+func TestReleasedNameservers(t *testing.T) {
+	released := releasedNameservers(
+		[]string{"ns1.example-dns.net", "NS2.example-dns.net", "ns3.example-dns.net"},
+		[]string{"ns1.example-dns.net", "ns2.example-dns.net"},
+	)
+	assert.Equal(t, []string{"ns3.example-dns.net"}, released)
+}
+
+func TestBuildReleasedNameserversWarning(t *testing.T) {
+	warning := buildReleasedNameserversWarning("example.com", []string{"ns3.example-dns.net", "ns4.example-dns.net"})
+
+	assert.Equal(t, diag.Warning, warning.Severity)
+	assert.Contains(t, warning.Summary, "example.com")
+	assert.Contains(t, warning.Summary, "2 imported nameserver(s)")
+	assert.Contains(t, warning.Detail, "ns3.example-dns.net")
+	assert.Contains(t, warning.Detail, "ns4.example-dns.net")
+	assert.Contains(t, warning.Detail, "still delegated")
+}

@@ -411,6 +411,9 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		if released := releasedRecords(oldRecords, newRecords); len(released) > 0 {
 			diags = append(diags, buildReleasedRecordsWarning(domain, released))
 		}
+		if released := releasedNameservers(convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers)); len(released) > 0 {
+			diags = append(diags, buildReleasedNameserversWarning(domain, released))
+		}
 	}
 
 	// Settling an import only needs a write when a declared record is not
@@ -452,7 +455,10 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, nsDiags...)
 	}
 
-	if mode == ncModeMerge && newNameserversLen != 0 && (!adopted || data.HasChange("nameservers")) {
+	// As with records, settling an import writes nameservers only when a
+	// declared one is not already live; releasing undeclared ones needs no write.
+	declaredNameserversNotLive := releasedNameservers(convertInterfacesToString(newNameservers), convertInterfacesToString(oldNameservers))
+	if mode == ncModeMerge && newNameserversLen != 0 && (!adopted || len(declaredNameserversNotLive) != 0) {
 		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(previousNameserversMerge), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
