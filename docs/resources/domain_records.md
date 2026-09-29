@@ -64,7 +64,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 ## Attribute Reference
 
-- `adopted` - Set by the provider after `terraform import`: `true` while the imported records and nameservers have not yet been reconciled with the configuration, `false` after the first apply. See [Import](#import).
+- `adopted` - Set by the provider after `terraform import`: `true` while the imported records and nameservers have not yet been reconciled with the configuration, `false` after the first apply. A destroy while it is `true` deletes nothing. See [Import](#import).
 
 ## Import
 
@@ -81,7 +81,7 @@ configuration leaving state. That first apply settles ownership:
 
 - In `MERGE` mode the undeclared records are **released, not deleted**: they
   disappear from state, stay live at Namecheap, and the apply prints a warning
-  listing them. A `terraform destroy` before that first apply deletes nothing.
+  listing them.
 - Adoption never removes a live record. `MERGE` identifies a record by
   hostname, type **and** address, so a declared record whose address differs
   from the live one is added alongside it, and the live one is released from
@@ -90,6 +90,10 @@ configuration leaving state. That first apply settles ownership:
 - In `OVERWRITE` mode the resource owns the entire zone, so undeclared records
   are deleted, with the usual warning listing them and offering paste-ready
   `record` blocks.
+
+A `terraform destroy` before that first apply deletes nothing in either mode:
+import always records the resource as `MERGE` until an apply settles it, and
+nothing was managed yet.
 
 See the [importing guide](../guides/importing.md#after-importing) for the full
 walkthrough.

@@ -136,7 +136,8 @@ large portfolio that can brush against Namecheap's per-minute rate limit; the
    resource owns the entire zone, so the apply deletes them; the provider warns
    and lists them, with paste-ready `record` blocks so you can adopt rather
    than lose them.
-4. Do not `terraform destroy` a `MERGE` resource that you imported but never
-   applied expecting a no-op cleanup: nothing was managed yet, so the provider
-   deletes nothing. Apply once first if you want the resource to own the records
-   you declared.
+4. Do not `terraform destroy` a resource that you imported but never applied
+   expecting it to clean up the zone: nothing was managed yet, so the provider
+   deletes nothing, whichever `mode` the configuration declares (import records
+   the resource as `MERGE` until the first apply). Apply once first if you want
+   the resource to own the records you declared.

@@ -121,7 +121,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 			"adopted": {
 				Type:        schema.TypeBool,
 				Computed:    true,
-				Description: "Set by the provider after `terraform import`: true while the imported records and nameservers have not yet been reconciled with the configuration. The first apply clears it. In MERGE mode that apply releases undeclared records from state without deleting them at Namecheap, and a destroy before that apply deletes nothing.",
+				Description: "Set by the provider after `terraform import`: true while the imported records and nameservers have not yet been reconciled with the configuration. The first apply clears it. In MERGE mode that apply releases undeclared records from state without deleting them at Namecheap. A destroy before that apply deletes nothing, whatever mode the configuration declares.",
 			},
 		},
 	}
@@ -530,12 +530,11 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 		defer ncMutexKV.Unlock(domain)
 	}
 
-	// Records adopted by `terraform import` and never applied are not owned by
-	// this resource: MERGE releases them untouched, while OVERWRITE still
-	// clears the zone but with none of them counted as consented (#355).
-	adopted := data.Get("adopted").(bool)
-
-	if mode == ncModeMerge && adopted {
+	// Records and nameservers adopted by `terraform import` and never applied
+	// are not owned by this resource, so a destroy releases them untouched
+	// (#355). The mode here comes from state, which import always sets to
+	// MERGE, so this is the only path an un-applied import can take.
+	if mode == ncModeMerge && data.Get("adopted").(bool) {
 		return nil
 	}
 
@@ -544,9 +543,6 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeOverwrite && recordsLen != 0 {
-		if adopted {
-			records = nil
-		}
 		return deleteRecordsOverwrite(ctx, domain, records, client)
 	}
 

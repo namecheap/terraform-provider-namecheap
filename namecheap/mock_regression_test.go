@@ -621,4 +621,51 @@ resource "namecheap_domain_records" "test" {
 			},
 		})
 	})
+
+	// Import stores mode = MERGE regardless of the configured mode, and Delete
+	// reads the mode from state, so a destroy before the first apply is the
+	// MERGE no-op even when the configuration says OVERWRITE: nothing was ever
+	// applied, so nothing is deleted.
+	t.Run("regression_355_overwrite_import_destroy_before_apply_keeps_zone", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				mockCheckHostCount(m, domain, 2),
+				mockCheckCommandCount(m, "namecheap.domains.dns.setHosts", 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "OVERWRITE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+}
+`, domain),
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+					ImportStateCheck: func(states []*terraform.InstanceState) error {
+						if got := states[0].Attributes["mode"]; got != "MERGE" {
+							return fmt.Errorf("mode after import = %q, want MERGE", got)
+						}
+						return nil
+					},
+				},
+			},
+		})
+	})
 }
