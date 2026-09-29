@@ -245,7 +245,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
 		if mode == ncModeMerge {
-			realNameservers, nsDiags := readNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
+			realNameservers, nsDiags := readNameserversMerge(nsResponse, convertInterfacesToString(nameservers))
 			if nsDiags.HasError() {
 				return nsDiags
 			}
@@ -254,7 +254,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		}
 
 		if mode == ncModeOverwrite || mode == ncModeImport {
-			realNameservers, nsDiags := readNameserversOverwrite(ctx, domain, client)
+			realNameservers, nsDiags := readNameserversOverwrite(nsResponse)
 			if nsDiags.HasError() {
 				return nsDiags
 			}

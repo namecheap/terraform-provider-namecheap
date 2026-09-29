@@ -89,14 +89,9 @@ func createNameserversOverwrite(ctx context.Context, domain string, nameservers 
 	return nil
 }
 
-// readNameserversMerge read real nameservers, check whether there's available the current ones, return only
-// the records from currentNameservers argument that are really exist
-func readNameserversMerge(ctx context.Context, domain string, currentNameservers []string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil {
-		return nil, diagFromClientError(err)
-	}
-
+// readNameserversMerge read real nameservers from an already fetched getList response, check whether there's
+// available the current ones, return only the records from currentNameservers argument that are really exist
+func readNameserversMerge(nsResponse *namecheap.DomainsDNSGetListCommandResponse, currentNameservers []string) (*[]string, diag.Diagnostics) {
 	if err := validateGetListResponse(nsResponse); err != nil {
 		return nil, diagFromClientError(err)
 	}
@@ -117,13 +112,8 @@ func readNameserversMerge(ctx context.Context, domain string, currentNameservers
 	return &foundNameservers, nil
 }
 
-// readNameserversOverwrite returns remote real nameservers
-func readNameserversOverwrite(ctx context.Context, domain string, client *namecheap.Client) (*[]string, diag.Diagnostics) {
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil {
-		return nil, diagFromClientError(err)
-	}
-
+// readNameserversOverwrite returns remote real nameservers from an already fetched getList response
+func readNameserversOverwrite(nsResponse *namecheap.DomainsDNSGetListCommandResponse) (*[]string, diag.Diagnostics) {
 	if err := validateGetListResponse(nsResponse); err != nil {
 		return nil, diagFromClientError(err)
 	}

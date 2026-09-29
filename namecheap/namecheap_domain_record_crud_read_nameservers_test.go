@@ -1,124 +1,75 @@
 package namecheap_provider
 
 import (
-	"context"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
+	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestReadNameserversMerge_FindsMatching(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com", "ns3.other.com"}))
-	}))
-	defer server.Close()
+// getListResponse builds the parsed getList response the nameserver readers
+// receive from resourceRecordRead.
+func getListResponse(isUsingOurDNS bool, nameservers []string) *namecheap.DomainsDNSGetListCommandResponse {
+	result := &namecheap.DomainDNSGetListResult{IsUsingOurDNS: namecheap.Bool(isUsingOurDNS)}
+	if nameservers != nil {
+		result.Nameservers = &nameservers
+	}
+	return &namecheap.DomainsDNSGetListCommandResponse{DomainDNSGetListResult: result}
+}
 
-	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com", "ns2.example.com"}, client)
+func TestReadNameserversMerge_FindsMatching(t *testing.T) {
+	result, diags := readNameserversMerge(getListResponse(false, []string{"ns1.example.com", "ns2.example.com", "ns3.other.com"}), []string{"ns1.example.com", "ns2.example.com"})
 	assert.False(t, diags.HasError())
 	assert.Equal(t, []string{"ns1.example.com", "ns2.example.com"}, *result)
 }
 
 func TestReadNameserversMerge_CaseInsensitiveMatch(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}))
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(getListResponse(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}), []string{"ns1.example.com"})
 	assert.False(t, diags.HasError())
 	assert.Equal(t, []string{"ns1.example.com"}, *result)
 }
 
 func TestReadNameserversMerge_UsingOurDNS(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(true, nil))
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(getListResponse(true, nil), []string{"ns1.example.com"})
 	assert.False(t, diags.HasError())
 	assert.Empty(t, *result)
 }
 
 func TestReadNameserversMerge_NoMatchFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.other.com", "ns2.other.com"}))
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
+	result, diags := readNameserversMerge(getListResponse(false, []string{"ns1.other.com", "ns2.other.com"}), []string{"ns1.example.com"})
 	assert.False(t, diags.HasError())
 	assert.Empty(t, *result)
 }
 
 func TestReadNameserversOverwrite_ReturnsAll(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com"}))
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
+	result, diags := readNameserversOverwrite(getListResponse(false, []string{"ns1.example.com", "ns2.example.com"}))
 	assert.False(t, diags.HasError())
 	assert.Equal(t, []string{"ns1.example.com", "ns2.example.com"}, *result)
 }
 
 func TestReadNameserversOverwrite_UsingOurDNS(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(true, nil))
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
+	result, diags := readNameserversOverwrite(getListResponse(true, nil))
 	assert.False(t, diags.HasError())
 	assert.Empty(t, *result)
 }
 
 func TestReadNameserversOverwrite_NilNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return custom DNS (IsUsingOurDNS=false) but with no nameserver elements
-		_, _ = fmt.Fprint(w, getListXML(false, nil))
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
+	// Custom DNS (IsUsingOurDNS=false) but with no nameserver elements
+	result, diags := readNameserversOverwrite(getListResponse(false, nil))
 	assert.False(t, diags.HasError())
 	assert.NotNil(t, result)
 	// With nil nameservers and IsUsingOurDNS=false, should return empty list
 	assert.Empty(t, *result)
 }
 
-func TestReadNameserversMerge_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprint(w, "internal error")
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com"}, client)
+func TestReadNameserversMerge_NilResponse(t *testing.T) {
+	result, diags := readNameserversMerge(nil, []string{"ns1.example.com"})
 	assert.True(t, diags.HasError())
 	assert.Nil(t, result)
 }
 
-func TestReadNameserversOverwrite_GetListAPIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprint(w, "internal error")
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	result, diags := readNameserversOverwrite(context.Background(), "test.com", client)
+func TestReadNameserversOverwrite_NilResponse(t *testing.T) {
+	result, diags := readNameserversOverwrite(nil)
 	assert.True(t, diags.HasError())
 	assert.Nil(t, result)
 }

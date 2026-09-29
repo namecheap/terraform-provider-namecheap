@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -825,4 +826,35 @@ func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
 	// unset even though the API reports "MX".
 	assert.Equal(t, "", data.Get("email_type").(string))
 	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
+}
+
+// Read of a domain on custom nameservers must reuse the getList response it
+// already fetched to check IsUsingOurDNS instead of requesting it again: each
+// extra call counts against the account's API rate limit on every refresh.
+func TestResourceRecordRead_CustomNameservers_SingleGetList(t *testing.T) {
+	for _, mode := range []string{ncModeOverwrite, ncModeMerge} {
+		t.Run(mode, func(t *testing.T) {
+			var getListCalls int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				if r.FormValue("Command") == "namecheap.domains.dns.getList" {
+					atomic.AddInt32(&getListCalls, 1)
+					_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+				}
+			}))
+			defer server.Close()
+
+			client := newTestClient(server.URL)
+			data := resourceNamecheapDomainRecords().TestResourceData()
+			data.SetId("test.com")
+			_ = data.Set("domain", "test.com")
+			_ = data.Set("mode", mode)
+			_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
+
+			diags := resourceRecordRead(context.TODO(), data, client)
+			assert.False(t, diags.HasError())
+			assert.ElementsMatch(t, []interface{}{"ns1.custom.com", "ns2.custom.com"}, data.Get("nameservers").(*schema.Set).List())
+			assert.Equal(t, int32(1), atomic.LoadInt32(&getListCalls))
+		})
+	}
 }
