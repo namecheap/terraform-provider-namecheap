@@ -414,8 +414,10 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	// Settling an import only needs a write when there are declared records
-	// to bring in line with the configuration; released records need none.
-	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) && (!adopted || (newRecordsLen != 0 && data.HasChange("record"))) {
+	// to bring in line with the configuration or a declared email_type to
+	// apply; released records need none.
+	settleRecordsWrite := newRecordsLen != 0 && (data.HasChange("record") || data.HasChange("email_type"))
+	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) && (!adopted || settleRecordsWrite) {
 		recordDiags := updateRecordsMerge(ctx, domain, emailType, previousRecordsMerge, newRecords, client)
 		if recordDiags.HasError() {
 			return recordDiags
@@ -473,6 +475,17 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 			}
 			diags = append(diags, recordDiags...)
 		}
+	}
+
+	// Settling an import that declares email_type but no records: the adopted
+	// records stay in the zone untouched and only the email type is written (#355).
+	if mode == ncModeMerge && adopted && emailType != nil && data.HasChange("email_type") &&
+		newRecordsLen == 0 && oldRecordsLen != 0 && oldNameserversLen == 0 && newNameserversLen == 0 {
+		recordDiags := updateRecordsMerge(ctx, domain, emailType, nil, nil, client)
+		if recordDiags.HasError() {
+			return recordDiags
+		}
+		diags = append(diags, recordDiags...)
 	}
 
 	// For overwrite mode, when no nameservers and records, and email type is not set, then we have to reset it to NONE

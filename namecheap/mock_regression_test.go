@@ -443,4 +443,64 @@ resource "namecheap_domain_records" "test" {
 			},
 		})
 	})
+
+	// A declared email_type is part of the configuration the settle apply
+	// reconciles: it must reach Namecheap on that apply, both when the declared
+	// records already match the zone exactly (so no record differs) and when no
+	// records are declared at all.
+	t.Run("regression_355_merge_import_applies_email_type", func(t *testing.T) {
+		mx := hostEntry{Name: "@", Type: "MX", Address: "mail.example.com.", MXPref: 10, TTL: 1800}
+		home := hostEntry{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800}
+		for _, tc := range []struct {
+			name   string
+			hosts  []hostEntry
+			record string
+		}{
+			{name: "with_matching_record", hosts: []hostEntry{mx}, record: `
+  record {
+    hostname = "@"
+    type     = "MX"
+    address  = "mail.example.com."
+    mx_pref  = 10
+  }
+`},
+			{name: "without_records", hosts: []hostEntry{mx, home}, record: ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := newNamecheapMock(t)
+				m.seed(domain, tc.hosts, "NONE", nil)
+
+				config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain     = "%s"
+  mode       = "MERGE"
+  email_type = "MX"
+%s}
+`, domain, tc.record)
+
+				resource.Test(t, resource.TestCase{
+					PreCheck:          func() { mockPreCheck(t, m) },
+					ProviderFactories: mockProviderFactories(),
+					Steps: []resource.TestStep{
+						{
+							Config:             config,
+							ResourceName:       resourceName,
+							ImportState:        true,
+							ImportStateId:      domain,
+							ImportStatePersist: true,
+						},
+						{
+							Config: config,
+							Check: resource.ComposeTestCheckFunc(
+								mockCheckEmailType(m, domain, "MX"),
+								mockCheckHostCount(m, domain, len(tc.hosts)),
+								mockCheckHostContains(m, domain, "@", "MX", "mail.example.com."),
+								resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+							),
+						},
+					},
+				})
+			})
+		}
+	})
 }
