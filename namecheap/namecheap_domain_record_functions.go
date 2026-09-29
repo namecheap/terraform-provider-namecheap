@@ -928,3 +928,52 @@ func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *stri
 
 	return emailType
 }
+
+// releasedRecords returns the records (in raw *schema.Set element form) that are
+// present in previous but absent from current, matched by hostname, type and
+// fixed address like the rest of MERGE mode. Used after an import to name the
+// adopted records the first apply releases from state (#355).
+func releasedRecords(previous []interface{}, current []interface{}) []interface{} {
+	currentHashes := map[string]struct{}{}
+	for _, record := range *convertRecordTypeSetToDomainRecords(&current) {
+		currentHashes[releasedRecordKey(&record)] = struct{}{}
+	}
+
+	var released []interface{}
+	for i, record := range *convertRecordTypeSetToDomainRecords(&previous) {
+		if _, ok := currentHashes[releasedRecordKey(&record)]; !ok {
+			released = append(released, previous[i])
+		}
+	}
+	return released
+}
+
+// releasedRecordKey is the case-insensitive hostname/type/fixed-address key
+// releasedRecords matches on. An address the fixer rejects is compared as-is.
+func releasedRecordKey(record *namecheap.DomainsDNSHostRecord) string {
+	address, err := getFixedAddressOfRecord(record)
+	if err != nil {
+		address = record.Address
+	}
+	return strings.ToLower(hashRecord(*record.HostName, *record.RecordType, *address))
+}
+
+// buildReleasedRecordsWarning builds the warning emitted by the first MERGE
+// apply after `terraform import` for the adopted records that are not declared
+// in the configuration: they leave Terraform state but stay live at Namecheap.
+func buildReleasedRecordsWarning(domain string, released []interface{}) diag.Diagnostic {
+	var detail strings.Builder
+
+	detail.WriteString("These records were adopted by `terraform import` but are not declared in the configuration. ")
+	detail.WriteString("They were removed from Terraform state and were not deleted at Namecheap:\n\n")
+	for _, record := range *convertRecordTypeSetToDomainRecords(&released) {
+		fmt.Fprintf(&detail, "  %s %s %s\n", derefStr(record.HostName), derefStr(record.RecordType), derefStr(record.Address))
+	}
+	detail.WriteString("\nAdd them to the configuration to manage them with this resource, or leave them as they are.")
+
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Released %d imported record(s) on %s from Terraform state", len(released), domain),
+		Detail:   detail.String(),
+	}
+}

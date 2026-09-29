@@ -1,6 +1,7 @@
 package namecheap_provider
 
 import (
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -410,4 +411,20 @@ func TestResolveEmailType_MXETypeButOnlyMXRecords(t *testing.T) {
 	emailType := namecheap.EmailTypeMXE
 	result := resolveEmailType(&records, &emailType)
 	assert.Equal(t, namecheap.EmailTypeNone, *result)
+}
+
+func TestBuildReleasedRecordsWarning(t *testing.T) {
+	released := []interface{}{
+		map[string]interface{}{"hostname": "home", "type": "A", "address": "203.0.113.20", "mx_pref": 10, "ttl": 1800},
+		map[string]interface{}{"hostname": "@", "type": "MX", "address": "mail.example.com.", "mx_pref": 20, "ttl": 600},
+	}
+
+	warning := buildReleasedRecordsWarning("example.com", released)
+
+	assert.Equal(t, diag.Warning, warning.Severity)
+	assert.Contains(t, warning.Summary, "example.com")
+	assert.Contains(t, warning.Summary, "2 imported record(s)")
+	assert.Contains(t, warning.Detail, "home A 203.0.113.20")
+	assert.Contains(t, warning.Detail, "@ MX mail.example.com.")
+	assert.Contains(t, warning.Detail, "not deleted")
 }

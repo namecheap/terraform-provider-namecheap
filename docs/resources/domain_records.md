@@ -62,6 +62,10 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 ~> It is strongly recommended to set `address`, `hostname`, `nameservers` in lower case to prevent undefined behavior!
 
+## Attribute Reference
+
+- `adopted` - Set by the provider after `terraform import`: `true` while the imported records and nameservers have not yet been reconciled with the configuration, `false` after the first apply. See [Import](#import).
+
 ## Import
 
 Domain records can be imported by domain name, e.g.,
@@ -69,3 +73,18 @@ Domain records can be imported by domain name, e.g.,
 ```shell
 terraform import namecheap_domain_records.main example.com
 ```
+
+Import reads the whole live zone into state and marks it `adopted = true`. The
+first plan afterwards is never empty: it shows `adopted` being recomputed and, in
+`MERGE` mode, any record that exists at Namecheap but is absent from your
+configuration leaving state. That first apply settles ownership:
+
+- In `MERGE` mode the undeclared records are **released, not deleted**: they
+  disappear from state, stay live at Namecheap, and the apply prints a warning
+  listing them. A `terraform destroy` before that first apply deletes nothing.
+- In `OVERWRITE` mode the resource owns the entire zone, so undeclared records
+  are deleted, with the usual warning listing them and offering paste-ready
+  `record` blocks.
+
+See the [importing guide](../guides/importing.md#after-importing) for the full
+walkthrough.

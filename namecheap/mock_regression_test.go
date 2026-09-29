@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
-// TestAccMockRegression pins the fixes for four historical bugs so they cannot
-// silently regress. All four issues are closed/fixed; these are guardrails, run
-// fast and credential-free against the stateful mock.
+// TestAccMockRegression pins the fixes for historical bugs so they cannot
+// silently regress. These are guardrails, run fast and credential-free against
+// the stateful mock.
 func TestAccMockRegression(t *testing.T) {
 	const domain = "mock-example.com"
 	const resourceName = "namecheap_domain_records.test"
@@ -85,7 +86,7 @@ resource "namecheap_domain_records" "test" {
 	// #68: `terraform import` set an internal mode=IMPORT that the schema's mode
 	// validator rejected ("expected mode to be one of [MERGE OVERWRITE]"). Import
 	// now succeeds. mode is import-only and differs from the configured value, so
-	// it is excluded from ImportStateVerify.
+	// it is excluded from ImportStateVerify, as is the adopted marker (#355).
 	t.Run("regression_68_import", func(t *testing.T) {
 		m := newNamecheapMock(t)
 		resource.Test(t, resource.TestCase{
@@ -104,7 +105,7 @@ resource "namecheap_domain_records" "test" {
 					ImportState:             true,
 					ImportStateId:           domain,
 					ImportStateVerify:       true,
-					ImportStateVerifyIgnore: []string{"mode"},
+					ImportStateVerifyIgnore: []string{"mode", "adopted"},
 				},
 			},
 		})
@@ -148,6 +149,254 @@ resource "namecheap_domain_records" "test" {
 						mockCheckHostCount(m, domain, 2),
 						mockCheckHostContains(m, domain, "test", "A", "1.1.1.1"),
 						mockCheckHostContains(m, domain, "@", "CAA", caaAddress),
+					),
+				},
+			},
+		})
+	})
+	// #355: after `terraform import` in MERGE mode, state held every live record,
+	// so the first apply (and a destroy before any apply) treated undeclared
+	// records as managed and deleted them at Namecheap. Import now marks the
+	// records as adopted; the first MERGE apply releases the undeclared ones from
+	// state without touching the zone, and a MERGE destroy before any apply
+	// deletes nothing.
+	t.Run("regression_355_merge_import_apply_keeps_undeclared", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			// After a real apply the resource owns only www, so destroy removes
+			// www and leaves the undeclared home record alone.
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				mockCheckHostCount(m, domain, 1),
+				mockCheckHostContains(m, domain, "home", "A", "203.0.113.20"),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+					ImportStateCheck: func(states []*terraform.InstanceState) error {
+						if len(states) != 1 {
+							return fmt.Errorf("expected 1 imported state, got %d", len(states))
+						}
+						if got := states[0].Attributes["adopted"]; got != "true" {
+							return fmt.Errorf("adopted after import = %q, want \"true\"", got)
+						}
+						if got := states[0].Attributes["record.#"]; got != "2" {
+							return fmt.Errorf("record.# after import = %q, want \"2\"", got)
+						}
+						return nil
+					},
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckHostCount(m, domain, 2),
+						mockCheckHostContains(m, domain, "www", "A", "203.0.113.10"),
+						mockCheckHostContains(m, domain, "home", "A", "203.0.113.20"),
+						resource.TestCheckResourceAttr(resourceName, "record.#", "1"),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+					),
+				},
+			},
+		})
+	})
+
+	t.Run("regression_355_merge_import_destroy_keeps_undeclared", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			// Nothing was ever applied, so destroy must not touch the zone.
+			CheckDestroy: mockCheckHostCount(m, domain, 2),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+}
+`, domain),
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+			},
+		})
+	})
+
+	// Portfolio adoption from the importing guide: a MERGE resource with no
+	// record blocks. The first apply must settle ownership without writing to
+	// the zone at all, and every live record stays.
+	t.Run("regression_355_merge_import_no_records_writes_nothing", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckHostCount(m, domain, 2),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckHostCount(m, domain, 2),
+						resource.TestCheckResourceAttr(resourceName, "record.#", "0"),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+						func(*terraform.State) error {
+							if got := m.commandCount("namecheap.domains.dns.setHosts"); got != 0 {
+								return fmt.Errorf("setHosts called %d time(s) while settling an import with no declared records, want 0", got)
+							}
+							return nil
+						},
+					),
+				},
+			},
+		})
+	})
+
+	// Configuration that already matches the imported zone exactly: the plan
+	// is still non-empty (adopted is recomputed) so that one apply settles
+	// ownership, but no write is needed for it.
+	t.Run("regression_355_merge_import_matching_config_settles_without_write", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "MERGE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckHostsCleared(m, domain),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckHostCount(m, domain, 1),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
+						func(*terraform.State) error {
+							if got := m.commandCount("namecheap.domains.dns.setHosts"); got != 0 {
+								return fmt.Errorf("setHosts called %d time(s) while settling an import that matches config, want 0", got)
+							}
+							return nil
+						},
+					),
+				},
+			},
+		})
+	})
+
+	// OVERWRITE keeps its documented semantics after import: the first apply
+	// owns the whole zone and removes undeclared records (with the #250 warning
+	// at apply time). Guards that the adoption marker does not weaken OVERWRITE.
+	t.Run("regression_355_overwrite_import_apply_still_owns_zone", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		m.seed(domain, []hostEntry{
+			{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+			{Name: "home", Type: "A", Address: "203.0.113.20", MXPref: 10, TTL: 1800},
+		}, "NONE", nil)
+
+		config := fmt.Sprintf(`
+resource "namecheap_domain_records" "test" {
+  domain = "%s"
+  mode   = "OVERWRITE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+}
+`, domain)
+
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckHostsCleared(m, domain),
+			Steps: []resource.TestStep{
+				{
+					Config:             config,
+					ResourceName:       resourceName,
+					ImportState:        true,
+					ImportStateId:      domain,
+					ImportStatePersist: true,
+				},
+				{
+					Config: config,
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckHostCount(m, domain, 1),
+						mockCheckHostContains(m, domain, "www", "A", "203.0.113.10"),
+						resource.TestCheckResourceAttr(resourceName, "adopted", "false"),
 					),
 				},
 			},

@@ -38,6 +38,16 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 			},
 		},
 
+		// While records adopted by `terraform import` are still unreconciled,
+		// force a non-empty plan so Update runs once and settles ownership
+		// even when the configuration already matches the imported zone (#355).
+		CustomizeDiff: func(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+			if diff.Id() != "" && diff.Get("adopted").(bool) {
+				return diff.SetNewComputed("adopted")
+			}
+			return nil
+		},
+
 		Schema: map[string]*schema.Schema{
 			"domain": {
 				Type:         schema.TypeString,
@@ -107,6 +117,11 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 					Type:         schema.TypeString,
 					ValidateFunc: validation.StringIsNotEmpty,
 				},
+			},
+			"adopted": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Set by the provider after `terraform import`: true while the imported records and nameservers have not yet been reconciled with the configuration. The first apply clears it. In MERGE mode that apply releases undeclared records from state without deleting them at Namecheap, and a destroy before that apply deletes nothing.",
 			},
 		},
 	}
@@ -197,6 +212,7 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	data.SetId(domain)
+	_ = data.Set("adopted", false)
 
 	return diags
 }
@@ -302,6 +318,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 
 	if mode == ncModeImport {
 		_ = data.Set("mode", ncModeMerge)
+		_ = data.Set("adopted", true)
 	}
 
 	return diags
@@ -327,6 +344,18 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 
 	oldNameserversLen := len(oldNameservers)
 	newNameserversLen := len(newNameservers)
+
+	// Records and nameservers adopted by `terraform import` were found, not
+	// applied, so MERGE must not treat them as owned: the merge runs against
+	// the configuration itself, releasing anything undeclared from state
+	// without touching it at Namecheap (#355).
+	adopted := data.Get("adopted").(bool)
+	previousRecordsMerge := oldRecords
+	previousNameserversMerge := oldNameservers
+	if adopted {
+		previousRecordsMerge = newRecords
+		previousNameserversMerge = newNameservers
+	}
 
 	var emailType *string
 
@@ -365,7 +394,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		}
 	}
 
-	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 {
+	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 && !adopted {
 		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
@@ -373,8 +402,16 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, nsDiags...)
 	}
 
-	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) {
-		recordDiags := updateRecordsMerge(ctx, domain, emailType, oldRecords, newRecords, client)
+	if mode == ncModeMerge && adopted {
+		if released := releasedRecords(oldRecords, newRecords); len(released) > 0 {
+			diags = append(diags, buildReleasedRecordsWarning(domain, released))
+		}
+	}
+
+	// Settling an import only needs a write when there are declared records
+	// to bring in line with the configuration; released records need none.
+	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) && (!adopted || (newRecordsLen != 0 && data.HasChange("record"))) {
+		recordDiags := updateRecordsMerge(ctx, domain, emailType, previousRecordsMerge, newRecords, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
@@ -385,8 +422,13 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		// oldRecords is passed as the pre-flight's prior-state reference so a
 		// record the user just deliberately removed from config (still live
 		// at pre-flight time, since SetHosts hasn't run yet) is treated as a
-		// consented removal rather than a surprise deletion warning.
-		recordDiags := createRecordsOverwrite(ctx, domain, emailType, newRecords, oldRecords, client)
+		// consented removal rather than a surprise deletion warning. Adopted
+		// records were never consented to, so they stay eligible for the warning.
+		priorRecords := oldRecords
+		if adopted {
+			priorRecords = nil
+		}
+		recordDiags := createRecordsOverwrite(ctx, domain, emailType, newRecords, priorRecords, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
@@ -401,8 +443,8 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, nsDiags...)
 	}
 
-	if mode == ncModeMerge && newNameserversLen != 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+	if mode == ncModeMerge && newNameserversLen != 0 && (!adopted || data.HasChange("nameservers")) {
+		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(previousNameserversMerge), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -437,6 +479,9 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, recordDiags...)
 	}
 
+	// Ownership is settled once the first apply after import succeeds.
+	_ = data.Set("adopted", false)
+
 	return diags
 }
 
@@ -465,11 +510,23 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 		defer ncMutexKV.Unlock(domain)
 	}
 
+	// Records adopted by `terraform import` and never applied are not owned by
+	// this resource: MERGE releases them untouched, while OVERWRITE still
+	// clears the zone but with none of them counted as consented (#355).
+	adopted := data.Get("adopted").(bool)
+
+	if mode == ncModeMerge && adopted {
+		return nil
+	}
+
 	if mode == ncModeMerge && recordsLen != 0 {
 		return deleteRecordsMerge(ctx, domain, records, client)
 	}
 
 	if mode == ncModeOverwrite && recordsLen != 0 {
+		if adopted {
+			records = nil
+		}
 		return deleteRecordsOverwrite(ctx, domain, records, client)
 	}
 

@@ -826,3 +826,61 @@ func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
 	assert.Equal(t, "", data.Get("email_type").(string))
 	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
 }
+
+// #355: import adopts the whole live zone into state. The IMPORT read marks the
+// records as adopted so the first MERGE apply/destroy knows they were found,
+// not applied, and must not delete the undeclared ones.
+func TestReadImportMode_MarksRecordsAdopted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "@", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeImport)
+
+	diags := resourceRecordRead(context.TODO(), data, newTestClient(server.URL))
+	assert.False(t, diags.HasError())
+	assert.True(t, data.Get("adopted").(bool), "IMPORT read must mark the adopted records")
+}
+
+// The refresh that precedes the first plan after import runs in MERGE mode and
+// must carry the adopted marker through unchanged, otherwise Update never sees
+// it.
+func TestReadMergeMode_PreservesAdoptedMarker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "@", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+			}))
+		}
+	}))
+	defer server.Close()
+
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("adopted", true)
+	_ = data.Set("record", []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	})
+
+	diags := resourceRecordRead(context.TODO(), data, newTestClient(server.URL))
+	assert.False(t, diags.HasError())
+	assert.True(t, data.Get("adopted").(bool), "MERGE read must not clear the adopted marker")
+}
