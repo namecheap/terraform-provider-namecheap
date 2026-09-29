@@ -424,8 +424,8 @@ func TestBuildReleasedRecordsWarning(t *testing.T) {
 	assert.Equal(t, diag.Warning, warning.Severity)
 	assert.Contains(t, warning.Summary, "example.com")
 	assert.Contains(t, warning.Summary, "2 imported record(s)")
-	assert.Contains(t, warning.Detail, "home A 203.0.113.20")
-	assert.Contains(t, warning.Detail, "@ MX mail.example.com.")
+	assert.Contains(t, warning.Detail, "{hostname = home, type = A, address = 203.0.113.20}")
+	assert.Contains(t, warning.Detail, "{hostname = @, type = MX, address = mail.example.com.}")
 	assert.Contains(t, warning.Detail, "not deleted")
 }
 
@@ -446,4 +446,27 @@ func TestBuildReleasedNameserversWarning(t *testing.T) {
 	assert.Contains(t, warning.Detail, "ns3.example-dns.net")
 	assert.Contains(t, warning.Detail, "ns4.example-dns.net")
 	assert.Contains(t, warning.Detail, "still delegated")
+}
+
+func TestReleasedRecords_MatchesOnFixedAddressCaseInsensitively(t *testing.T) {
+	previous := []interface{}{
+		map[string]interface{}{"hostname": "mail", "type": "CNAME", "address": "Target.Example.com.", "mx_pref": 10, "ttl": 1800},
+		map[string]interface{}{"hostname": "home", "type": "A", "address": "203.0.113.20", "mx_pref": 10, "ttl": 1800},
+	}
+	current := []interface{}{
+		map[string]interface{}{"hostname": "mail", "type": "CNAME", "address": "target.example.com", "mx_pref": 10, "ttl": 1800},
+	}
+
+	released, err := releasedRecords(previous, current)
+	assert.NoError(t, err)
+	assert.Equal(t, []interface{}{previous[1]}, released)
+}
+
+func TestReleasedRecords_SurfacesAddressFixError(t *testing.T) {
+	previous := []interface{}{
+		map[string]interface{}{"hostname": "@", "type": "CAA", "address": "not a caa value", "mx_pref": 10, "ttl": 1800},
+	}
+
+	_, err := releasedRecords(previous, nil)
+	assert.Error(t, err)
 }

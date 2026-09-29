@@ -408,7 +408,11 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeMerge && adopted {
-		if released := releasedRecords(oldRecords, newRecords); len(released) > 0 {
+		released, err := releasedRecords(oldRecords, newRecords)
+		if err != nil {
+			return diagFromClientError(err)
+		}
+		if len(released) > 0 {
 			diags = append(diags, buildReleasedRecordsWarning(domain, released))
 		}
 		if released := releasedNameservers(convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers)); len(released) > 0 {
