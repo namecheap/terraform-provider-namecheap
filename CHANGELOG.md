@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.4](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.3...v2.9.4) (2026-10-02)
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/namecheap/go-namecheap-sdk/v2 from 2.10.3 to 2.10.4 ([#351](https://github.com/namecheap/terraform-provider-namecheap/issues/351)) ([0546224](https://github.com/namecheap/terraform-provider-namecheap/commit/0546224cc17426af1e80f7196445318b76589f78))
+* reuse the getList response when reading custom nameservers ([#357](https://github.com/namecheap/terraform-provider-namecheap/issues/357)) ([35df7bb](https://github.com/namecheap/terraform-provider-namecheap/commit/35df7bbeb23d676fb31c20e82615129b7d948a28))
+
 ## [2.9.3](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.2...v2.9.3) (2026-09-09)
 
 
