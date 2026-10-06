@@ -108,8 +108,8 @@ resource "namecheap_domain_records" "portfolio" {
 zone, so an apply against a configuration that does not yet list every existing
 record will **delete** the records you did not write down — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite). Adopt in
-`MERGE`, confirm the plan is empty, and switch mode later if you want full
-ownership.
+`MERGE`, apply once to settle ownership (see [After importing](#after-importing)),
+and switch mode later if you want full ownership.
 
 -> A portfolio import reads the account listing plus one call per domain. On a
 large portfolio that can brush against Namecheap's per-minute rate limit; the
@@ -118,13 +118,27 @@ large portfolio that can brush against Namecheap's per-minute rate limit; the
 
 ## After importing
 
-1. Run `terraform plan`. An empty plan means the configuration matches reality
-   and the adoption is complete.
-2. A non-empty plan means your configuration differs from what exists. Read each
-   proposed change and decide which side is right — sometimes the configuration
-   is wrong, sometimes the live state has drifted and the plan is the fix.
+1. Run `terraform plan`. For most resources an empty plan means the
+   configuration matches reality and the adoption is complete. A freshly
+   imported `namecheap_domain_records` is the exception: its plan always lists
+   one change, `adopted` being recomputed. Import reads every live record and
+   nameserver into state, and one apply is what settles which of them your
+   configuration actually owns.
+2. Any other change in the plan means your configuration differs from what
+   exists. Read each proposed change and decide which side is right — sometimes
+   the configuration is wrong, sometimes the live state has drifted and the plan
+   is the fix.
 3. For `namecheap_domain_records`, a common first-plan difference is records
-   that exist at Namecheap but are absent from your configuration. In `MERGE`
-   mode they are simply left alone; in `OVERWRITE` mode the provider warns and
-   lists them, with paste-ready `record` blocks so you can adopt rather than
-   lose them.
+   that exist at Namecheap but are absent from your configuration; the plan
+   shows them leaving state. In `MERGE` mode the first apply releases them from
+   state with a warning that lists them and **does not delete or change them at
+   Namecheap** (the same goes for imported custom nameservers you did not
+   declare). In `OVERWRITE` mode the provider warns and lists them, with
+   paste-ready `record` blocks so you can adopt rather than lose them.
+4. Until that first apply, destroying the resource removes it from state only
+   and deletes nothing at Namecheap. Apply once before you rely on destroy.
+
+-> Resources imported with an earlier provider version carry no `adopted`
+marker, so their first `MERGE` apply still deletes imported records the
+configuration does not declare. Declare those records first, or run
+`terraform state rm` and import again with this version.

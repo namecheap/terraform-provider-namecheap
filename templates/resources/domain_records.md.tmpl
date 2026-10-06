@@ -39,6 +39,10 @@ Follow [Namecheap domain records guide](../guides/namecheap_domain_records_guide
 
 ~> It is strongly recommended to set `address`, `hostname`, `nameservers` in lower case to prevent undefined behavior!
 
+## Attribute Reference
+
+- `adopted` - Set by the provider after `terraform import` and cleared by the first apply; unset for resources that were not imported. While `true`, a destroy deletes nothing at Namecheap, and the first apply in `MERGE` mode releases imported records and nameservers that the configuration does not declare from state instead of deleting them. See [After importing](../guides/importing.md#after-importing).
+
 ## Import
 
 Domain records can be imported by domain name, e.g.,
