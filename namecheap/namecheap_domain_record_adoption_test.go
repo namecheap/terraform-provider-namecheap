@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -209,4 +212,237 @@ func TestBuildReleasedWarning(t *testing.T) {
 	assert.Contains(t, warning.Detail, "hostname = home, type = A, address = 5.6.7.8")
 	assert.Contains(t, warning.Detail, "nameserver ns3.example.net")
 	assert.Contains(t, warning.Detail, "NOT changed at Namecheap")
+}
+
+// setHostsRecorder serves a zone holding www and home and records the hostnames
+// of every setHosts call, i.e. what the provider decided to keep at Namecheap.
+type setHostsRecorder struct {
+	mu    sync.Mutex
+	calls [][]string
+}
+
+func (rec *setHostsRecorder) server() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+				{Name: "home", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			var hostnames []string
+			for key, values := range r.Form {
+				if strings.HasPrefix(key, "HostName") {
+					hostnames = append(hostnames, values[0])
+				}
+			}
+			rec.mu.Lock()
+			rec.calls = append(rec.calls, hostnames)
+			rec.mu.Unlock()
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+}
+
+func (rec *setHostsRecorder) sent() [][]string {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.calls
+}
+
+// planAndApply drives the real plan -> apply path (Diff runs CustomizeDiff, Apply
+// runs Update) from a prior state, the way Terraform does, so the old/new values
+// Update sees are the prior state and the planned configuration.
+func planAndApply(t *testing.T, serverURL string, prior *terraform.InstanceState, records ...map[string]interface{}) (*terraform.InstanceDiff, *terraform.InstanceState, diag.Diagnostics) {
+	t.Helper()
+
+	var recordList []interface{}
+	for _, record := range records {
+		recordList = append(recordList, record)
+	}
+	config := terraform.NewResourceConfigRaw(map[string]interface{}{
+		"domain": "test.com",
+		"mode":   ncModeMerge,
+		"record": recordList,
+	})
+
+	client := newTestClient(serverURL)
+	resource := resourceNamecheapDomainRecords()
+	diff, err := resource.Diff(context.TODO(), prior, config, client)
+	require.NoError(t, err)
+	require.NotNil(t, diff, "an apply must be planned")
+
+	state, diags := resource.Apply(context.TODO(), prior, diff, client)
+	return diff, state, diags
+}
+
+func priorState(t *testing.T, adopted bool, records ...map[string]interface{}) *terraform.InstanceState {
+	t.Helper()
+	return persistedRecordsResource(t, adopted, records...).State()
+}
+
+func TestUpdate_AdoptedMerge_KeepsImportedRecordsAtNamecheap(t *testing.T) {
+	rec := &setHostsRecorder{}
+	server := rec.server()
+	defer server.Close()
+
+	// State holds the whole imported zone; the configuration declares only www.
+	prior := priorState(t, true,
+		adoptionTestRecord("www", "A", "1.2.3.4"),
+		adoptionTestRecord("home", "A", "5.6.7.8"))
+
+	_, state, diags := planAndApply(t, server.URL, prior, adoptionTestRecord("www", "A", "1.2.3.4"))
+
+	require.False(t, diags.HasError())
+	require.Len(t, rec.sent(), 1)
+	assert.ElementsMatch(t, []string{"www", "home"}, rec.sent()[0], "the imported home record must be sent back, not dropped")
+	assert.Equal(t, "false", state.Attributes["adopted"], "the first apply settles ownership")
+	assert.Equal(t, "1", state.Attributes["record.#"], "home leaves state")
+	require.Len(t, diags, 1)
+	assert.Equal(t, diag.Warning, diags[0].Severity)
+	assert.Contains(t, diags[0].Summary, "Released 1 imported item(s)")
+	assert.Contains(t, diags[0].Detail, "hostname = home")
+}
+
+// The contrast that makes the test above meaningful: the same change on a
+// resource that was not imported is a genuine removal and is still deleted.
+func TestUpdate_NotAdoptedMerge_StillRemovesDroppedRecord(t *testing.T) {
+	rec := &setHostsRecorder{}
+	server := rec.server()
+	defer server.Close()
+
+	prior := priorState(t, false,
+		adoptionTestRecord("www", "A", "1.2.3.4"),
+		adoptionTestRecord("home", "A", "5.6.7.8"))
+
+	diff, state, diags := planAndApply(t, server.URL, prior, adoptionTestRecord("www", "A", "1.2.3.4"))
+
+	require.False(t, diags.HasError())
+	require.Len(t, rec.sent(), 1)
+	assert.Equal(t, []string{"www"}, rec.sent()[0])
+	assert.Empty(t, diags, "no release warning for a resource that was not imported")
+	assert.NotContains(t, diff.Attributes, "adopted", "an ordinary update plan must not mention the marker")
+	assert.NotContains(t, state.Attributes, "adopted", "an ordinary update must not write the marker")
+}
+
+func TestUpdate_AdoptedMerge_MalformedRecordFailsBeforeAnyWrite(t *testing.T) {
+	rec := &setHostsRecorder{}
+	server := rec.server()
+	defer server.Close()
+
+	// A CAA address needs three parts; this one has two.
+	prior := priorState(t, true, adoptionTestRecord("www", "A", "1.2.3.4"))
+
+	_, _, diags := planAndApply(t, server.URL, prior, adoptionTestRecord("caa", "CAA", "0 issue"))
+
+	assert.True(t, diags.HasError())
+	assert.Empty(t, rec.sent(), "nothing may be written when the records cannot be compared")
+}
+
+// CustomizeDiff: an imported resource always plans the apply that settles it,
+// even when the configuration matches the zone exactly; an ordinary resource
+// with no changes plans nothing.
+func TestCustomizeDiff_AdoptedAlwaysPlansSettlingApply(t *testing.T) {
+	config := terraform.NewResourceConfigRaw(map[string]interface{}{
+		"domain": "test.com",
+		"mode":   ncModeMerge,
+		"record": []interface{}{adoptionTestRecord("www", "A", "1.2.3.4")},
+	})
+	resource := resourceNamecheapDomainRecords()
+
+	t.Run("adopted, configuration matches", func(t *testing.T) {
+		prior := priorState(t, true, adoptionTestRecord("www", "A", "1.2.3.4"))
+		diff, err := resource.Diff(context.TODO(), prior, config, nil)
+		require.NoError(t, err)
+		require.NotNil(t, diff)
+		require.Contains(t, diff.Attributes, "adopted")
+		assert.True(t, diff.Attributes["adopted"].NewComputed)
+	})
+
+	t.Run("not adopted, configuration matches", func(t *testing.T) {
+		prior := priorState(t, false, adoptionTestRecord("www", "A", "1.2.3.4"))
+		diff, err := resource.Diff(context.TODO(), prior, config, nil)
+		require.NoError(t, err)
+		assert.Nil(t, diff, "an unchanged, non-imported resource must plan nothing")
+	})
+}
+
+func TestReleasedRecords_MalformedAddressIsAnError(t *testing.T) {
+	valid := adoptionTestRecord("www", "A", "1.2.3.4")
+	malformed := adoptionTestRecord("caa", "CAA", "0 issue")
+
+	_, err := releasedRecords([]interface{}{valid}, []interface{}{malformed})
+	assert.Error(t, err, "malformed declared record")
+
+	_, err = releasedRecords([]interface{}{malformed}, []interface{}{valid})
+	assert.Error(t, err, "malformed imported record")
+}
+
+// If the first apply after import fails part-way, whatever state Terraform is
+// left with must never make the retry delete the undeclared imported records.
+func TestUpdate_AdoptedMerge_FailedFirstApplyDoesNotArmDeletion(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
+				{Name: "home", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+			}))
+		default:
+			_, _ = fmt.Fprint(w, apiErrorXML("2019166", "temporary failure"))
+		}
+	}))
+	defer failing.Close()
+
+	prior := priorState(t, true,
+		adoptionTestRecord("www", "A", "1.2.3.4"),
+		adoptionTestRecord("home", "A", "5.6.7.8"))
+	www := adoptionTestRecord("www", "A", "1.2.3.4")
+
+	_, afterFailure, diags := planAndApply(t, failing.URL, prior, www)
+	require.True(t, diags.HasError(), "the first apply is meant to fail")
+	require.NotNil(t, afterFailure)
+
+	// The invariant that keeps a retry safe: after the failure the imported home
+	// record is either no longer in state (so it can never be deleted by this
+	// resource) or the marker still protects it. Today the SDK stores the planned
+	// state, i.e. the first case.
+	homeInState := false
+	for key, value := range afterFailure.Attributes {
+		if strings.HasSuffix(key, ".hostname") && value == "home" {
+			homeInState = true
+		}
+	}
+	assert.True(t, !homeInState || afterFailure.Attributes["adopted"] == "true",
+		"home is in state without the marker: the next apply would delete it")
+
+	// Retry against a healthy API from exactly the state the failure left.
+	rec := &setHostsRecorder{}
+	healthy := rec.server()
+	defer healthy.Close()
+
+	config := terraform.NewResourceConfigRaw(map[string]interface{}{
+		"domain": "test.com",
+		"mode":   ncModeMerge,
+		"record": []interface{}{www},
+	})
+	client := newTestClient(healthy.URL)
+	resource := resourceNamecheapDomainRecords()
+	diff, err := resource.Diff(context.TODO(), afterFailure, config, client)
+	require.NoError(t, err)
+	if diff == nil {
+		return // nothing planned, so nothing can be deleted
+	}
+	_, retryDiags := resource.Apply(context.TODO(), afterFailure, diff, client)
+
+	require.False(t, retryDiags.HasError())
+	for _, sent := range rec.sent() {
+		assert.Contains(t, sent, "home", "the retry must not delete the imported home record")
+	}
 }
