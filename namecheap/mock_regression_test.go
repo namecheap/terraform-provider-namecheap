@@ -84,8 +84,9 @@ resource "namecheap_domain_records" "test" {
 
 	// #68: `terraform import` set an internal mode=IMPORT that the schema's mode
 	// validator rejected ("expected mode to be one of [MERGE OVERWRITE]"). Import
-	// now succeeds. mode is import-only and differs from the configured value, so
-	// it is excluded from ImportStateVerify.
+	// now succeeds. mode is import-only and differs from the configured value, and
+	// adopted (#355) is an import-only marker, so both are excluded from
+	// ImportStateVerify.
 	t.Run("regression_68_import", func(t *testing.T) {
 		m := newNamecheapMock(t)
 		resource.Test(t, resource.TestCase{
@@ -104,7 +105,7 @@ resource "namecheap_domain_records" "test" {
 					ImportState:             true,
 					ImportStateId:           domain,
 					ImportStateVerify:       true,
-					ImportStateVerifyIgnore: []string{"mode"},
+					ImportStateVerifyIgnore: []string{"mode", "adopted"},
 				},
 			},
 		})

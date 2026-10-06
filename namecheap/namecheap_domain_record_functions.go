@@ -880,6 +880,89 @@ func derefStr(s *string) string {
 	return *s
 }
 
+// releasedRecords returns the records of previous that current does not
+// contain, matched the way MERGE matches records everywhere else (hostname,
+// type and fixed address, case-insensitively). On the first apply after
+// `terraform import` previous is the whole imported zone, so the result is
+// the imported records the configuration never declared (#355).
+func releasedRecords(previous []interface{}, current []interface{}) ([]namecheap.DomainsDNSHostRecord, error) {
+	currentKeys := map[string]struct{}{}
+	for _, record := range *convertRecordTypeSetToDomainRecords(&current) {
+		address, err := getFixedAddressOfRecord(&record)
+		if err != nil {
+			return nil, err
+		}
+		currentKeys[strings.ToLower(hashRecord(*record.HostName, *record.RecordType, *address))] = struct{}{}
+	}
+
+	var released []namecheap.DomainsDNSHostRecord
+	for _, record := range *convertRecordTypeSetToDomainRecords(&previous) {
+		address, err := getFixedAddressOfRecord(&record)
+		if err != nil {
+			return nil, err
+		}
+		if _, declared := currentKeys[strings.ToLower(hashRecord(*record.HostName, *record.RecordType, *address))]; !declared {
+			released = append(released, record)
+		}
+	}
+
+	return released, nil
+}
+
+// releasedNameservers returns the nameservers of previous that current does not
+// contain (case-insensitively); the nameserver counterpart of releasedRecords.
+func releasedNameservers(previous []string, current []string) []string {
+	var released []string
+	for _, prev := range previous {
+		declared := false
+		for _, cur := range current {
+			if strings.EqualFold(prev, cur) {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			released = append(released, prev)
+		}
+	}
+	return released
+}
+
+// buildReleasedWarning builds the warning for the first apply after import: the
+// imported records and nameservers the configuration does not declare were
+// dropped from Terraform state and deliberately left in place at Namecheap.
+func buildReleasedWarning(domain string, records []namecheap.DomainsDNSHostRecord, nameservers []string) diag.Diagnostic {
+	var detail strings.Builder
+	detail.WriteString("These were adopted by `terraform import` but are not declared in the configuration. " +
+		"They were removed from Terraform state and were NOT changed at Namecheap:\n\n")
+	for i := range records {
+		detail.WriteString("  " + stringifyNCRecord(&records[i]) + "\n")
+	}
+	for _, nameserver := range nameservers {
+		detail.WriteString("  nameserver " + nameserver + "\n")
+	}
+	detail.WriteString("\nAdd them to the configuration to manage them with this resource, or leave them as they are.")
+
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Released %d imported item(s) on %s from Terraform state without deleting them", len(records)+len(nameservers), domain),
+		Detail:   detail.String(),
+	}
+}
+
+// buildAdoptedDestroyWarning is returned instead of deleting anything when an
+// imported resource is destroyed before its first apply: until then the state
+// holds records Terraform never declared, so it must not delete them (#355).
+func buildAdoptedDestroyWarning(domain string) diag.Diagnostic {
+	return diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("Nothing was deleted at Namecheap for %s", domain),
+		Detail: "This resource was imported and never applied, so its state holds every record and nameserver " +
+			"that existed at import time, not only the ones Terraform declared. It was removed from state only. " +
+			"To have Terraform delete the records it manages, apply the configuration once and then destroy.",
+	}
+}
+
 // stringifyNCRecord returns a string with hostname, record type and address of the record
 // This function mostly serves to print error details for user
 func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {

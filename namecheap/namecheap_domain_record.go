@@ -38,6 +38,17 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 			},
 		},
 
+		CustomizeDiff: func(_ context.Context, diff *schema.ResourceDiff, _ interface{}) error {
+			// While imported records are still unreconciled, plan the one apply
+			// that settles them. Without it the marker could outlive a clean
+			// import, and a record removed from the configuration much later
+			// would be mistaken for an imported one and left at Namecheap.
+			if diff.Id() != "" && diff.Get("adopted").(bool) {
+				return diff.SetNewComputed("adopted")
+			}
+			return nil
+		},
+
 		Schema: map[string]*schema.Schema{
 			"domain": {
 				Type:         schema.TypeString,
@@ -108,8 +119,22 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 					ValidateFunc: validation.StringIsNotEmpty,
 				},
 			},
+			"adopted": {
+				Type:        schema.TypeBool,
+				Computed:    true,
+				Description: "Set by the provider after `terraform import` and cleared by the first apply; unset for resources that were not imported. While `true`, a destroy deletes nothing at Namecheap, and the first apply in `MERGE` mode releases imported records and nameservers that the configuration does not declare from state instead of deleting them.",
+			},
 		},
 	}
+}
+
+// isAdopted reports whether the resource was imported and has not been applied
+// since, i.e. its state still holds items Terraform never declared (#355). It
+// reads the prior value, because during an apply the planned one is unknown.
+func isAdopted(data *schema.ResourceData) bool {
+	prior, _ := data.GetChange("adopted")
+	adopted, _ := prior.(bool)
+	return adopted
 }
 
 func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, errs []error) {
@@ -302,6 +327,8 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 
 	if mode == ncModeImport {
 		_ = data.Set("mode", ncModeMerge)
+		// Everything live was just read into state, declared or not (#355).
+		_ = data.Set("adopted", true)
 	}
 
 	return diags
@@ -342,6 +369,25 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 
 	var diags diag.Diagnostics
 
+	// MERGE removes the previous state's records and nameservers from the remote
+	// zone before adding the configured ones. For an imported resource the
+	// previous state is everything that was live, not what Terraform declared, so
+	// the first apply must not remove anything: treating the configured items as
+	// "previous" keeps declared ones in sync and leaves the rest untouched (#355).
+	adopted := isAdopted(data)
+	previousRecords, previousNameservers := oldRecords, oldNameservers
+	if adopted && mode == ncModeMerge {
+		released, err := releasedRecords(oldRecords, newRecords)
+		if err != nil {
+			return diagFromClientError(err)
+		}
+		releasedNs := releasedNameservers(convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers))
+		if len(released)+len(releasedNs) > 0 {
+			diags = append(diags, buildReleasedWarning(domain, released, releasedNs))
+		}
+		previousRecords, previousNameservers = newRecords, newNameservers
+	}
+
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		return diagFromClientError(err)
@@ -366,7 +412,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(previousNameservers), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -374,7 +420,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) {
-		recordDiags := updateRecordsMerge(ctx, domain, emailType, oldRecords, newRecords, client)
+		recordDiags := updateRecordsMerge(ctx, domain, emailType, previousRecords, newRecords, client)
 		if recordDiags.HasError() {
 			return recordDiags
 		}
@@ -402,7 +448,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	}
 
 	if mode == ncModeMerge && newNameserversLen != 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(previousNameservers), convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -437,6 +483,11 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, recordDiags...)
 	}
 
+	// Ownership of the imported items is settled; later removals are real removals.
+	if adopted {
+		_ = data.Set("adopted", false)
+	}
+
 	return diags
 }
 
@@ -445,6 +496,12 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 
 	domain := strings.ToLower(data.Get("domain").(string))
 	mode := strings.ToUpper(data.Get("mode").(string))
+
+	// Imported but never applied: the state holds everything that was live, so
+	// deleting "the state's records" would wipe the zone (#355).
+	if isAdopted(data) {
+		return diag.Diagnostics{buildAdoptedDestroyWarning(domain)}
+	}
 
 	var records []interface{}
 	var nameservers []interface{}
