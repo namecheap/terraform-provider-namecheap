@@ -280,6 +280,16 @@ secrets:
   `workflow_dispatch` — never Dependabot, never fork PRs. Untrusted fork code
   therefore never reaches the self-hosted runner, the whitelisted Elastic IP,
   or the AWS / Namecheap credentials.
+- The EC2 runner is registered with `--no-default-labels`
+  (`namecheap/ec2-github-runner` @ ec2-github-runner#83), so it carries only the
+  unique per-run label from `start-runner` and never the implicit
+  `self-hosted` / `Linux` / `X64` set. A job elsewhere in the repository that
+  targets `runs-on: [self-hosted, linux, x64]` (for example one added by a fork
+  PR) can never be scheduled onto it, even if that job waits in the queue until
+  the next trusted run starts a runner. Defence in depth on top of this: the
+  repository requires approval for workflows from **all** outside collaborators
+  (`actions/permissions/fork-pr-contributor-approval` =
+  `all_external_contributors`), not only first-time contributors.
 - The `acceptance_mock` job provides the fork-facing acceptance signal: it runs
   on `pull_request` on GitHub-hosted `ubuntu-latest`, references no `secrets.*`,
   and drives the in-process mock (see
