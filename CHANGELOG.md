@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.5](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.4...v2.9.5) (2026-10-12)
+
+
+### Bug Fixes
+
+* **deps:** bump Go toolchain to 1.26.9 and golang.org/x/net to v0.60.0 ([#363](https://github.com/namecheap/terraform-provider-namecheap/issues/363)) ([83990e6](https://github.com/namecheap/terraform-provider-namecheap/commit/83990e6a62ef75873206605eb15733d575cbaeaf))
+
 ## [2.9.4](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.3...v2.9.4) (2026-10-02)
 
 
