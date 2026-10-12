@@ -62,12 +62,18 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # paths-filter reads PR files via the API on pull_request events
+      checks: read # already-tested reads the merged PR head's "Acceptance test" check run
     outputs:
       # workflow_dispatch is a maintainer explicitly asking for a full run (the
       # documented path for live acceptance on Dependabot branches — see
       # CLAUDE.md), and paths-filter has no base to diff against there anyway,
       # so dispatch runs always count as code and bypass the filter entirely.
       code: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter-code.outputs.code }}
+      # 'false' only when already-tested proved this push to master is the
+      # exact tree that already passed live acceptance on its PR. Every other
+      # case — PRs, dispatch, a step that was skipped or failed — is 'true', so
+      # the gate fails open towards running the sandbox suite.
+      acceptance: ${{ steps.already-tested.outputs.skip == 'true' && 'false' || 'true' }}
     steps:
       # Checkout is required for push events, where paths-filter diffs with git
       # (pull_request events use the API and would not need it).
@@ -88,6 +94,48 @@ jobs:
               - '!*.md'
               - '!LICENSE'
               - '!.release-please-manifest.json'
+
+      # The post-merge push to master re-ran live acceptance on code its PR had
+      # just passed, doubling the load on the sandbox account the SDK and
+      # mcp-server suites share (20/min, 700/hour) — enough to fail healthy
+      # runs on the hourly quota. Skip it only when ALL of these hold:
+      #   1. the pushed commit is the squash-merge commit of a PR;
+      #   2. its git tree is identical to that PR's head commit tree — i.e. the
+      #      branch was up to date, so master now holds exactly what was tested;
+      #   3. the latest "Acceptance test" check run on that head succeeded.
+      # Anything else (direct push, stale branch, Dependabot PR whose acceptance
+      # was skipped, API error) leaves skip=false and acceptance runs as before.
+      - name: Check whether this merge was already acceptance-tested
+        id: already-tested
+        if: ${{ github.event_name == 'push' && steps.filter-code.outputs.code == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          decide() {
+            echo "skip=$1" >> "$GITHUB_OUTPUT"
+            echo "Live acceptance on this push: $([ "$1" = true ] && echo skipped || echo runs) — $2" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+
+          pr=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq "[.[] | select(.merge_commit_sha == \"$SHA\")] | first | select(.) | \"\(.number) \(.head.sha)\"") \
+            || decide false "could not look up the PR for $SHA"
+          [ -n "$pr" ] || decide false "$SHA is not a PR merge commit"
+          read -r number head <<<"$pr"
+
+          merge_tree=$(gh api "repos/$REPO/git/commits/$SHA" --jq .tree.sha) || decide false "could not read tree of $SHA"
+          head_tree=$(gh api "repos/$REPO/git/commits/$head" --jq .tree.sha) || decide false "could not read tree of PR #$number head $head"
+          [ "$merge_tree" = "$head_tree" ] || decide false "PR #$number head tree differs from the merge (branch was behind master)"
+
+          acceptance=$(gh api "repos/$REPO/commits/$head/check-runs?check_name=Acceptance%20test&filter=latest" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions")] | first | .conclusion // "none"') \
+            || decide false "could not read check runs of PR #$number head $head"
+          [ "$acceptance" = success ] || decide false "PR #$number head's Acceptance test is '$acceptance', not success"
+
+          decide true "identical tree passed Acceptance test on PR #$number (${head:0:7})"
 
   check:
     name: Check
@@ -550,8 +598,9 @@ jobs:
     # Dependabot events (same). The changes-gate term additionally skips the
     # whole EC2 lifecycle — and its per-run AWS cost — when the diff touches
     # only root markdown/LICENSE/the release-please manifest (most notably the
-    # Release PR and its merge commit).
-    if: ${{ needs.changes.outputs.code == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
+    # Release PR and its merge commit), and the `acceptance` term skips it on a
+    # post-merge push whose exact tree already passed acceptance on its PR.
+    if: ${{ needs.changes.outputs.code == 'true' && needs.changes.outputs.acceptance == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -691,10 +740,10 @@ jobs:
     name: Acceptance test
     runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
     needs: [changes, start-runner]
-    # Same gate as start-runner: changes-gate `code` + same-repo PRs + pushes
-    # to master + manual dispatch, never forks/Dependabot (those get
-    # acceptance_mock instead).
-    if: ${{ needs.changes.outputs.code == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
+    # Same gate as start-runner: changes-gate `code` + `acceptance` + same-repo
+    # PRs + pushes to master + manual dispatch, never forks/Dependabot (those
+    # get acceptance_mock instead).
+    if: ${{ needs.changes.outputs.code == 'true' && needs.changes.outputs.acceptance == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
     steps:
       # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
       # Runs before our own scripts exist on disk, so it — not a custom
