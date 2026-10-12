@@ -25,7 +25,7 @@ DCO bot, and the `security/snyk (Namecheap)` integration.
 ```mermaid
 flowchart TD
     A[Feature PR opened] -->|CI: full run| B[Squash-merge to master]
-    B -->|CI: full run| C[Versioning opens/updates Release PR]
+    B -->|CI: full run, live acceptance skipped if the PR already passed it on this exact tree| C[Versioning opens/updates Release PR]
     C -->|CI: gate skips all test jobs| D[Maintainer merges Release PR]
     D -->|CI: gate skips all test jobs| E[Versioning creates vX.Y.Z tag]
     E -->|Release workflow| F[GoReleaser publishes signed binaries]
@@ -41,7 +41,9 @@ not just hosted-runner minutes: each gated-away run also skips a start/stop
 cycle of the **self-hosted EC2 sandbox runner** (`t3.medium` + the whitelisted
 Elastic IP), so the gate saves real AWS cost per release, and removes two trips
 through the single-EIP acceptance queue that other runs would otherwise wait
-behind.
+behind. The [post-merge acceptance skip](#post-merge-acceptance-skip) then
+drops the live suite from the merge run too when it would only re-test the
+PR's tree, leaving **one** live acceptance run per change.
 
 ## The changes gate
 
@@ -68,10 +70,37 @@ fork/Dependabot/event conditions still apply on top of the gate):
 | Change | Check / Docs / Trivy / govulncheck / summary | Mock acceptance matrix | EC2 start → acceptance → stop | CI OK |
 |---|---|---|---|---|
 | Code, workflows, `docs/**`, `templates/**`, `examples/**` — same-repo PR or push to `master` | runs | skipped (fork/Dependabot only) | runs | pass |
+| Push to `master` that squash-merges a PR whose head has the **same tree** and a **passing** `Acceptance test` | runs | skipped | skipped ([post-merge skip](#post-merge-acceptance-skip)) | pass |
 | Same, but fork or Dependabot PR | runs | runs | skipped (no secrets) | pass |
 | Root `*.md` / `LICENSE` / manifest only — any PR or push | skipped | skipped | skipped | pass |
 | Release PR (changelog + manifest) and its merge | skipped | skipped | skipped | pass |
 | `workflow_dispatch` (any ref) | runs | skipped (PR-only job) | runs | pass |
+
+### Post-merge acceptance skip
+
+The live suite runs against the `saTerraformProvider` sandbox account, which
+go-namecheap-sdk and mcp-server-namecheap acceptance also use, and Namecheap
+limits each account to 20 requests/minute and **700/hour**. Re-running the
+suite on the post-merge push spent that quota on code the PR had just passed,
+and a burst of runs across the three repos within one hour has failed healthy
+suites with `after 5 attempts: namecheap: retryable HTTP status`.
+
+So on a push to `master`, the `changes` job's "already-tested" step skips live
+acceptance (output `acceptance=false`, which `start-runner` and
+`acceptance_test` check) only when **all** of these hold:
+
+1. the pushed commit is the squash-merge commit of a PR;
+2. its git tree equals that PR's head commit tree — the branch was up to date,
+   so `master` now holds byte-for-byte what was tested;
+3. the latest `Acceptance test` check run on that head concluded `success`.
+
+Every other case runs acceptance as before: direct pushes, a PR that was behind
+`master` (the merge combined it with code it was never tested against),
+Dependabot PRs (their PR acceptance is skipped for lack of secrets, so the
+post-merge run is their only live coverage), and any API lookup failure. The
+step writes its decision and reason to the run's job summary. Check, Trivy,
+govulncheck and the rest still run on every post-merge push, and `CI OK` still
+concludes the run, so `versioning.yml` fires as usual.
 
 ### Why a gate job instead of workflow-level `paths-ignore`
 
