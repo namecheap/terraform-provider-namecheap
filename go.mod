@@ -90,6 +90,6 @@ require (
 
 go 1.26.6
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 tool github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
