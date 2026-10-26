@@ -71,6 +71,7 @@ func dataSourceNamecheapDomainsRead(ctx context.Context, data *schema.ResourceDa
 	result := make([]map[string]interface{}, 0, len(allDomains))
 	for i := range allDomains {
 		result = append(result, flattenPortfolioDomain(&allDomains[i], now))
+		logPortfolioDates(ctx, &allDomains[i])
 	}
 
 	if err := data.Set("domains", result); err != nil {

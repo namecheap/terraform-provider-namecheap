@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
@@ -118,33 +119,43 @@ func dataSourceDomainReadError(domain string, err error) diag.Diagnostics {
 	return diags
 }
 
-// formatDateTime renders a Namecheap DateTime as an RFC3339 string. Namecheap
-// returns lifecycle dates as calendar dates (the SDK parses "MM/DD/YYYY" with
-// time.Parse, yielding midnight UTC), so the RFC3339 output is timezone-stable.
-// A nil pointer renders as an empty string, as does the zero time — since SDK
-// v2.10.1 an empty date element decodes to the zero value instead of erroring.
+// formatDateTime renders a Namecheap DateTime as an RFC3339 string (UTC), or
+// an empty string. The API has no single date format: getList and getInfo
+// return calendar dates (rendered as midnight UTC), while other commands can
+// return a date with a time, which keeps its time.
+//
+// The attribute contract is "RFC3339 or empty": a nil pointer, an empty date
+// element (the zero time) and a value the SDK could not parse all render as
+// an empty string. Since SDK v2.10.6 an unrecognised value no longer fails the
+// response; the raw text is kept in DateTime.Raw, and the caller records it
+// with logUnparsedDate. It is deliberately not passed through: users feed
+// these attributes to timeadd/timecmp, which would fail on raw API text with
+// an error pointing at their own configuration.
 func formatDateTime(dt *namecheap.DateTime) string {
-	if dt == nil || dt.IsZero() {
-		return ""
-	}
-	return dt.Time.UTC().Format(time.RFC3339)
-}
-
-// formatPremiumDNSDate renders a PremiumDnsSubscription date — an ISO string
-// without a zone designator, e.g. "2027-06-02T00:00:00" — as RFC3339 (UTC), so
-// premium_dns_expires matches the format of every other date attribute. The
-// zero time ("0001-01-01T00:00:00", the API's "never" sentinel, which can
-// appear even on a live subscription) renders as an empty string. A value that
-// fails to parse is passed through verbatim rather than dropped.
-func formatPremiumDNSDate(s string) string {
-	t, err := time.Parse("2006-01-02T15:04:05", s)
-	if err != nil {
-		return s
-	}
-	if t.IsZero() {
+	t, ok := dt.Parsed()
+	if !ok {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// logUnparsedDate records, at warn level in the provider log, a date the SDK
+// could not parse: the attribute, the domain, the raw text and the parse error.
+// It is a log line and not a diagnostic on purpose: a server-side date-format
+// change is nothing the practitioner can act on, so it must not add noise to
+// every plan, but the evidence has to be retrievable (TF_LOG=WARN) when a user
+// reports an empty value. It is a no-op for a nil pointer and for every parsed
+// (or empty) value.
+func logUnparsedDate(ctx context.Context, domain, attr string, dt *namecheap.DateTime) {
+	if dt == nil || dt.ParseError() == nil {
+		return
+	}
+	tflog.Warn(ctx, "Namecheap returned a date the provider could not parse; rendering the attribute empty", map[string]interface{}{
+		"domain":    domain,
+		"attribute": attr,
+		"raw":       dt.Raw,
+		"error":     dt.ParseError().Error(),
+	})
 }
 
 // daysUntil returns the whole number of calendar days from now until target,
@@ -267,17 +278,17 @@ func domainPortfolioElemSchema() map[string]*schema.Schema {
 		"created": {
 			Type:        schema.TypeString,
 			Computed:    true,
-			Description: "Registration date as an RFC3339 timestamp (UTC).",
+			Description: "Registration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.",
 		},
 		"expires": {
 			Type:        schema.TypeString,
 			Computed:    true,
-			Description: "Expiration date as an RFC3339 timestamp (UTC).",
+			Description: "Expiration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.",
 		},
 		"expires_in_days": {
 			Type:        schema.TypeInt,
 			Computed:    true,
-			Description: "Whole calendar days until the domain expires (negative if already expired).",
+			Description: "Whole calendar days until the domain expires (negative if already expired). 0 means either that the domain expires today or that no day count could be derived because expires is empty; the two cannot be told apart.",
 		},
 		"is_expired": {
 			Type:        schema.TypeBool,
@@ -330,8 +341,17 @@ func flattenPortfolioDomain(d *namecheap.Domain, now time.Time) map[string]inter
 		"is_premium":      derefBool(d.IsPremium),
 		"is_our_dns":      derefBool(d.IsOurDNS),
 	}
-	if d.Expires != nil {
-		m["expires_in_days"] = daysUntil(d.Expires.Time, now)
+	// Day counts come only from a parsed, non-zero expiry: the zero time of an
+	// unparsed or empty date would otherwise yield a count measured from year 1.
+	if expires, ok := d.Expires.Parsed(); ok {
+		m["expires_in_days"] = daysUntil(expires, now)
 	}
 	return m
+}
+
+// logPortfolioDates records the unparsed dates of one portfolio row.
+func logPortfolioDates(ctx context.Context, d *namecheap.Domain) {
+	name := derefString(d.Name)
+	logUnparsedDate(ctx, name, "created", d.Created)
+	logUnparsedDate(ctx, name, "expires", d.Expires)
 }
