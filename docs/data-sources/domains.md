@@ -56,9 +56,9 @@ resource "namecheap_domain_records" "spf" {
   - `id` - Namecheap internal domain identifier.
   - `name` - The domain name (e.g. `example.com`).
   - `user` - The account user the domain belongs to.
-  - `created` - Registration date as an RFC3339 timestamp (UTC).
-  - `expires` - Expiration date as an RFC3339 timestamp (UTC).
-  - `expires_in_days` - Whole calendar days until the domain expires (negative if already expired).
+  - `created` - Registration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.
+  - `expires` - Expiration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.
+  - `expires_in_days` - Whole calendar days until the domain expires (negative if already expired). `0` means either that the domain expires today or that no day count could be derived because `expires` is empty; the two cannot be told apart.
   - `is_expired` - Whether the domain has expired.
   - `is_locked` - Whether the registrar lock is enabled.
   - `auto_renew` - Whether auto-renew is enabled.

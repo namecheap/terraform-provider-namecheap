@@ -30,14 +30,14 @@ Looks up read-only information about a single domain. Use it to reference an exi
 - `is_premium` - Whether the domain is a premium domain.
 - `is_premium_dns` - Whether the domain has an active PremiumDNS subscription.
 - `nameservers` - The nameservers currently configured for the domain.
-- `created` - Registration date as an RFC3339 timestamp (UTC).
-- `expires` - Expiration date as an RFC3339 timestamp (UTC).
-- `expires_in_days` - Whole calendar days until the domain expires (negative if already expired). Derived from the wall clock at read time; prefer `expires` where a stable value is needed. `0` together with an empty `expires` means the API did not report an expiry date.
+- `created` - Registration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.
+- `expires` - Expiration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.
+- `expires_in_days` - Whole calendar days until the domain expires (negative if already expired). Derived from the wall clock at read time; prefer `expires` where a stable value is needed. `0` means either that the domain expires today or that no day count could be derived because `expires` is empty; the two cannot be told apart.
 - `is_expired` - Whether the domain has expired, as reported by the portfolio listing (this accounts for renewal grace periods). When the domain is missing from the listing, it falls back to a value derived from the expiry date and domain status.
 - `is_locked` - Whether the registrar lock is enabled.
 - `auto_renew` - Whether auto-renew is enabled.
 - `whois_guard` - WhoisGuard status (e.g. `ENABLED`, `DISABLED`, `NOTPRESENT`).
-- `whois_guard_expires` - Expiration date of the domain privacy protection as an RFC3339 timestamp (UTC); empty when privacy is not allotted.
+- `whois_guard_expires` - Expiration date of the domain privacy protection as an RFC3339 timestamp (UTC); empty when privacy is not allotted or the API did not report a usable date.
 - `whois_guard_email` - The generated privacy-protection email address on the Whois record.
 - `whois_guard_forwarded_to` - The real address the privacy-protection email forwards to. Note that this address is stored in the Terraform state.
 - `status` - Domain status as reported by the API (e.g. `Ok`, `Locked`, `Expired`); empty when the API omits it.
