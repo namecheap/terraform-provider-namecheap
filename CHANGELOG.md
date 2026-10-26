@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.7](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.6...v2.9.7) (2026-10-26)
+
+
+### Bug Fixes
+
+* render unparseable API dates as empty and cover the real date formats ([#374](https://github.com/namecheap/terraform-provider-namecheap/issues/374)) ([ee8f2ae](https://github.com/namecheap/terraform-provider-namecheap/commit/ee8f2ae07df1b79354314aed94f7ed5432da30f7))
+
 ## [2.9.6](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.5...v2.9.6) (2026-10-22)
 
 
