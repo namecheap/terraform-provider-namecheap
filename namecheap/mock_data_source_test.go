@@ -312,3 +312,100 @@ resource "namecheap_domain_records" "spf" {
 		},
 	})
 }
+
+// TestAccMockDataSourceDomainsDateFormats seeds one portfolio row per date
+// format the live API has been observed to send (captured in October 2026),
+// so the mock mirrors real responses rather than the docs. Each row proves one
+// rendering rule of the data source: calendar dates render as midnight UTC,
+// a date with a time keeps its time (whether the AM/PM separator is an ASCII
+// space or U+202F), a two-digit year is accepted, an empty value renders as an
+// empty string, and a value the SDK cannot parse also renders as an empty
+// string, with expires_in_days left at 0, instead of failing the read or
+// leaking raw API text into an attribute documented as RFC3339.
+func TestAccMockDataSourceDomainsDateFormats(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seedPortfolio(0,
+		mockPortfolioDomain{ID: "1", Name: "padded.example", User: "mock-user", Created: "11/19/2020", Expires: "11/19/2099", WhoisGuard: "ENABLED", AutoRenew: true, IsOurDNS: true},
+		mockPortfolioDomain{ID: "2", Name: "time-space.example", User: "mock-user", Created: "4/30/2021 11:31:13 AM", Expires: "4/30/2099 11:31:13 AM", WhoisGuard: "ENABLED", AutoRenew: true, IsOurDNS: true},
+		mockPortfolioDomain{ID: "3", Name: "time-nnbsp.example", User: "mock-user", Created: "12/14/2020 1:01:07 PM", Expires: "12/14/2099 1:01:07 PM", WhoisGuard: "ENABLED", AutoRenew: true, IsOurDNS: true},
+		mockPortfolioDomain{ID: "4", Name: "two-digit-year.example", User: "mock-user", Created: "4/30/21", Expires: "4/30/40", WhoisGuard: "ENABLED", AutoRenew: true, IsOurDNS: true},
+		mockPortfolioDomain{ID: "5", Name: "empty-expiry.example", User: "mock-user", Created: "11/19/2020", Expires: "", WhoisGuard: "ENABLED", AutoRenew: true, IsOurDNS: true},
+		mockPortfolioDomain{ID: "6", Name: "unparseable.example", User: "mock-user", Created: "11/19/2020", Expires: "someday", WhoisGuard: "ENABLED", AutoRenew: true, IsOurDNS: true},
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: `data "namecheap_domains" "all" {}`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.#", "6"),
+					// zero-padded calendar date -> midnight UTC
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.0.created", "2020-11-19T00:00:00Z"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.0.expires", "2099-11-19T00:00:00Z"),
+					// time with an ASCII space keeps its time
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.1.created", "2021-04-30T11:31:13Z"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.1.expires", "2099-04-30T11:31:13Z"),
+					// time with U+202F before PM (the form a real renew returned)
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.2.created", "2020-12-14T13:01:07Z"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.2.expires", "2099-12-14T13:01:07Z"),
+					resource.TestCheckResourceAttrWith("data.namecheap_domains.all", "domains.2.expires_in_days", func(v string) error {
+						if v == "0" || v[0] == '-' {
+							return fmt.Errorf("expected a positive expires_in_days for a 2099 expiry, got %q", v)
+						}
+						return nil
+					}),
+					// two-digit year (Go's rule: 69-99 -> 19xx, 00-68 -> 20xx)
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.3.created", "2021-04-30T00:00:00Z"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.3.expires", "2040-04-30T00:00:00Z"),
+					// empty element -> empty string, 0 days
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.4.expires", ""),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.4.expires_in_days", "0"),
+					// unparseable -> empty, 0 days (never raw text, never a count from the zero time)
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.5.expires", ""),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.5.expires_in_days", "0"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccMockDataSourceDomainTimeBearingDates reads a single domain whose
+// getInfo dates carry a time component (the form other commands have been
+// observed to return), proving namecheap_domain renders the instant rather
+// than flattening it to midnight or rejecting the response.
+func TestAccMockDataSourceDomainTimeBearingDates(t *testing.T) {
+	m := newNamecheapMock(t)
+	const domain = "timed-example.com"
+	m.seedInfo(domain, mockDomainInfo{
+		ProviderType:  "FREE",
+		IsUsingOurDNS: true,
+		Nameservers:   []string{"dns1.registrar-servers.com", "dns2.registrar-servers.com"},
+		Created:       "12/14/2020 1:01:07 PM",
+		Expires:       "12/14/2099 1:01:07 PM",
+		WhoisGuard:    "False",
+	})
+	m.seedPortfolio(0,
+		mockPortfolioDomain{ID: "20", Name: domain, User: "mock-user", Created: "12/14/2020", Expires: "12/14/2099", WhoisGuard: "DISABLED", AutoRenew: true, IsOurDNS: true},
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+data "namecheap_domain" "test" {
+  domain = "%s"
+}
+`, domain),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "created", "2020-12-14T13:01:07Z"),
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "expires", "2099-12-14T13:01:07Z"),
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_expired", "false"),
+				),
+			},
+		},
+	})
+}

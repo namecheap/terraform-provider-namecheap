@@ -7,6 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ncDate builds a *namecheap.DateTime from a Namecheap "MM/DD/YYYY" date string,
@@ -70,6 +71,22 @@ func TestFormatDateTime(t *testing.T) {
 	dt := ncDate(t, "06/02/2027")
 	assert.Equal(t, "2027-06-02T00:00:00Z", formatDateTime(dt),
 		"a Namecheap date should render as an RFC3339 midnight-UTC timestamp")
+
+	// domains.renew-style value (captured from the sandbox on 2026-10-26): the
+	// SDK parses the time component and the U+202F before PM; the provider
+	// renders the instant it carries instead of flattening it to midnight.
+	withTime := &namecheap.DateTime{}
+	require.NoError(t, withTime.UnmarshalText([]byte("12/14/2034 1:01:07\u202fPM")))
+	assert.Equal(t, "2034-12-14T13:01:07Z", formatDateTime(withTime))
+
+	// A value the SDK could not parse renders as an empty string, the same as
+	// a missing date, so the attribute is always RFC3339 or empty and never
+	// leaks raw API text into a value users feed to timeadd/timecmp. The raw
+	// text is recorded by logUnparsedDate instead.
+	raw := &namecheap.DateTime{}
+	require.NoError(t, raw.UnmarshalText([]byte("not-a-date")))
+	require.Error(t, raw.ParseError())
+	assert.Equal(t, "", formatDateTime(raw))
 }
 
 func TestDaysUntil(t *testing.T) {

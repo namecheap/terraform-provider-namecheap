@@ -59,17 +59,17 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"created": {
 				Type:        schema.TypeString,
 				Computed:    true,
-				Description: "Registration date as an RFC3339 timestamp (UTC).",
+				Description: "Registration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.",
 			},
 			"expires": {
 				Type:        schema.TypeString,
 				Computed:    true,
-				Description: "Expiration date as an RFC3339 timestamp (UTC).",
+				Description: "Expiration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.",
 			},
 			"expires_in_days": {
 				Type:        schema.TypeInt,
 				Computed:    true,
-				Description: "Whole calendar days until the domain expires (negative if already expired). 0 with an empty expires means the API did not report an expiry date.",
+				Description: "Whole calendar days until the domain expires (negative if already expired). 0 means either that the domain expires today or that no day count could be derived because expires is empty; the two cannot be told apart.",
 			},
 			"is_expired": {
 				Type:        schema.TypeBool,
@@ -94,7 +94,7 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"whois_guard_expires": {
 				Type:        schema.TypeString,
 				Computed:    true,
-				Description: "Expiration date of the domain privacy protection as an RFC3339 timestamp (UTC); empty when privacy is not allotted.",
+				Description: "Expiration date of the domain privacy protection as an RFC3339 timestamp (UTC); empty when privacy is not allotted or the API did not report a usable date.",
 			},
 			"whois_guard_email": {
 				Type:        schema.TypeString,
@@ -194,12 +194,16 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 		_ = data.Set("is_owner", *info.IsOwner)
 	}
 
+	// Dates the SDK could not parse render empty (the attribute contract is
+	// RFC3339 or empty) and are logged rather than failing the read.
 	expired := isStatusExpired(info.Status)
 	if dd := info.DomainDetails; dd != nil {
 		_ = data.Set("created", formatDateTime(dd.CreatedDate))
 		_ = data.Set("expires", formatDateTime(dd.ExpiredDate))
-		if dd.ExpiredDate != nil && !dd.ExpiredDate.IsZero() {
-			days := daysUntil(dd.ExpiredDate.Time, time.Now().UTC())
+		logUnparsedDate(ctx, domain, "created", dd.CreatedDate)
+		logUnparsedDate(ctx, domain, "expires", dd.ExpiredDate)
+		if expires, ok := dd.ExpiredDate.Parsed(); ok {
+			days := daysUntil(expires, time.Now().UTC())
 			_ = data.Set("expires_in_days", days)
 			expired = expired || days < 0
 		}
@@ -214,6 +218,7 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 			_ = data.Set("whois_guard", mapGetInfoWhoisGuard(*wg.Enabled))
 		}
 		_ = data.Set("whois_guard_expires", formatDateTime(wg.ExpiredDate))
+		logUnparsedDate(ctx, domain, "whois_guard_expires", wg.ExpiredDate)
 		if ed := wg.EmailDetails; ed != nil {
 			if ed.WhoisGuardEmail != nil {
 				_ = data.Set("whois_guard_email", *ed.WhoisGuardEmail)
@@ -234,8 +239,16 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 			if sub.UseAutoRenew != nil {
 				_ = data.Set("premium_dns_auto_renew", *sub.UseAutoRenew)
 			}
+			// The subscription date is an ISO string without a zone (the SDK
+			// types it as a plain string); DateTime parses that form and maps
+			// the API's "0001-01-01T00:00:00" never-expires sentinel to the zero
+			// time, so it renders under the same "RFC3339 or empty" contract as
+			// every other date attribute.
 			if sub.ExpirationDate != nil {
-				_ = data.Set("premium_dns_expires", formatPremiumDNSDate(*sub.ExpirationDate))
+				var expires namecheap.DateTime
+				_ = expires.UnmarshalText([]byte(*sub.ExpirationDate)) // never fails since SDK v2.10.6
+				_ = data.Set("premium_dns_expires", formatDateTime(&expires))
+				logUnparsedDate(ctx, domain, "premium_dns_expires", &expires)
 			}
 		}
 	}

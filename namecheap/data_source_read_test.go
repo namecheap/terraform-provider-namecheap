@@ -300,6 +300,43 @@ func TestDataSourceDomainRead_Success(t *testing.T) {
 	assert.Equal(t, domain, d.Id())
 }
 
+// TestDataSourceDomainRead_UnparseableDate pins the contract for a date the SDK
+// cannot parse (since SDK v2.10.6 the raw text is kept instead of failing the
+// whole response): the attribute is empty, exactly as for a missing date, so
+// it is always RFC3339 or empty; expires_in_days is not derived from the zero
+// time; and the read stays clean of diagnostics: the user cannot act on a
+// server-side format change, so it is logged for maintainers instead of shown
+// in the plan. The created date uses the time-bearing form a real renew
+// returned, which must parse and render with its time.
+func TestDataSourceDomainRead_UnparseableDate(t *testing.T) {
+	const domain = "odd-dates.example"
+	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+		switch command {
+		case "namecheap.domains.getInfo":
+			return xmlGetInfo(dsGetInfo{
+				Domain: domain, Status: "Ok", OwnerName: "apiuser", IsOwner: true,
+				Created: "12/14/2034 1:01:07\u202fPM", Expires: "someday",
+				ProviderType: "FREE", IsOurDNS: true, EmailType: "NONE",
+				Nameservers: []string{"dns1.registrar-servers.com"},
+			})
+		case "namecheap.domains.getList":
+			return xmlGetListPage([]dsDomainRow{
+				{ID: "7", Name: domain, User: "u", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "DISABLED", IsOurDNS: true},
+			}, 1, 1, domainsPageSize)
+		}
+		return apiErrorXML("1010101", "unexpected command "+command)
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomain().Schema, map[string]interface{}{"domain": domain})
+	diags := dataSourceNamecheapDomainRead(context.Background(), d, client)
+	require.False(t, diags.HasError(), "an unparseable date must not fail the read: %+v", diags)
+
+	assert.Equal(t, "2034-12-14T13:01:07Z", d.Get("created"), "a time-bearing date must keep its time")
+	assert.Equal(t, "", d.Get("expires"), "an unparseable date must render empty, never as raw API text")
+	assert.Equal(t, 0, d.Get("expires_in_days"), "no day count can be derived from an unparseable expiry")
+	assert.Empty(t, diags, "an unparseable date is logged, not surfaced as a diagnostic the user cannot act on")
+}
+
 func TestDataSourceDomainRead_NotFound(t *testing.T) {
 	const domain = "does-not-exist-abc123.com"
 	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
@@ -353,6 +390,37 @@ func TestDataSourceDomainRead_LifecycleMissing(t *testing.T) {
 	assert.Equal(t, false, d.Get("premium_dns_auto_renew"))
 	assert.Equal(t, "", d.Get("premium_dns_expires"))
 	assert.Equal(t, "", d.Get("whois_guard_expires"))
+}
+
+// TestDataSourceDomainRead_UnparseablePremiumDNSDate: premium_dns_expires has
+// the same "RFC3339 or empty" contract as the other date attributes, so a
+// subscription date the provider cannot parse renders empty rather than as
+// raw API text.
+func TestDataSourceDomainRead_UnparseablePremiumDNSDate(t *testing.T) {
+	const domain = "odd-premium.example"
+	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+		switch command {
+		case "namecheap.domains.getInfo":
+			return xmlGetInfo(dsGetInfo{
+				Domain: domain, Status: "Ok", OwnerName: "apiuser", IsOwner: true,
+				Created: "06/02/2021", Expires: "06/02/2099",
+				ProviderType: "FREE", IsOurDNS: true, EmailType: "NONE",
+				PremiumDNS: true, SubscriptionID: 4757, PremiumDNSExpires: "someday",
+				Nameservers: []string{"dns1.registrar-servers.com"},
+			})
+		case "namecheap.domains.getList":
+			return xmlGetListPage([]dsDomainRow{
+				{ID: "7", Name: domain, User: "u", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "DISABLED", IsOurDNS: true},
+			}, 1, 1, domainsPageSize)
+		}
+		return apiErrorXML("1010101", "unexpected command "+command)
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomain().Schema, map[string]interface{}{"domain": domain})
+	diags := dataSourceNamecheapDomainRead(context.Background(), d, client)
+	require.False(t, diags.HasError(), "an unparseable date must not fail the read: %+v", diags)
+	assert.Equal(t, "", d.Get("premium_dns_expires"), "an unparseable subscription date must render empty, never as raw API text")
+	assert.Empty(t, diags)
 }
 
 // TestDataSourceDomainRead_ExpiredFallback covers is_expired when the domain is
@@ -479,6 +547,33 @@ func TestDataSourceDomainsRead_MultiPage(t *testing.T) {
 	third := domains[2].(map[string]interface{})
 	assert.Equal(t, true, third["is_expired"])
 	assert.Less(t, third["expires_in_days"].(int), 0, "an expired domain should have a negative expires_in_days")
+}
+
+// TestDataSourceDomainsRead_UnparseableExpiry: a portfolio row whose Expires
+// the SDK cannot parse must not yield a day count computed from the zero time
+// (year 1, a huge negative number); it renders an empty expires and 0 days,
+// and the read stays clean of diagnostics.
+func TestDataSourceDomainsRead_UnparseableExpiry(t *testing.T) {
+	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+		if command != "namecheap.domains.getList" {
+			return apiErrorXML("1010101", "unexpected command "+command)
+		}
+		return xmlGetListPage([]dsDomainRow{
+			{ID: "1", Name: "fine.example", User: "u", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "ENABLED"},
+			{ID: "2", Name: "odd.example", User: "u", Created: "06/02/2021", Expires: "someday", WhoisGuard: "ENABLED"},
+		}, 2, 1, domainsPageSize)
+	})
+
+	d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomains().Schema, map[string]interface{}{"list_type": "ALL"})
+	diags := dataSourceNamecheapDomainsRead(context.Background(), d, client)
+	require.False(t, diags.HasError(), "an unparseable date must not fail the read: %+v", diags)
+
+	domains := d.Get("domains").([]interface{})
+	require.Len(t, domains, 2)
+	odd := domains[1].(map[string]interface{})
+	assert.Equal(t, "", odd["expires"], "an unparseable date must render empty, never as raw API text")
+	assert.Equal(t, 0, odd["expires_in_days"], "no day count from an unparseable expiry (and never one derived from the zero time)")
+	assert.Empty(t, diags, "an unparseable date is logged, not surfaced as a diagnostic the user cannot act on")
 }
 
 func TestDataSourceDomainsRead_Empty(t *testing.T) {
