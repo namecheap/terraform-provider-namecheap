@@ -408,6 +408,7 @@ func TestAccNamecheapDomainHostRecordMXPreference(t *testing.T) {
 	// With an MX zone set up, record what the API does with the MX shape it will
 	// not support, so the evidence is in the log rather than in a guess.
 	probeSameExchangeMXPair(t, primaryMailHost)
+	probeMXPreferenceDeleteThenAdd(t, "mail3."+*testAccDomain)
 
 	config := func(pref int) string {
 		return fmt.Sprintf(`
@@ -519,6 +520,59 @@ func probeSameExchangeMXPair(t *testing.T, exchange string) {
 			t.Errorf("MX pair probe: failed to remove the record it added to %s: %v", *testAccDomain, err)
 		}
 	}
+}
+
+// probeMXPreferenceDeleteThenAdd records whether the live API applies a new MX
+// preference when the record is removed and re-added in two separate writes.
+// Changing it in one write does not land: the zone keeps the old preference,
+// which suggests Namecheap identifies an MX record by host and mail server and
+// keeps the stored preference while that pair is in the zone. If two writes
+// carry the change, that is the evidence for how the resource has to apply it.
+//
+// Never fails the test: it puts the API's answer in the CI log.
+func probeMXPreferenceDeleteThenAdd(t *testing.T, exchange string) {
+	t.Helper()
+	if !liveTestConfigured() {
+		return
+	}
+
+	ctx := context.Background()
+	dns := namecheapSDKClient.DomainsDNS
+	record := liveRecord("@", "MX", exchange, 1800)
+	record.MXPref = namecheap.UInt8(20)
+	changed := record
+	changed.MXPref = namecheap.UInt8(30)
+
+	defer func() {
+		for _, leftover := range []namecheap.DomainsDNSHostRecord{record, changed} {
+			if _, err := dns.DeleteRecordsWithContext(ctx, *testAccDomain, hostRecordSelector(leftover)); err != nil {
+				t.Logf("MX delete-then-add probe: could not remove %q at preference %d: %v", exchange, *leftover.MXPref, err)
+			}
+		}
+	}()
+
+	if _, err := dns.AddRecordsWithContext(ctx, *testAccDomain, []namecheap.DomainsDNSHostRecord{record}); err != nil {
+		t.Logf("MX delete-then-add probe: could not add %q at preference 20 to set the experiment up (%v); skipping it", exchange, err)
+		return
+	}
+	_, deleteErr := dns.DeleteRecordsWithContext(ctx, *testAccDomain, hostRecordSelector(record))
+	_, addErr := dns.AddRecordsWithContext(ctx, *testAccDomain, []namecheap.DomainsDNSHostRecord{changed})
+
+	zone, err := liveZoneRecords()
+	if err != nil {
+		t.Logf("MX delete-then-add probe: %v", err)
+		return
+	}
+	var stored []string
+	for _, host := range zone {
+		if derefString(host.Type) == namecheap.RecordTypeMX &&
+			hostRecordNormalizedAddress(derefString(host.Address)) == hostRecordNormalizedAddress(exchange) {
+			stored = append(stored, fmt.Sprintf("pref=%d", derefInt(host.MXPref)))
+		}
+	}
+	t.Logf("MX delete-then-add probe on %s: removing %q at preference 20 returned %v, re-adding it at 30 in a "+
+		"second write returned %v; the zone then held [%s]. pref=30 means two writes carry a preference change "+
+		"that one write cannot.", *testAccDomain, exchange, deleteErr, addErr, strings.Join(stored, ", "))
 }
 
 // hostRecordNormalizedAddress exposes the SDK's address normalization for the probe's
