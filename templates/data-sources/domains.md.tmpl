@@ -23,10 +23,19 @@ The portfolio pairs naturally with `for_each` to apply uniform policy (SPF, DMAR
 
 {{tffile "examples/data-sources/domains/example_2.tf"}}
 
+## Registrar lock
+
+The listing's own `IsLocked` flag does not reliably reflect the registrar (transfer) lock: it can read `false` for a domain whose lock is on. Set `include_registrar_lock` to fill `is_locked` from `namecheap.domains.getRegistrarLock` instead:
+
+{{tffile "examples/data-sources/domains/example_3.tf"}}
+
+~> `include_registrar_lock` costs one extra API call per listed domain. The calls are paced by the provider's `requests_per_minute` limit (20 by default) and count against Namecheap's hourly and daily API quotas, so a large portfolio reads much more slowly. Narrow the listing with `search_term` or `list_type` to check fewer domains.
+
 ## Argument Reference
 
 - `search_term` - (Optional) Keyword to filter the returned domains. Maps to the getList `SearchTerm` parameter.
 - `list_type` - (Optional) Which subset of the account's domains to return. Possible values: `ALL` (default), `EXPIRING`, `EXPIRED`. Maps to the getList `ListType` parameter.
+- `include_registrar_lock` - (Optional) Whether to fill each domain's `is_locked` from `namecheap.domains.getRegistrarLock`, the API's authoritative registrar-lock status. Defaults to `false`. Costs one extra API call per listed domain (see [Registrar lock](#registrar-lock)). A domain whose call fails keeps the listing's flag, and the read warns.
 
 ## Attribute Reference
 
@@ -38,7 +47,7 @@ The portfolio pairs naturally with `for_each` to apply uniform policy (SPF, DMAR
   - `expires` - Expiration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.
   - `expires_in_days` - Whole calendar days until the domain expires (negative if already expired). `0` means either that the domain expires today or that no day count could be derived because `expires` is empty; the two cannot be told apart.
   - `is_expired` - Whether the domain has expired.
-  - `is_locked` - Whether the registrar lock is enabled.
+  - `is_locked` - Whether the registrar lock is enabled, from `namecheap.domains.getRegistrarLock` when `include_registrar_lock` is `true`. Otherwise this is the portfolio listing's `IsLocked` flag, which does not reliably reflect the registrar lock: it can read `false` while the lock is on.
   - `auto_renew` - Whether auto-renew is enabled.
   - `whois_guard` - WhoisGuard status (e.g. `ENABLED`, `DISABLED`, `NOTPRESENT`).
   - `is_premium` - Whether the domain is a premium domain.

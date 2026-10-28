@@ -13,9 +13,10 @@ import (
 
 // TestAccMockDataSourceDomain reads a single domain via namecheap_domain against
 // the stateful mock and asserts the exported attributes. It exercises the
-// two-call design end-to-end: getInfo supplies almost everything (DNS fields,
-// dates, whois_guard), while namecheap.domains.getList supplies the two booleans
-// getInfo lacks (is_locked/auto_renew) plus the authoritative is_expired flag.
+// three-call design end-to-end: getInfo supplies almost everything (DNS fields,
+// dates, whois_guard), namecheap.domains.getList supplies auto_renew plus the
+// authoritative is_expired flag, and namecheap.domains.getRegistrarLock supplies
+// is_locked.
 func TestAccMockDataSourceDomain(t *testing.T) {
 	m := newNamecheapMock(t)
 	const domain = "info-example.com"
@@ -33,10 +34,13 @@ func TestAccMockDataSourceDomain(t *testing.T) {
 	// whois state differ from getInfo's on purpose: the checks below prove
 	// getInfo is the source for those attributes now. IsExpired=true contradicts
 	// getInfo's 2099 expiry so the check proves the listing's own flag wins over
-	// the date-derived fallback.
+	// the date-derived fallback. IsLocked=false with the registrar lock on is
+	// what the live API returns for a locked domain (#377): is_locked must
+	// follow getRegistrarLock, not the listing.
 	m.seedPortfolio(0,
-		mockPortfolioDomain{ID: "10", Name: domain, User: "mock-user", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: true, IsLocked: true, AutoRenew: true, IsPremium: true, IsOurDNS: false},
+		mockPortfolioDomain{ID: "10", Name: domain, User: "mock-user", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: true, IsLocked: false, AutoRenew: true, IsPremium: true, IsOurDNS: false},
 	)
+	m.seedRegistrarLock(domain, true)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { mockPreCheck(t, m) },
@@ -65,8 +69,52 @@ data "namecheap_domain" "test" {
 					// getList-sourced fields (the only listing-dependent ones).
 					// is_expired is the listing's flag, not the derived fallback.
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_expired", "true"),
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "auto_renew", "true"),
+					// getRegistrarLock-sourced: true although the listing says false.
+					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_locked", "true"),
+				),
+			},
+		},
+	})
+}
+
+// TestAccMockDataSourceDomainRegistrarLockFallback: when getRegistrarLock fails,
+// the read still succeeds and is_locked keeps the portfolio listing's flag.
+func TestAccMockDataSourceDomainRegistrarLockFallback(t *testing.T) {
+	m := newNamecheapMock(t)
+	const domain = "lock-fallback-example.com"
+	m.seedInfo(domain, mockDomainInfo{
+		ProviderType:  "FREE",
+		IsUsingOurDNS: true,
+		Nameservers:   []string{"dns1.registrar-servers.com", "dns2.registrar-servers.com"},
+		Created:       "06/02/2021",
+		Expires:       "06/02/2099",
+	})
+	m.seedPortfolio(0,
+		mockPortfolioDomain{ID: "11", Name: domain, User: "mock-user", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "DISABLED", IsLocked: true, AutoRenew: true, IsOurDNS: true},
+	)
+	m.seedRegistrarLock(domain, false)
+	m.failOn("namecheap.domains.getRegistrarLock", "2016166", "Domain is not associated with your account")
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+data "namecheap_domain" "test" {
+  domain = "%s"
+}
+`, domain),
+				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "is_locked", "true"),
 					resource.TestCheckResourceAttr("data.namecheap_domain.test", "auto_renew", "true"),
+					func(*terraform.State) error {
+						if got := m.commandCount("namecheap.domains.getRegistrarLock"); got == 0 {
+							return fmt.Errorf("expected the read to call getRegistrarLock before falling back")
+						}
+						return nil
+					},
 				),
 			},
 		},
@@ -190,6 +238,63 @@ data "namecheap_domains" "all" {
 						got := m.getListCallCount()
 						if got < 3 || got%3 != 0 {
 							return fmt.Errorf("expected getList calls to be a positive multiple of 3 (one per page, proving full pagination), got %d", got)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// TestAccMockDataSourceDomainsRegistrarLock pins include_registrar_lock. Each
+// listing row's IsLocked disagrees with its getRegistrarLock status. Left at
+// the default, the data source makes no getRegistrarLock call and reports the
+// listing's flags. With the argument set, is_locked follows getRegistrarLock
+// for each domain, in both directions.
+func TestAccMockDataSourceDomainsRegistrarLock(t *testing.T) {
+	m := newNamecheapMock(t)
+	m.seedPortfolio(0,
+		mockPortfolioDomain{ID: "1", Name: "locked-example.com", User: "mock-user", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "ENABLED", IsLocked: false, AutoRenew: true, IsOurDNS: true},
+		mockPortfolioDomain{ID: "2", Name: "unlocked-example.com", User: "mock-user", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "ENABLED", IsLocked: true, AutoRenew: true, IsOurDNS: true},
+	)
+	m.seedRegistrarLock("locked-example.com", true)
+	m.seedRegistrarLock("unlocked-example.com", false)
+
+	const lockCommand = "namecheap.domains.getRegistrarLock"
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { mockPreCheck(t, m) },
+		ProviderFactories: mockProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: `data "namecheap_domains" "all" {}`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "include_registrar_lock", "false"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.0.is_locked", "false"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.1.is_locked", "true"),
+					func(*terraform.State) error {
+						if got := m.commandCount(lockCommand); got != 0 {
+							return fmt.Errorf("expected no getRegistrarLock calls without include_registrar_lock, got %d", got)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: `
+data "namecheap_domains" "all" {
+  include_registrar_lock = true
+}
+`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.#", "2"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.0.name", "locked-example.com"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.0.is_locked", "true"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.1.name", "unlocked-example.com"),
+					resource.TestCheckResourceAttr("data.namecheap_domains.all", "domains.1.is_locked", "false"),
+					func(*terraform.State) error {
+						if got := m.commandCount(lockCommand); got < 2 || got%2 != 0 {
+							return fmt.Errorf("expected getRegistrarLock calls to be a positive multiple of 2 (one per domain per read), got %d", got)
 						}
 						return nil
 					},
@@ -389,6 +494,7 @@ func TestAccMockDataSourceDomainTimeBearingDates(t *testing.T) {
 	m.seedPortfolio(0,
 		mockPortfolioDomain{ID: "20", Name: domain, User: "mock-user", Created: "12/14/2020", Expires: "12/14/2099", WhoisGuard: "DISABLED", AutoRenew: true, IsOurDNS: true},
 	)
+	m.seedRegistrarLock(domain, true)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { mockPreCheck(t, m) },

@@ -14,11 +14,13 @@ import (
 //
 // Almost everything comes from one namecheap.domains.getInfo call: DNS details,
 // dates, privacy (Whoisguard), ownership, and modification rights. The
-// namecheap.domains.getList portfolio listing still supplies is_locked and
-// auto_renew (getInfo does not return those two booleans) and the authoritative
-// is_expired flag — the API's own verdict, which accounts for renewal grace
-// periods that date arithmetic cannot see. On a portfolio miss, is_expired
-// falls back to a value derived from the expiry date and domain status.
+// namecheap.domains.getList portfolio listing still supplies auto_renew (getInfo
+// does not return it) and the authoritative is_expired flag — the API's own
+// verdict, which accounts for renewal grace periods that date arithmetic cannot
+// see. On a portfolio miss, is_expired falls back to a value derived from the
+// expiry date and domain status. is_locked comes from
+// namecheap.domains.getRegistrarLock: the listing's IsLocked flag does not track
+// the registrar lock, so it is only the fallback when that call fails.
 func dataSourceNamecheapDomain() *schema.Resource {
 	return &schema.Resource{
 		Description: "Reads a single domain on the account: its DNS provider and nameservers, plus lifecycle fields such as expiry, registrar lock and auto-renew.",
@@ -79,7 +81,7 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"is_locked": {
 				Type:        schema.TypeBool,
 				Computed:    true,
-				Description: "Whether the registrar lock is enabled.",
+				Description: "Whether the registrar lock is enabled, from namecheap.domains.getRegistrarLock. If that call fails, the read warns and falls back to the portfolio listing's IsLocked flag, which does not reliably reflect the registrar lock.",
 			},
 			"auto_renew": {
 				Type:        schema.TypeBool,
@@ -298,15 +300,23 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 	// portfolio listing. getInfo above has already confirmed the domain exists,
 	// so a portfolio miss leaves the booleans at their zero values and is_expired
 	// at the derived fallback (with a warning) rather than failing the lookup.
-	lifecycleDiags := setDomainLifecycleFromList(ctx, client, data, domain)
-	if lifecycleDiags.HasError() {
-		return lifecycleDiags
+	diags := setDomainLifecycleFromList(ctx, client, data, domain)
+	if diags.HasError() {
+		return diags
+	}
+
+	// The listing's IsLocked is not the registrar lock, so replace it with the
+	// authoritative status. On failure the listing value stays, with a warning.
+	if locked, warning := fetchRegistrarLock(ctx, client, domain); warning != nil {
+		diags = append(diags, *warning)
+	} else {
+		_ = data.Set("is_locked", locked)
 	}
 
 	data.SetId(domain)
-	// Propagate any non-error diagnostics (e.g. the portfolio-miss warning)
-	// without discarding the successful read.
-	return lifecycleDiags
+	// Propagate any non-error diagnostics (the portfolio-miss and registrar-lock
+	// warnings) without discarding the successful read.
+	return diags
 }
 
 // isStatusExpired reports whether getInfo's Status attribute says the domain is

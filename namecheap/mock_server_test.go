@@ -70,6 +70,13 @@ type namecheapMock struct {
 	// API error, exercising the not-found diagnostic.
 	infos map[string]mockDomainInfo
 
+	// Registrar-lock (namecheap.domains.getRegistrarLock) state, keyed by domain
+	// name and kept apart from the portfolio row on purpose: the live API's
+	// getList IsLocked flag does not track the lock, so a test seeds the two
+	// independently. A domain absent from this map returns a "Domain not found"
+	// API error, like getInfo.
+	registrarLocks map[string]bool
+
 	// Account-scoped money state. balances backs namecheap.users.getBalances
 	// (nil until seeded, so an unseeded read surfaces an API error rather than
 	// silently reporting zero funds); pricing backs namecheap.users.getPricing,
@@ -280,6 +287,16 @@ func (m *namecheapMock) seedInfo(domain string, info mockDomainInfo) {
 	m.infos[domain] = info
 }
 
+// seedRegistrarLock registers the getRegistrarLock status for a domain.
+func (m *namecheapMock) seedRegistrarLock(domain string, locked bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.registrarLocks == nil {
+		m.registrarLocks = map[string]bool{}
+	}
+	m.registrarLocks[domain] = locked
+}
+
 // seedBalances registers the account funds returned by users.getBalances. Until
 // it is called, a balance read returns an API error rather than zero funds, so a
 // test cannot accidentally assert against an implicit empty account.
@@ -360,6 +377,9 @@ func (m *namecheapMock) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	case "namecheap.domains.getInfo":
 		_, _ = io.WriteString(w, m.renderGetInfoXML(r.FormValue("DomainName")))
+		return
+	case "namecheap.domains.getRegistrarLock":
+		_, _ = io.WriteString(w, m.renderGetRegistrarLockXML(r.FormValue("DomainName")))
 		return
 	case "namecheap.users.getBalances":
 		_, _ = io.WriteString(w, m.renderGetBalancesXML())
@@ -659,6 +679,23 @@ func (m *namecheapMock) renderGetInfoXML(domain string) string {
     </DomainGetInfoResult>
   </CommandResponse>
 </ApiResponse>`, domain, info.IsPremium, details, whois, info.IsPremiumDNS, info.ProviderType, info.IsUsingOurDNS, strings.Join(nsLines, "\n        "))
+}
+
+// renderGetRegistrarLockXML renders a namecheap.domains.getRegistrarLock
+// response for the given domain, or a "Domain not found" API error when the
+// domain's lock was not seeded.
+func (m *namecheapMock) renderGetRegistrarLockXML(domain string) string {
+	locked, ok := m.registrarLocks[domain]
+	if !ok {
+		return apiErrorXML("2019166", fmt.Sprintf("Domain %q not found", domain))
+	}
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.domains.getRegistrarLock">
+    <DomainGetRegistrarLockResult Domain="%s" RegistrarLockStatus="%t" />
+  </CommandResponse>
+</ApiResponse>`, mockXMLAttrEscaper.Replace(domain), locked)
 }
 
 // renderGetBalancesXML renders the account funds for namecheap.users.getBalances.

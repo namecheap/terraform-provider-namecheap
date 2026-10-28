@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
@@ -192,6 +193,17 @@ func xmlGetListPage(rows []dsDomainRow, total, page, pageSize int) string {
 </ApiResponse>`, strings.Join(lines, "\n      "), total, page, pageSize)
 }
 
+// xmlGetRegistrarLock renders a namecheap.domains.getRegistrarLock response.
+func xmlGetRegistrarLock(domain string, locked bool) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.domains.getRegistrarLock">
+    <DomainGetRegistrarLockResult Domain="%s" RegistrarLockStatus="%t" />
+  </CommandResponse>
+</ApiResponse>`, domain, locked)
+}
+
 func xmlDNSGetList(domain string, isUsingOurDNS bool, nameservers []string) string {
 	var ns []string
 	for _, n := range nameservers {
@@ -251,12 +263,15 @@ func TestDataSourceDomainRead_Success(t *testing.T) {
 		case "namecheap.domains.getList":
 			// Deliberately different dates and whois state than getInfo: the
 			// assertions below prove getInfo is now the source for those fields
-			// and the listing supplies only is_expired/is_locked/auto_renew.
+			// and the listing supplies only is_expired/auto_renew.
 			// IsExpired=true contradicts getInfo's 2099 expiry on purpose — the
 			// listing's own flag must win over the date-derived fallback.
+			// IsLocked=false is what the live API lists for a locked domain.
 			return xmlGetListPage([]dsDomainRow{
-				{ID: "42", Name: domain, User: "u", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: true, IsLocked: true, AutoRenew: true, IsOurDNS: true},
+				{ID: "42", Name: domain, User: "u", Created: "01/01/2000", Expires: "01/01/2001", WhoisGuard: "DISABLED", IsExpired: true, IsLocked: false, AutoRenew: true, IsOurDNS: true},
 			}, 1, 1, domainsPageSize)
+		case "namecheap.domains.getRegistrarLock":
+			return xmlGetRegistrarLock(domain, true)
 		}
 		return apiErrorXML("1010101", "unexpected command "+command)
 	})
@@ -280,8 +295,9 @@ func TestDataSourceDomainRead_Success(t *testing.T) {
 	// Listing-sourced fields. is_expired must be the listing's own flag, not the
 	// date-derived fallback (getInfo's 2099 expiry would say false).
 	assert.Equal(t, true, d.Get("is_expired"), "the listing's IsExpired flag must override the date-derived fallback")
-	assert.Equal(t, true, d.Get("is_locked"))
 	assert.Equal(t, true, d.Get("auto_renew"))
+	assert.Equal(t, true, d.Get("is_locked"), "is_locked must follow getRegistrarLock, not the listing's IsLocked")
+	assert.Empty(t, diags)
 	// New getInfo attributes.
 	assert.Equal(t, "Ok", d.Get("status"))
 	assert.Equal(t, "apiuser", d.Get("owner_name"))
@@ -323,6 +339,8 @@ func TestDataSourceDomainRead_UnparseableDate(t *testing.T) {
 			return xmlGetListPage([]dsDomainRow{
 				{ID: "7", Name: domain, User: "u", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "DISABLED", IsOurDNS: true},
 			}, 1, 1, domainsPageSize)
+		case "namecheap.domains.getRegistrarLock":
+			return xmlGetRegistrarLock(domain, true)
 		}
 		return apiErrorXML("1010101", "unexpected command "+command)
 	})
@@ -353,8 +371,8 @@ func TestDataSourceDomainRead_LifecycleMissing(t *testing.T) {
 	const domain = "example.com"
 	// getInfo confirms the domain exists, but the portfolio listing returns a
 	// different domain, so the exact-match finds nothing: the listing-sourced
-	// booleans stay at their zero values (with a warning) while every
-	// getInfo-sourced field is still populated, and the read succeeds.
+	// boolean stays at its zero value (with a warning) while every getInfo- and
+	// getRegistrarLock-sourced field is still populated, and the read succeeds.
 	client := startDataSourceServer(t, func(command string, _ *http.Request) string {
 		switch command {
 		case "namecheap.domains.getInfo":
@@ -369,6 +387,8 @@ func TestDataSourceDomainRead_LifecycleMissing(t *testing.T) {
 			return xmlGetListPage([]dsDomainRow{
 				{ID: "7", Name: "other-domain.com", User: "u", Created: "01/01/2020", Expires: "01/01/2030"},
 			}, 1, 1, domainsPageSize)
+		case "namecheap.domains.getRegistrarLock":
+			return xmlGetRegistrarLock(domain, true)
 		}
 		return apiErrorXML("1010101", "unexpected command "+command)
 	})
@@ -380,11 +400,14 @@ func TestDataSourceDomainRead_LifecycleMissing(t *testing.T) {
 	// getInfo-sourced fields survive a portfolio miss.
 	assert.Equal(t, "2099-06-02T00:00:00Z", d.Get("expires"))
 	assert.Equal(t, "NOTPRESENT", d.Get("whois_guard"), "NotAlloted from getInfo must map onto the documented vocabulary")
-	// Only the listing-sourced booleans degrade to zero values; is_expired keeps
-	// the fallback derived from getInfo's expiry date (2099 -> not expired).
+	// Only the listing-sourced boolean degrades to its zero value; is_expired
+	// keeps the fallback derived from getInfo's expiry date (2099 -> not
+	// expired), and is_locked does not depend on the listing at all.
 	assert.Equal(t, false, d.Get("is_expired"))
-	assert.Equal(t, false, d.Get("is_locked"))
 	assert.Equal(t, false, d.Get("auto_renew"))
+	assert.Equal(t, true, d.Get("is_locked"), "a portfolio miss must not cost the getRegistrarLock status")
+	require.Len(t, diags, 1, "only the portfolio-miss warning is expected")
+	assert.Equal(t, diag.Warning, diags[0].Severity)
 	// The -1 sentinel subscription must not surface its auto-renew flag or its
 	// "0001-01-01T00:00:00" never-expires date.
 	assert.Equal(t, false, d.Get("premium_dns_auto_renew"))
@@ -412,6 +435,8 @@ func TestDataSourceDomainRead_UnparseablePremiumDNSDate(t *testing.T) {
 			return xmlGetListPage([]dsDomainRow{
 				{ID: "7", Name: domain, User: "u", Created: "06/02/2021", Expires: "06/02/2099", WhoisGuard: "DISABLED", IsOurDNS: true},
 			}, 1, 1, domainsPageSize)
+		case "namecheap.domains.getRegistrarLock":
+			return xmlGetRegistrarLock(domain, true)
 		}
 		return apiErrorXML("1010101", "unexpected command "+command)
 	})
@@ -463,6 +488,8 @@ func TestDataSourceDomainRead_ExpiredFallback(t *testing.T) {
 				case "namecheap.domains.getList":
 					// Portfolio miss: the listing cannot supply IsExpired.
 					return xmlGetListPage(nil, 0, 1, domainsPageSize)
+				case "namecheap.domains.getRegistrarLock":
+					return xmlGetRegistrarLock(domain, true)
 				}
 				return apiErrorXML("1010101", "unexpected command "+command)
 			})
@@ -496,6 +523,49 @@ func TestDataSourceDomainRead_GetListError(t *testing.T) {
 	diags := dataSourceNamecheapDomainRead(context.Background(), d, client)
 	require.True(t, diags.HasError(), "a getList transport/API error should surface")
 	assert.Contains(t, diags[0].Summary, domain)
+}
+
+// TestDataSourceDomainRead_RegistrarLockUnavailable: when getRegistrarLock
+// fails or returns no status, the read still succeeds, warns once naming the
+// domain, and is_locked keeps the listing's flag.
+func TestDataSourceDomainRead_RegistrarLockUnavailable(t *testing.T) {
+	const domain = "example.com"
+	cases := map[string]string{
+		"API error": apiErrorXML("2016166", "Domain is not associated with your account"),
+		"no status": `<?xml version="1.0" encoding="utf-8"?>
+<ApiResponse Status="OK" xmlns="http://api.namecheap.com/xml.response">
+  <Errors />
+  <CommandResponse Type="namecheap.domains.getRegistrarLock" />
+</ApiResponse>`,
+	}
+	for name, lockResponse := range cases {
+		t.Run(name, func(t *testing.T) {
+			client := startDataSourceServer(t, func(command string, _ *http.Request) string {
+				switch command {
+				case "namecheap.domains.getInfo":
+					return xmlGetInfo(dsGetInfo{Domain: domain, Status: "Ok", Expires: "06/02/2099", ProviderType: "NAMECHEAP", IsOurDNS: true})
+				case "namecheap.domains.getList":
+					return xmlGetListPage([]dsDomainRow{
+						{ID: "42", Name: domain, User: "u", Created: "06/02/2021", Expires: "06/02/2099", IsLocked: true, AutoRenew: true},
+					}, 1, 1, domainsPageSize)
+				case "namecheap.domains.getRegistrarLock":
+					return lockResponse
+				}
+				return apiErrorXML("1010101", "unexpected command "+command)
+			})
+
+			d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomain().Schema, map[string]interface{}{"domain": domain})
+			diags := dataSourceNamecheapDomainRead(context.Background(), d, client)
+			require.False(t, diags.HasError(), "a getRegistrarLock failure must not fail the read: %+v", diags)
+			require.Len(t, diags, 1)
+			assert.Equal(t, diag.Warning, diags[0].Severity)
+			assert.Equal(t, registrarLockUnavailableSummary, diags[0].Summary)
+			assert.Contains(t, diags[0].Detail, domain)
+			assert.Equal(t, true, d.Get("is_locked"), "is_locked must keep the listing's flag")
+			assert.Equal(t, true, d.Get("auto_renew"))
+			assert.Equal(t, domain, d.Id())
+		})
+	}
 }
 
 // --- namecheap_domains -------------------------------------------------------
@@ -598,6 +668,70 @@ func TestDataSourceDomainsRead_Error(t *testing.T) {
 	d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomains().Schema, map[string]interface{}{"list_type": "ALL"})
 	diags := dataSourceNamecheapDomainsRead(context.Background(), d, client)
 	assert.True(t, diags.HasError(), "a getList API error should surface")
+}
+
+// TestDataSourceDomainsRead_RegistrarLock pins include_registrar_lock: off by
+// default, with no getRegistrarLock calls and the listing's IsLocked flags;
+// when set, one getRegistrarLock call per domain overrides each flag, and a
+// domain whose call fails keeps its listing flag behind a warning.
+func TestDataSourceDomainsRead_RegistrarLock(t *testing.T) {
+	rows := []dsDomainRow{
+		{ID: "1", Name: "locked.example", User: "u", Created: "06/02/2021", Expires: "06/02/2099", IsLocked: false},
+		{ID: "2", Name: "unlocked.example", User: "u", Created: "06/02/2021", Expires: "06/02/2099", IsLocked: true},
+		{ID: "3", Name: "unsupported.example", User: "u", Created: "06/02/2021", Expires: "06/02/2099", IsLocked: true},
+	}
+	locks := map[string]bool{"locked.example": true, "unlocked.example": false}
+
+	read := func(t *testing.T, include bool) ([]interface{}, diag.Diagnostics, []string) {
+		var mu sync.Mutex
+		var lockCalls []string
+		client := startDataSourceServer(t, func(command string, r *http.Request) string {
+			switch command {
+			case "namecheap.domains.getList":
+				return xmlGetListPage(rows, len(rows), 1, domainsPageSize)
+			case "namecheap.domains.getRegistrarLock":
+				name := r.FormValue("DomainName")
+				mu.Lock()
+				lockCalls = append(lockCalls, name)
+				mu.Unlock()
+				if locked, ok := locks[name]; ok {
+					return xmlGetRegistrarLock(name, locked)
+				}
+				return apiErrorXML("2016166", "Domain is not associated with your account")
+			}
+			return apiErrorXML("1010101", "unexpected command "+command)
+		})
+		d := schema.TestResourceDataRaw(t, dataSourceNamecheapDomains().Schema, map[string]interface{}{"include_registrar_lock": include})
+		diags := dataSourceNamecheapDomainsRead(context.Background(), d, client)
+		require.False(t, diags.HasError(), "unexpected diagnostics: %+v", diags)
+		return d.Get("domains").([]interface{}), diags, lockCalls
+	}
+	isLocked := func(domains []interface{}, i int) interface{} {
+		return domains[i].(map[string]interface{})["is_locked"]
+	}
+
+	t.Run("default", func(t *testing.T) {
+		domains, diags, lockCalls := read(t, false)
+		require.Len(t, domains, 3)
+		assert.Empty(t, lockCalls, "getRegistrarLock must not be called unless include_registrar_lock is set")
+		assert.Empty(t, diags)
+		assert.Equal(t, false, isLocked(domains, 0))
+		assert.Equal(t, true, isLocked(domains, 1))
+		assert.Equal(t, true, isLocked(domains, 2))
+	})
+
+	t.Run("include_registrar_lock", func(t *testing.T) {
+		domains, diags, lockCalls := read(t, true)
+		require.Len(t, domains, 3)
+		assert.Equal(t, []string{"locked.example", "unlocked.example", "unsupported.example"}, lockCalls, "one getRegistrarLock call per listed domain")
+		assert.Equal(t, true, isLocked(domains, 0), "is_locked must follow getRegistrarLock, not the listing")
+		assert.Equal(t, false, isLocked(domains, 1), "is_locked must follow getRegistrarLock, not the listing")
+		assert.Equal(t, true, isLocked(domains, 2), "a failed call keeps the listing's flag")
+		require.Len(t, diags, 1, "only the failed domain warns")
+		assert.Equal(t, diag.Warning, diags[0].Severity)
+		assert.Equal(t, registrarLockUnavailableSummary, diags[0].Summary)
+		assert.Contains(t, diags[0].Detail, "unsupported.example")
+	})
 }
 
 // --- namecheap_domain_records ------------------------------------------------

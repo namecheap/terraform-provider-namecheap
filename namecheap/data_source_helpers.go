@@ -2,6 +2,7 @@ package namecheap_provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,7 +20,9 @@ import (
 // not carry at all) and is_expired still come from the listing. is_expired is
 // listed here so the API's own flag — which accounts for renewal grace periods
 // and matches the namecheap_domains data source — overwrites the fallback value
-// derived from getInfo's expiry date and status.
+// derived from getInfo's expiry date and status. The listing's is_locked is
+// only a fallback: the data source overwrites it with the getRegistrarLock
+// status (see fetchRegistrarLock).
 var domainLifecycleAttrs = []string{
 	"is_expired", "is_locked", "auto_renew",
 }
@@ -75,7 +78,8 @@ func fetchAllDomains(ctx context.Context, client *namecheap.Client, listType, se
 // it landed on a later page. A transport/API error is surfaced (named with the
 // domain). When the domain is genuinely absent from the listing (despite getInfo
 // having confirmed it exists), the lifecycle fields are left at their zero values
-// and a warning is emitted so the gap is visible rather than silent.
+// and a warning is emitted so the gap is visible rather than silent. is_locked
+// is not part of that warning: getRegistrarLock supplies it independently.
 func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, data *schema.ResourceData, domain string) diag.Diagnostics {
 	domains, err := fetchAllDomains(ctx, client, domainsListTypeAll, domain)
 	if err != nil {
@@ -97,13 +101,47 @@ func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, d
 
 	return diag.Diagnostics{{
 		Severity: diag.Warning,
-		Summary:  fmt.Sprintf("Registrar lock and auto-renew unavailable for domain %q", domain),
+		Summary:  fmt.Sprintf("Auto-renew unavailable for domain %q", domain),
 		Detail: "getInfo confirmed the domain exists, but it did not appear in the " +
-			"namecheap.domains.getList portfolio listing, so is_locked and auto_renew " +
-			"were left at their zero values and is_expired was derived from the expiry " +
-			"date and status instead of the listing's own flag. " +
+			"namecheap.domains.getList portfolio listing, so auto_renew was left at its " +
+			"zero value and is_expired was derived from the expiry date and status " +
+			"instead of the listing's own flag. " +
 			"This is unexpected; please report it if it persists.",
 	}}
+}
+
+// registrarLockUnavailableSummary is shared by every getRegistrarLock failure,
+// whichever data source and domain it came from, so Terraform folds repeated
+// warnings from a large portfolio into one entry instead of one per domain.
+const registrarLockUnavailableSummary = "Registrar lock status unavailable"
+
+// fetchRegistrarLock returns domain's registrar-lock status from
+// namecheap.domains.getRegistrarLock, the API's authoritative source for it.
+// The getList portfolio listing also carries an IsLocked flag, but it does not
+// track the registrar lock: it reads false for domains whose lock
+// getRegistrarLock reports as set (#377), so is_locked must not rely on it.
+//
+// When the call fails or the response carries no status, it returns a warning
+// naming the domain instead of an error, and the caller keeps the listing
+// value. The lock is one field of a larger read, and some TLDs and shared
+// domains cannot report it; failing the whole read over it would take every
+// other attribute down with it.
+func fetchRegistrarLock(ctx context.Context, client *namecheap.Client, domain string) (bool, *diag.Diagnostic) {
+	resp, err := client.Domains.GetRegistrarLockWithContext(ctx, domain)
+	if err == nil && (resp == nil || resp.DomainGetRegistrarLockResult == nil || resp.DomainGetRegistrarLockResult.RegistrarLockStatus == nil) {
+		err = errors.New("the response carried no RegistrarLockStatus")
+	}
+	if err != nil {
+		return false, &diag.Diagnostic{
+			Severity: diag.Warning,
+			Summary:  registrarLockUnavailableSummary,
+			Detail: fmt.Sprintf("namecheap.domains.getRegistrarLock failed for domain %q: %s. "+
+				"is_locked keeps the namecheap.domains.getList portfolio listing's IsLocked flag "+
+				"(false when the domain is absent from the listing), which does not reliably "+
+				"reflect the registrar lock.", domain, err),
+		}
+	}
+	return *resp.DomainGetRegistrarLockResult.RegistrarLockStatus, nil
 }
 
 // dataSourceDomainReadError converts an SDK error from a domain-scoped read into
@@ -298,7 +336,7 @@ func domainPortfolioElemSchema() map[string]*schema.Schema {
 		"is_locked": {
 			Type:        schema.TypeBool,
 			Computed:    true,
-			Description: "Whether the registrar lock is enabled.",
+			Description: "Whether the registrar lock is enabled, from namecheap.domains.getRegistrarLock when include_registrar_lock is true. Otherwise this is the portfolio listing's IsLocked flag, which does not reliably reflect the registrar lock: it can read false while the lock is on.",
 		},
 		"auto_renew": {
 			Type:        schema.TypeBool,
