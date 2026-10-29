@@ -34,7 +34,7 @@ Looks up read-only information about a single domain. Use it to reference an exi
 - `expires` - Expiration date as an RFC3339 timestamp (UTC); empty when the API did not report a usable date.
 - `expires_in_days` - Whole calendar days until the domain expires (negative if already expired). Derived from the wall clock at read time; prefer `expires` where a stable value is needed. `0` means either that the domain expires today or that no day count could be derived because `expires` is empty; the two cannot be told apart.
 - `is_expired` - Whether the domain has expired, as reported by the portfolio listing (this accounts for renewal grace periods). When the domain is missing from the listing, it falls back to a value derived from the expiry date and domain status.
-- `is_locked` - Whether the registrar lock is enabled.
+- `is_locked` - Whether the domain is locked at Namecheap (the `IsLocked` flag of `namecheap.domains.getList`): while `true`, changes to the domain are not allowed. This is not the registrar (transfer) lock.
 - `auto_renew` - Whether auto-renew is enabled.
 - `whois_guard` - WhoisGuard status (e.g. `ENABLED`, `DISABLED`, `NOTPRESENT`).
 - `whois_guard_expires` - Expiration date of the domain privacy protection as an RFC3339 timestamp (UTC); empty when privacy is not allotted or the API did not report a usable date.
