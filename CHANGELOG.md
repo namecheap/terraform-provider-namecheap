@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.8](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.7...v2.9.8) (2026-10-29)
+
+
+### Bug Fixes
+
+* **docs:** describe is_locked as the Namecheap lock, not the registrar lock ([#379](https://github.com/namecheap/terraform-provider-namecheap/issues/379)) ([1df5a70](https://github.com/namecheap/terraform-provider-namecheap/commit/1df5a70d87ccd3333dfbb08365d90caa01050443))
+
 ## [2.9.7](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.6...v2.9.7) (2026-10-26)
 
 
