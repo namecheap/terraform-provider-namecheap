@@ -21,7 +21,7 @@ import (
 // falls back to a value derived from the expiry date and domain status.
 func dataSourceNamecheapDomain() *schema.Resource {
 	return &schema.Resource{
-		Description: "Reads a single domain on the account: its DNS provider and nameservers, plus lifecycle fields such as expiry, registrar lock and auto-renew.",
+		Description: "Reads a single domain on the account: its DNS provider and nameservers, plus lifecycle fields such as expiry, lock status and auto-renew.",
 		ReadContext: dataSourceNamecheapDomainRead,
 		Schema: map[string]*schema.Schema{
 			"domain": {
@@ -79,7 +79,7 @@ func dataSourceNamecheapDomain() *schema.Resource {
 			"is_locked": {
 				Type:        schema.TypeBool,
 				Computed:    true,
-				Description: "Whether the registrar lock is enabled.",
+				Description: "Whether the domain is locked at Namecheap (the `IsLocked` flag of `namecheap.domains.getList`): while `true`, changes to the domain are not allowed. This is not the registrar (transfer) lock.",
 			},
 			"auto_renew": {
 				Type:        schema.TypeBool,
@@ -293,7 +293,7 @@ func dataSourceNamecheapDomainRead(ctx context.Context, data *schema.ResourceDat
 		}
 	}
 
-	// getInfo does not carry the registrar-lock and domain auto-renew booleans,
+	// getInfo does not carry the is_locked and auto_renew booleans,
 	// and its is_expired can only be derived. Fetch those three from the account
 	// portfolio listing. getInfo above has already confirmed the domain exists,
 	// so a portfolio miss leaves the booleans at their zero values and is_expired

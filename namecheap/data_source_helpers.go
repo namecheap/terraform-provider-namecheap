@@ -15,7 +15,7 @@ import (
 // domainLifecycleAttrs are the attributes exported by the namecheap_domain data
 // source that originate from the portfolio listing (namecheap.domains.getList)
 // rather than from getInfo. Since SDK v2.10.1 maps getInfo's full response,
-// only the registrar-lock and domain auto-renew booleans (which getInfo does
+// only the is_locked and auto_renew booleans (which getInfo does
 // not carry at all) and is_expired still come from the listing. is_expired is
 // listed here so the API's own flag — which accounts for renewal grace periods
 // and matches the namecheap_domains data source — overwrites the fallback value
@@ -97,7 +97,7 @@ func setDomainLifecycleFromList(ctx context.Context, client *namecheap.Client, d
 
 	return diag.Diagnostics{{
 		Severity: diag.Warning,
-		Summary:  fmt.Sprintf("Registrar lock and auto-renew unavailable for domain %q", domain),
+		Summary:  fmt.Sprintf("Lock status and auto-renew unavailable for domain %q", domain),
 		Detail: "getInfo confirmed the domain exists, but it did not appear in the " +
 			"namecheap.domains.getList portfolio listing, so is_locked and auto_renew " +
 			"were left at their zero values and is_expired was derived from the expiry " +
@@ -298,7 +298,7 @@ func domainPortfolioElemSchema() map[string]*schema.Schema {
 		"is_locked": {
 			Type:        schema.TypeBool,
 			Computed:    true,
-			Description: "Whether the registrar lock is enabled.",
+			Description: "Whether the domain is locked at Namecheap (the `IsLocked` flag of `namecheap.domains.getList`): while `true`, changes to the domain are not allowed. This is not the registrar (transfer) lock.",
 		},
 		"auto_renew": {
 			Type:        schema.TypeBool,
