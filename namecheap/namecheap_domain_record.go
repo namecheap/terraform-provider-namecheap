@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -24,6 +25,8 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 		UpdateContext: resourceRecordUpdate,
 		ReadContext:   resourceRecordRead,
 		DeleteContext: resourceRecordDelete,
+
+		CustomizeDiff: customizeRecordsDiff,
 
 		Importer: &schema.ResourceImporter{
 			StateContext: func(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
@@ -132,6 +135,108 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 		))
 	}
 	return
+}
+
+// customizeRecordsDiff fails the plan when email_type = "MXE" would leave the
+// zone with no MXE record. Namecheap accepts that write and puts the zone on
+// MXE with nothing to publish, so the domain is left without a mail server.
+//
+// In OVERWRITE the configured records are the whole zone. In MERGE an MXE row
+// another resource manages counts too, so when the configuration has none the
+// zone is read; a failed read skips the check and leaves it to the apply.
+func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	config := diff.GetRawConfig()
+	if config.IsNull() || !config.IsKnown() {
+		return nil
+	}
+	emailType := config.GetAttr("email_type")
+	if !emailType.IsKnown() || emailType.IsNull() || emailType.AsString() != namecheap.EmailTypeMXE {
+		return nil
+	}
+	hasMXE, known := configHasMXERecord(config.GetAttr("record"))
+	if hasMXE || !known {
+		return nil
+	}
+
+	if strings.ToUpper(diff.Get("mode").(string)) == ncModeOverwrite {
+		return fmt.Errorf(`email_type = "MXE" needs at least one record with type = "MXE": ` +
+			`without one Namecheap puts the domain on MXE with no mail server. ` +
+			`Add the MXE record for your mail server's IPv4 address, or set another email_type`)
+	}
+
+	if !diff.NewValueKnown("domain") {
+		return nil
+	}
+	client := meta.(*namecheap.Client)
+	domain := strings.ToLower(diff.Get("domain").(string))
+	response, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
+	if err != nil || validateGetHostsResponse(response) != nil {
+		return nil
+	}
+	priorRecords, _ := diff.GetChange("record")
+	if zoneKeepsMXERecord(response.DomainDNSGetHostsResult.Hosts, priorRecords.(*schema.Set).List()) {
+		return nil
+	}
+	return fmt.Errorf(`email_type = "MXE" needs at least one record with type = "MXE", `+
+		`and neither this resource nor the rest of %s's zone has one: `+
+		`without one Namecheap puts the domain on MXE with no mail server. `+
+		`Add the MXE record for your mail server's IPv4 address to this resource, or set another email_type`, domain)
+}
+
+// configHasMXERecord reports whether the configured record blocks hold an MXE
+// record. known is false when a record type is not known until apply, so the
+// answer cannot be given at plan time.
+func configHasMXERecord(records cty.Value) (hasMXE bool, known bool) {
+	if !records.IsKnown() {
+		return false, false
+	}
+	if records.IsNull() {
+		return false, true
+	}
+	known = true
+	for it := records.ElementIterator(); it.Next(); {
+		_, record := it.Element()
+		if !record.IsKnown() {
+			known = false
+			continue
+		}
+		recordType := record.GetAttr("type")
+		if !recordType.IsKnown() {
+			known = false
+			continue
+		}
+		if !recordType.IsNull() && recordType.AsString() == namecheap.RecordTypeMXE {
+			return true, true
+		}
+	}
+	return false, known
+}
+
+// zoneKeepsMXERecord reports whether a MERGE write keeps an MXE row this
+// resource does not manage: a live MXE row absent from priorRecords, the
+// records the resource wrote last.
+func zoneKeepsMXERecord(hosts *[]namecheap.DomainsDNSHostRecordDetailed, priorRecords []interface{}) bool {
+	if hosts == nil {
+		return false
+	}
+	prior := convertRecordTypeSetToDomainRecords(&priorRecords)
+	for _, host := range *hosts {
+		if derefStr(host.Type) != namecheap.RecordTypeMXE {
+			continue
+		}
+		hostHash := hashRecord(derefStr(host.Name), derefStr(host.Type), derefStr(host.Address))
+		owned := false
+		for _, record := range *prior {
+			if strings.EqualFold(hostHash, hashRecord(*record.HostName, *record.RecordType, *record.Address)) {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			return true
+		}
+	}
+	return false
 }
 
 func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
