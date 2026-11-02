@@ -246,6 +246,36 @@ func TestCreateRecordsOverwrite_Simple(t *testing.T) {
 	assert.Empty(t, diags, "no unmanaged records on the remote, so no warning is expected")
 }
 
+func TestCreateRecordsOverwrite_KeepsZoneEmailTypeWithoutEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("GMAIL", nil))
+		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "GMAIL", r.FormValue("EmailType"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		default:
+			t.Fatalf("unexpected command: %s", r.FormValue("Command"))
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	records := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := createRecordsOverwrite(context.Background(), "test.com", nil, records, nil, client)
+	assert.False(t, diags.HasError())
+}
+
 func TestCreateRecordsOverwrite_WithEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()

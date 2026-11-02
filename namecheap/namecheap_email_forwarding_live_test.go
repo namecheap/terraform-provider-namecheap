@@ -24,8 +24,10 @@ import (
 // the live API appears not to persist forwarding rules queryably until FWD is
 // set (getEmailForwarding otherwise returns no result even right after a
 // successful setEmailForwarding) - matching this resource's own documented
-// precondition. namecheap_domain_records' own destroy resets email_type back
-// to "NONE", so no extra cleanup is needed for it.
+// precondition. namecheap_domain_records' destroy keeps the zone's mail mode,
+// so the domain stays on FWD afterwards; the tests that need another mode set
+// it themselves (domain_records tests in PreCheck, host_record MX tests through
+// WithEmailType), so no extra cleanup write is needed.
 //
 // The helper resource must configure at least one `record` block:
 // resourceRecordCreate only threads email_type through to the API as a side

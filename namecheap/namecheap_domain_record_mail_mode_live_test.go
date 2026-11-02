@@ -83,8 +83,9 @@ func TestAccNamecheapDomainRecordsMailMode(t *testing.T) {
 		})
 	})
 
-	// OVERWRITE without email_type used to send NONE on every write, so the
-	// first record edit on a Private Email domain switched its mail off.
+	// OVERWRITE without email_type used to send NONE on every write and on
+	// destroy, so the first record edit on a Private Email domain switched its
+	// mail off.
 	t.Run("overwrite_without_email_type_keeps_a_mail_preset", func(t *testing.T) {
 		var resp namecheap.DomainsDNSGetHostsCommandResponse
 
@@ -94,6 +95,11 @@ func TestAccNamecheapDomainRecordsMailMode(t *testing.T) {
 				setDomainRecords(t, namecheap.String(namecheap.EmailTypePrivate), nil)
 			},
 			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&resp),
+				testAccDomainRecordsEmailType(&resp, namecheap.EmailTypePrivate),
+				testAccDomainRecordsLength(&resp, 0),
+			),
 			Steps: []resource.TestStep{
 				{
 					Config: fmt.Sprintf(`
@@ -130,6 +136,10 @@ func TestAccNamecheapDomainRecordsMailMode(t *testing.T) {
 				resetDomainRecords(t)
 			},
 			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&resp),
+				testAccDomainRecordsEmailType(&resp, namecheap.EmailTypeMX),
+			),
 			Steps: []resource.TestStep{
 				{
 					Config: fmt.Sprintf(`

@@ -747,7 +747,8 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 					Check: resource.ComposeTestCheckFunc(
 						testAccDomainRecordsAPIFetch(&domainRecordsResp),
 						testAccDomainRecordsLength(&domainRecordsResp, 1),
-						testAccDomainRecordsEmailType(&domainRecordsResp, namecheap.EmailTypeNone),
+						// email_type left the config, so the zone keeps FWD.
+						testAccDomainRecordsEmailType(&domainRecordsResp, namecheap.EmailTypeForward),
 						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    namecheap.String("sub11"),
 							Type:    namecheap.String("A"),

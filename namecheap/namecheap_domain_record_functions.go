@@ -301,8 +301,11 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 		newDomainRecords = append(newDomainRecords, *record)
 	}
 
+	// Without email_type the resource owns records, not the mail mode: resend
+	// the zone's mode so it never changes. Omitting EmailType would keep it on
+	// the API side too, but the SDK refuses the zone's own MX rows without it.
 	if emailType == nil {
-		emailType = resolveEmailType(&newDomainRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
+		emailType = remoteRecordsResponse.DomainDNSGetHostsResult.EmailType
 	}
 
 	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
@@ -339,7 +342,7 @@ func createRecordsOverwrite(ctx context.Context, domain string, emailType *strin
 	if len(priorRecords) > 0 {
 		preflightReference = append(append([]interface{}{}, records...), priorRecords...)
 	}
-	unmanaged, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, preflightReference, client)
+	unmanaged, zoneEmailType, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, preflightReference, client)
 	if preflightDiags.HasError() {
 		return preflightDiags
 	}
@@ -348,15 +351,16 @@ func createRecordsOverwrite(ctx context.Context, domain string, emailType *strin
 		diags = append(diags, buildUnmanagedDeletionWarning(domain, unmanaged, "will delete"))
 	}
 
-	emailTypeValue := namecheap.String(namecheap.EmailTypeNone)
-	if emailType != nil {
-		emailTypeValue = emailType
+	// Without email_type the mail mode stays as it is, as in MERGE: sending
+	// NONE here switched Private Email and Google Workspace domains off.
+	if emailType == nil {
+		emailType = zoneEmailType
 	}
 
 	_, err := client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   domainRecords,
-		EmailType: emailTypeValue,
+		EmailType: emailType,
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -471,19 +475,21 @@ func readRecordsOverwrite(ctx context.Context, domain string, currentRecords []i
 // callers can warn before a destructive SetHosts (#65, #250). Callers pass
 // the incoming config records for create/update, or the prior-state records
 // for delete (state-tracked records are consented deletions; anything else
-// live is the surprise worth warning about).
-func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceRecords []interface{}, client *namecheap.Client) ([]namecheap.DomainsDNSHostRecordDetailed, diag.Diagnostics) {
+// live is the surprise worth warning about). It also returns the zone's
+// current mail mode from the same read.
+func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceRecords []interface{}, client *namecheap.Client) ([]namecheap.DomainsDNSHostRecordDetailed, *string, diag.Diagnostics) {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
-		return nil, diagFromClientError(err)
+		return nil, nil, diagFromClientError(err)
 	}
 
 	if err := validateGetHostsResponse(remoteRecordsResponse); err != nil {
-		return nil, diagFromClientError(err)
+		return nil, nil, diagFromClientError(err)
 	}
 
+	emailType := remoteRecordsResponse.DomainDNSGetHostsResult.EmailType
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts == nil {
-		return nil, nil
+		return nil, emailType, nil
 	}
 
 	referenceRecordsConverted := convertRecordTypeSetToDomainRecords(&referenceRecords)
@@ -497,7 +503,7 @@ func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceReco
 		for _, referenceRecord := range *referenceRecordsConverted {
 			referenceRecordAddressFixed, err := getFixedAddressOfRecord(&referenceRecord)
 			if err != nil {
-				return nil, diagFromClientError(err)
+				return nil, nil, diagFromClientError(err)
 			}
 
 			referenceRecordHash := hashRecord(*referenceRecord.HostName, *referenceRecord.RecordType, *referenceRecordAddressFixed)
@@ -514,7 +520,7 @@ func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceReco
 		unmanagedRecords = append(unmanagedRecords, remoteRecord)
 	}
 
-	return unmanagedRecords, nil
+	return unmanagedRecords, emailType, nil
 }
 
 // updateRecordsMerge fetches remote records, remove previousRecords from remote, add currentRecords and return the final list
@@ -565,7 +571,7 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 	newRecordList = append(newRecordList, *currentRecordsMapped...)
 
 	if emailType == nil {
-		emailType = resolveEmailType(&newRecordList, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
+		emailType = remoteRecordsResponse.DomainDNSGetHostsResult.EmailType
 	}
 
 	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
@@ -626,12 +632,10 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 		}
 	}
 
-	resolvedEmailType := resolveEmailType(&remainedRecords, remoteRecordsResponse.DomainDNSGetHostsResult.EmailType)
-
 	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &remainedRecords,
-		EmailType: resolvedEmailType,
+		EmailType: remoteRecordsResponse.DomainDNSGetHostsResult.EmailType,
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -642,16 +646,17 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 	return nil
 }
 
-// deleteRecordsOverwrite removes all records. priorStateRecords is the set of
-// records Terraform had in state for this resource (raw *schema.Set form);
-// it is used only to compute the unmanaged-deletion pre-flight warning below,
-// not to scope the deletion itself - destroy always wipes the whole zone.
+// deleteRecordsOverwrite removes all records and keeps the mail mode.
+// priorStateRecords is the set of records Terraform had in state for this
+// resource (raw *schema.Set form); it is used only to compute the
+// unmanaged-deletion pre-flight warning below, not to scope the deletion
+// itself - destroy always wipes the whole zone.
 func deleteRecordsOverwrite(ctx context.Context, domain string, priorStateRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	// Pre-flight read: anything live that isn't in priorStateRecords is a
 	// surprise deletion Terraform never consented to (#65, #250).
-	unmanaged, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, priorStateRecords, client)
+	unmanaged, zoneEmailType, preflightDiags := unmanagedRecordsOverwrite(ctx, domain, priorStateRecords, client)
 	if preflightDiags.HasError() {
 		return preflightDiags
 	}
@@ -662,10 +667,12 @@ func deleteRecordsOverwrite(ctx context.Context, domain string, priorStateRecord
 
 	var records []namecheap.DomainsDNSHostRecord
 
+	// Destroy empties the zone but keeps its mail mode, as MERGE destroy does:
+	// a Private Email or Google Workspace domain keeps receiving mail.
 	_, err := client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &records,
-		EmailType: namecheap.String(namecheap.EmailTypeNone),
+		EmailType: zoneEmailType,
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -884,37 +891,4 @@ func derefStr(s *string) string {
 // This function mostly serves to print error details for user
 func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {
 	return fmt.Sprintf("{hostname = %s, type = %s, address = %s}", *record.HostName, *record.RecordType, *record.Address)
-}
-
-// resolveEmailType resolves an emailType for the case when no emailType provided by terraform configuration,
-// but we have an old emailType value extracted from read response
-// The main purpose is to prevent set up MX/MXE email type when after manipulation no MX/MXE records available
-// This function resolves a bug when we have removed MX/MXE record without reset of emailType, then trying to remove non-MX* record
-func resolveEmailType(records *[]namecheap.DomainsDNSHostRecord, emailType *string) *string {
-	if emailType == nil {
-		return namecheap.String(namecheap.EmailTypeNone)
-	}
-
-	if *emailType != namecheap.EmailTypeMXE && *emailType != namecheap.EmailTypeMX {
-		return emailType
-	}
-
-	foundMX := false
-	foundMXE := false
-
-	for _, record := range *records {
-		switch *record.RecordType {
-		case namecheap.RecordTypeMX:
-			foundMX = true
-		case namecheap.RecordTypeMXE:
-			foundMXE = true
-		}
-	}
-
-	if *emailType == namecheap.EmailTypeMX && !foundMX ||
-		*emailType == namecheap.EmailTypeMXE && !foundMXE {
-		return namecheap.String(namecheap.EmailTypeNone)
-	}
-
-	return emailType
 }

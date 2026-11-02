@@ -91,7 +91,7 @@ func TestDeleteRecordsMerge_RemovesAllManagedRecords(t *testing.T) {
 	assert.Equal(t, 0, setHostsRecordCount) // No records remain
 }
 
-func TestDeleteRecordsMerge_EmailTypeResolvedToNone(t *testing.T) {
+func TestDeleteRecordsMerge_KeepsEmailTypeWhenLastMXGoes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		command := r.FormValue("Command")
@@ -103,8 +103,8 @@ func TestDeleteRecordsMerge_EmailTypeResolvedToNone(t *testing.T) {
 				{Name: "@", Type: "MX", Address: "mail.test.com.", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
-			// After removing MX record, email type should be resolved to NONE
-			assert.Equal(t, "NONE", r.FormValue("EmailType"))
+			// The zone stays MX with no MX rows; destroy never downgrades it.
+			assert.Equal(t, "MX", r.FormValue("EmailType"))
 			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
@@ -125,16 +125,16 @@ func TestDeleteRecordsMerge_EmailTypeResolvedToNone(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
-func TestDeleteRecordsOverwrite_ClearsAll(t *testing.T) {
+func TestDeleteRecordsOverwrite_ClearsAllAndKeepsEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		switch r.FormValue("Command") {
 		case "namecheap.domains.dns.getHosts":
-			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
+			_, _ = fmt.Fprint(w, getHostsXML("OX", []hostEntry{
 				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 			}))
 		case "namecheap.domains.dns.setHosts":
-			assert.Equal(t, "NONE", r.FormValue("EmailType"))
+			assert.Equal(t, "OX", r.FormValue("EmailType"))
 			// No records should be sent
 			assert.Empty(t, r.FormValue("HostName1"))
 			_, _ = fmt.Fprint(w, setHostsSuccessXML())

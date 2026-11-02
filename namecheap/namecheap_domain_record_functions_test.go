@@ -110,106 +110,6 @@ func TestGetFixedAddressOfRecord(t *testing.T) {
 	}
 }
 
-func TestResolveEmailType(t *testing.T) {
-	cases := []struct {
-		Name              string
-		Records           []namecheap.DomainsDNSHostRecord
-		EmailType         string
-		ExpectedEmailType string
-	}{
-		{
-			Name:              "email_type_mx_with_0_records",
-			Records:           []namecheap.DomainsDNSHostRecord{},
-			EmailType:         namecheap.EmailTypeMX,
-			ExpectedEmailType: namecheap.EmailTypeNone,
-		},
-		{
-			Name:              "email_type_mxe_with_0_records",
-			Records:           []namecheap.DomainsDNSHostRecord{},
-			EmailType:         namecheap.EmailTypeMXE,
-			ExpectedEmailType: namecheap.EmailTypeNone,
-		},
-		{
-			Name: "email_type_mx_with_no_mx_records",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeA, "11.11.11.11"),
-			},
-			EmailType:         namecheap.EmailTypeMX,
-			ExpectedEmailType: namecheap.EmailTypeNone,
-		},
-		{
-			Name: "email_type_mx_with_no_mxe_records",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeA, "11.11.11.11"),
-			},
-			EmailType:         namecheap.EmailTypeMXE,
-			ExpectedEmailType: namecheap.EmailTypeNone,
-		},
-		{
-			Name: "email_type_mx_with_mx_record",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeMX, "mail.server.com"),
-			},
-			EmailType:         namecheap.EmailTypeMX,
-			ExpectedEmailType: namecheap.EmailTypeMX,
-		},
-		{
-			Name: "email_type_mx_with_mxe_record",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeMXE, "mail.server.com"),
-			},
-			EmailType:         namecheap.EmailTypeMXE,
-			ExpectedEmailType: namecheap.EmailTypeMXE,
-		},
-		{
-			Name: "email_type_none",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeA, "11.11.11.11"),
-			},
-			EmailType:         namecheap.EmailTypeNone,
-			ExpectedEmailType: namecheap.EmailTypeNone,
-		},
-		{
-			Name: "email_type_fwd",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeA, "11.11.11.11"),
-			},
-			EmailType:         namecheap.EmailTypeForward,
-			ExpectedEmailType: namecheap.EmailTypeForward,
-		},
-		{
-			Name: "email_type_private",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeA, "11.11.11.11"),
-			},
-			EmailType:         namecheap.EmailTypePrivate,
-			ExpectedEmailType: namecheap.EmailTypePrivate,
-		},
-		{
-			Name: "email_type_gmail",
-			Records: []namecheap.DomainsDNSHostRecord{
-				createRecordByTypeAndAddress(namecheap.RecordTypeA, "11.11.11.11"),
-			},
-			EmailType:         namecheap.EmailTypeGmail,
-			ExpectedEmailType: namecheap.EmailTypeGmail,
-		},
-	}
-
-	for _, caseItem := range cases {
-		t.Run(caseItem.Name, func(t *testing.T) {
-			assert.Equal(t, &caseItem.ExpectedEmailType, resolveEmailType(&caseItem.Records, &caseItem.EmailType))
-		})
-	}
-}
-
-func TestResolveEmailType_NilEmailType(t *testing.T) {
-	records := []namecheap.DomainsDNSHostRecord{
-		createRecordByTypeAndAddress(namecheap.RecordTypeA, "1.2.3.4"),
-	}
-	result := resolveEmailType(&records, nil)
-	assert.Equal(t, namecheap.EmailTypeNone, *result)
-}
-
 func TestValidateGetListResponse(t *testing.T) {
 	t.Run("nil_response", func(t *testing.T) {
 		err := validateGetListResponse(nil)
@@ -517,7 +417,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		}))
 		defer server.Close()
 
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Empty(t, unmanaged)
 	})
@@ -533,7 +433,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		reference := []interface{}{
 			map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
 		}
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Empty(t, unmanaged)
 	})
@@ -550,7 +450,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		reference := []interface{}{
 			map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
 		}
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		if assert.Len(t, unmanaged, 1) {
 			assert.Equal(t, "api", *unmanaged[0].Name)
@@ -566,7 +466,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		}))
 		defer server.Close()
 
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Empty(t, unmanaged)
 	})
@@ -584,7 +484,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		reference := []interface{}{
 			map[string]interface{}{"hostname": "www", "type": "CNAME", "address": "parkingpage.namecheap.com.", "mx_pref": 10, "ttl": 1800},
 		}
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Empty(t, unmanaged)
 	})
@@ -602,7 +502,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		reference := []interface{}{
 			map[string]interface{}{"hostname": "blog", "type": "CNAME", "address": "example.com", "mx_pref": 10, "ttl": 1800},
 		}
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Empty(t, unmanaged)
 	})
@@ -623,7 +523,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		reference := []interface{}{
 			map[string]interface{}{"hostname": "@", "type": "CAA", "address": "0 issue letsencrypt.org", "mx_pref": 10, "ttl": 1800},
 		}
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", reference, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Empty(t, unmanaged)
 	})
@@ -634,7 +534,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		}))
 		defer server.Close()
 
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
 		assert.False(t, diags.HasError())
 		assert.Nil(t, unmanaged)
 	})
@@ -646,7 +546,7 @@ func TestUnmanagedRecordsOverwrite(t *testing.T) {
 		}))
 		defer server.Close()
 
-		unmanaged, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
+		unmanaged, _, diags := unmanagedRecordsOverwrite(context.Background(), "test.com", []interface{}{}, newTestClient(server.URL))
 		assert.Nil(t, unmanaged)
 		assert.True(t, diags.HasError())
 	})
