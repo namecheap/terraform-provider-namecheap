@@ -143,7 +143,8 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 //
 // In OVERWRITE the configured records are the whole zone. In MERGE an MXE row
 // another resource manages counts too, so when the configuration has none the
-// zone is read; a failed read skips the check and leaves it to the apply.
+// live zone is read, once per plan that writes; a failed read skips the check
+// and leaves it to the apply.
 func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
 	config := diff.GetRawConfig()
 	if config.IsNull() || !config.IsKnown() {
@@ -155,6 +156,16 @@ func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta i
 	}
 	hasMXE, known := configHasMXERecord(config.GetAttr("record"))
 	if hasMXE || !known {
+		return nil
+	}
+	// CustomizeDiff runs on plans with no changes and again during apply, so the
+	// check, and the live read it may need, is limited to plans that write.
+	if !diff.HasChange("record") && !diff.HasChange("email_type") {
+		return nil
+	}
+	// An unknown mode must not fall into the lenient MERGE branch below and then
+	// apply as OVERWRITE.
+	if !diff.NewValueKnown("mode") {
 		return nil
 	}
 
@@ -174,7 +185,8 @@ func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta i
 		return nil
 	}
 	priorRecords, _ := diff.GetChange("record")
-	if zoneKeepsMXERecord(response.DomainDNSGetHostsResult.Hosts, priorRecords.(*schema.Set).List()) {
+	keeps, err := zoneKeepsMXERecord(response.DomainDNSGetHostsResult.Hosts, priorRecords.(*schema.Set).List())
+	if err != nil || keeps {
 		return nil
 	}
 	return fmt.Errorf(`email_type = "MXE" needs at least one record with type = "MXE", `+
@@ -214,29 +226,26 @@ func configHasMXERecord(records cty.Value) (hasMXE bool, known bool) {
 
 // zoneKeepsMXERecord reports whether a MERGE write keeps an MXE row this
 // resource does not manage: a live MXE row absent from priorRecords, the
-// records the resource wrote last.
-func zoneKeepsMXERecord(hosts *[]namecheap.DomainsDNSHostRecordDetailed, priorRecords []interface{}) bool {
+// records the resource wrote last, matched as the MERGE write matches them
+// (isPriorRecord).
+func zoneKeepsMXERecord(hosts *[]namecheap.DomainsDNSHostRecordDetailed, priorRecords []interface{}) (bool, error) {
 	if hosts == nil {
-		return false
+		return false, nil
 	}
 	prior := convertRecordTypeSetToDomainRecords(&priorRecords)
 	for _, host := range *hosts {
 		if derefStr(host.Type) != namecheap.RecordTypeMXE {
 			continue
 		}
-		hostHash := hashRecord(derefStr(host.Name), derefStr(host.Type), derefStr(host.Address))
-		owned := false
-		for _, record := range *prior {
-			if strings.EqualFold(hostHash, hashRecord(*record.HostName, *record.RecordType, *record.Address)) {
-				owned = true
-				break
-			}
+		owned, err := isPriorRecord(host, *prior)
+		if err != nil {
+			return false, err
 		}
 		if !owned {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -533,7 +542,9 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		}
 	}
 
-	// For overwrite mode, when no nameservers and records, and email type is not set, then we have to reset it to NONE
+	// OVERWRITE with no records, no nameservers and no email_type: resend the
+	// zone's current mail mode and wipe the records this resource no longer
+	// configures.
 	if emailType == nil && mode == ncModeOverwrite && oldNameserversLen == 0 && newNameserversLen == 0 && oldRecordsLen == 0 && newRecordsLen == 0 {
 		recordDiags := createRecordsOverwrite(ctx, domain, nil, []interface{}{}, nil, client)
 		if recordDiags.HasError() {

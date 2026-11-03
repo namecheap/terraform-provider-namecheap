@@ -77,11 +77,17 @@ resource "namecheap_domain_records" "test" {
 						ExpectError: mxeNeedsRecordError,
 					},
 					{
-						// The rejected plan wrote nothing: the zone still holds the
-						// MXE record and the first configuration plans clean.
+						// The rejected plan wrote nothing: only the first step's write
+						// reached setHosts (checked here, before destroy writes again),
+						// and the first configuration plans clean. A PlanOnly step runs
+						// no Check, so the count is asserted in PreConfig.
+						PreConfig: func() {
+							if n := m.commandCount("namecheap.domains.dns.setHosts"); n != 1 {
+								t.Errorf("setHosts calls = %d, want 1: the rejected plan must not write", n)
+							}
+						},
 						Config:   config(mode, true),
 						PlanOnly: true,
-						Check:    mockCheckHostContains(m, domain, "@", "MXE", "10.0.0.25"),
 					},
 				},
 			})

@@ -24,7 +24,7 @@ func TestHostRecordMailModeWarning(t *testing.T) {
 		&namecheap.RecordChangeResult{EmailTypeBefore: namecheap.EmailTypeMX, EmailType: namecheap.EmailTypeMXE})
 	if assert.Len(t, diags, 1) {
 		assert.Equal(t, diag.Warning, diags[0].Severity)
-		assert.Equal(t, "This write moved test.com's mail mode from MX to MXE", diags[0].Summary)
+		assert.Equal(t, "This write moved test.com's mail mode (EmailType) from MX to MXE", diags[0].Summary)
 		assert.Contains(t, diags[0].Detail, "email_type")
 	}
 }
@@ -51,7 +51,7 @@ func TestDomainHostRecordCreateWarnsWhenMXEMovesTheMailMode(t *testing.T) {
 	assert.Equal(t, namecheap.EmailTypeMXE, zone.emailType)
 	if assert.Len(t, diags, 1) {
 		assert.Equal(t, diag.Warning, diags[0].Severity)
-		assert.Equal(t, "This write moved test.com's mail mode from MX to MXE", diags[0].Summary)
+		assert.Equal(t, "This write moved test.com's mail mode (EmailType) from MX to MXE", diags[0].Summary)
 	}
 }
 

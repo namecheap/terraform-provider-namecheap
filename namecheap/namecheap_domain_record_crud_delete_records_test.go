@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -271,4 +272,59 @@ func TestDeleteRecordsOverwrite_SetHostsAPIError(t *testing.T) {
 	client := newTestClient(server.URL)
 	diags := deleteRecordsOverwrite(context.Background(), "test.com", []interface{}{}, client)
 	assert.True(t, diags.HasError())
+}
+
+// TestResendEmailTypeOmitsEmptyMode: getHosts can answer with an empty EmailType
+// attribute. The writes that resend the zone's mode must then omit the
+// parameter, which keeps the mode, rather than send "", which the SDK rejects
+// as an invalid EmailType before anything is written.
+func TestResendEmailTypeOmitsEmptyMode(t *testing.T) {
+	records := []interface{}{
+		map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+	}
+	writes := map[string]func(client *namecheap.Client) diag.Diagnostics{
+		"create merge": func(c *namecheap.Client) diag.Diagnostics {
+			return createRecordsMerge(context.Background(), "test.com", nil, records, c)
+		},
+		"create overwrite": func(c *namecheap.Client) diag.Diagnostics {
+			return createRecordsOverwrite(context.Background(), "test.com", nil, records, nil, c)
+		},
+		"update merge": func(c *namecheap.Client) diag.Diagnostics {
+			return updateRecordsMerge(context.Background(), "test.com", nil, records, records, c)
+		},
+		"delete merge": func(c *namecheap.Client) diag.Diagnostics {
+			return deleteRecordsMerge(context.Background(), "test.com", records, c)
+		},
+		"delete overwrite": func(c *namecheap.Client) diag.Diagnostics {
+			return deleteRecordsOverwrite(context.Background(), "test.com", records, c)
+		},
+	}
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			setHosts := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				switch r.FormValue("Command") {
+				case "namecheap.domains.dns.getHosts":
+					// www, the record each write manages, is absent so create does
+					// not refuse it as a duplicate.
+					_, _ = fmt.Fprint(w, getHostsXML("", []hostEntry{
+						{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
+					}))
+				case "namecheap.domains.dns.setHosts":
+					setHosts++
+					_, ok := r.Form["EmailType"]
+					assert.False(t, ok, "an empty zone mode must be omitted, not sent")
+					_, _ = fmt.Fprint(w, setHostsSuccessXML())
+				default:
+					t.Fatalf("unexpected command: %s", r.FormValue("Command"))
+				}
+			}))
+			defer server.Close()
+
+			diags := write(newTestClient(server.URL))
+			assert.False(t, diags.HasError(), "%v", diags)
+			assert.Equal(t, 1, setHosts)
+		})
+	}
 }

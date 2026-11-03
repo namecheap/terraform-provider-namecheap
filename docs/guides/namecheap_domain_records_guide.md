@@ -118,8 +118,8 @@ vice-versa.
 The `email_type` field is required if you want to set Mail Settings and MX records. After purchasing a domain, by
 default `email_type` equals to `NONE`.
 
-Leave `email_type` out to keep the domain's current Mail Settings: record changes and destroy then never change them,
-in `MERGE` and `OVERWRITE` mode alike. A domain on Private Email or Google Workspace stays on it, and a domain on
+Leave `email_type` out to keep the domain's current mail mode (`EmailType`, the dashboard's Mail Settings): record
+changes and destroy then never change it, in `MERGE` and `OVERWRITE` mode alike. A domain on Private Email or Google Workspace stays on it, and a domain on
 Custom MX stays on Custom MX even when its last MX record is removed.
 
 Normally, it takes 30 minutes for newly created records to take effect.

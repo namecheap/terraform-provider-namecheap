@@ -422,6 +422,9 @@ func resourceNamecheapDomainHostRecordDelete(ctx context.Context, data *schema.R
 	}
 
 	data.SetId("")
+	// The SDK never moves the mail mode on a delete, which adds no record, so
+	// this cannot fire today. It is defensive: an SDK that ever did would not
+	// move the mode silently.
 	return hostRecordMailModeWarning(domain, result)
 }
 
@@ -429,7 +432,8 @@ func resourceNamecheapDomainHostRecordDelete(ctx context.Context, data *schema.R
 // own. This resource does not manage the domain's EmailType, but the SDK moves
 // it to match the mail records a write adds: the first MX record moves NONE to
 // MX, and an MXE record that leaves no MX record behind moves MX to MXE, the
-// only mode Namecheap serves MXE records in. A delete never moves it. Without
+// only mode Namecheap serves MXE records in. A delete never moves it, so the
+// call on the delete path is defensive. Without
 // this warning the change would show nowhere: the resource has no attribute
 // for the mode.
 func hostRecordMailModeWarning(domain string, result *namecheap.RecordChangeResult) diag.Diagnostics {
@@ -438,7 +442,7 @@ func hostRecordMailModeWarning(domain string, result *namecheap.RecordChangeResu
 	}
 	return diag.Diagnostics{{
 		Severity: diag.Warning,
-		Summary:  fmt.Sprintf("This write moved %s's mail mode from %s to %s", domain, result.EmailTypeBefore, result.EmailType),
+		Summary:  fmt.Sprintf("This write moved %s's mail mode (EmailType) from %s to %s", domain, result.EmailTypeBefore, result.EmailType),
 		Detail: "namecheap_domain_host_record does not manage the domain's mail mode (EmailType), but Namecheap keeps MX " +
 			"records only in MX mode and serves MXE records only in MXE mode, so a write that adds one moves the mode to " +
 			"match the mail records left on the domain: MX while any MX record remains, otherwise MXE.\n\n" +

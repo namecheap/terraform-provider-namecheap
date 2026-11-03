@@ -305,7 +305,7 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 	// the zone's mode so it never changes. Omitting EmailType would keep it on
 	// the API side too, but the SDK refuses the zone's own MX rows without it.
 	if emailType == nil {
-		emailType = remoteRecordsResponse.DomainDNSGetHostsResult.EmailType
+		emailType = resendEmailType(remoteRecordsResponse)
 	}
 
 	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
@@ -487,7 +487,7 @@ func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceReco
 		return nil, nil, diagFromClientError(err)
 	}
 
-	emailType := remoteRecordsResponse.DomainDNSGetHostsResult.EmailType
+	emailType := resendEmailType(remoteRecordsResponse)
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts == nil {
 		return nil, emailType, nil
 	}
@@ -541,19 +541,9 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
-			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-			found := false
-
-			for _, prevRecord := range *previousRecordsMapped {
-				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
-				if err != nil {
-					return diagFromClientError(err)
-				}
-				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
-				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
-					found = true
-					break
-				}
+			found, err := isPriorRecord(remoteRecord, *previousRecordsMapped)
+			if err != nil {
+				return diagFromClientError(err)
 			}
 
 			if !found {
@@ -571,7 +561,7 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 	newRecordList = append(newRecordList, *currentRecordsMapped...)
 
 	if emailType == nil {
-		emailType = remoteRecordsResponse.DomainDNSGetHostsResult.EmailType
+		emailType = resendEmailType(remoteRecordsResponse)
 	}
 
 	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
@@ -605,19 +595,9 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
 		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
-			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-			found := false
-
-			for _, prevRecord := range *previousRecordsMapped {
-				prevRecordAddressFixed, err := getFixedAddressOfRecord(&prevRecord)
-				if err != nil {
-					return diagFromClientError(err)
-				}
-				prevRecordHash := hashRecord(*prevRecord.HostName, *prevRecord.RecordType, *prevRecordAddressFixed)
-				if strings.EqualFold(remoteRecordHash, prevRecordHash) {
-					found = true
-					break
-				}
+			found, err := isPriorRecord(remoteRecord, *previousRecordsMapped)
+			if err != nil {
+				return diagFromClientError(err)
 			}
 
 			if !found {
@@ -635,7 +615,7 @@ func deleteRecordsMerge(ctx context.Context, domain string, previousRecords []in
 	_, err = client.DomainsDNS.SetHostsWithContext(ctx, &namecheap.DomainsDNSSetHostsArgs{
 		Domain:    &domain,
 		Records:   &remainedRecords,
-		EmailType: remoteRecordsResponse.DomainDNSGetHostsResult.EmailType,
+		EmailType: resendEmailType(remoteRecordsResponse),
 		Flag:      nil,
 		Tag:       nil,
 	})
@@ -686,6 +666,41 @@ func deleteRecordsOverwrite(ctx context.Context, domain string, priorStateRecord
 // hashRecord creates a hash for record by hostname, recordType, and address
 func hashRecord(hostname string, recordType string, address string) string {
 	return fmt.Sprintf("[%s:%s:%s]", hostname, recordType, address)
+}
+
+// resendEmailType returns the zone's mail mode from a getHosts response, for a
+// write that resends it, or nil when getHosts left the attribute out or empty.
+// The SDK rejects "" as an invalid EmailType; nil omits the parameter, which
+// keeps the zone's mode just the same.
+func resendEmailType(response *namecheap.DomainsDNSGetHostsCommandResponse) *string {
+	if response == nil || response.DomainDNSGetHostsResult == nil {
+		return nil
+	}
+	emailType := response.DomainDNSGetHostsResult.EmailType
+	if emailType == nil || *emailType == "" {
+		return nil
+	}
+	return emailType
+}
+
+// isPriorRecord reports whether live, a row read from the zone, is one of prior,
+// the records this resource wrote last. Each prior address is normalised with
+// getFixedAddressOfRecord first, as the write normalises it, so a CNAME or MX
+// configured without its trailing dot still matches the row Namecheap returns
+// with one. Host name, type and address compare case-insensitively. The error is
+// getFixedAddressOfRecord's, for a prior CAA value it cannot parse.
+func isPriorRecord(live namecheap.DomainsDNSHostRecordDetailed, prior []namecheap.DomainsDNSHostRecord) (bool, error) {
+	liveHash := hashRecord(derefStr(live.Name), derefStr(live.Type), derefStr(live.Address))
+	for i := range prior {
+		address, err := getFixedAddressOfRecord(&prior[i])
+		if err != nil {
+			return false, err
+		}
+		if strings.EqualFold(liveHash, hashRecord(*prior[i].HostName, *prior[i].RecordType, *address)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func convertRecordTypeSetToDomainRecords(records *[]interface{}) *[]namecheap.DomainsDNSHostRecord {

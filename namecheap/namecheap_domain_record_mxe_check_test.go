@@ -70,7 +70,51 @@ func TestZoneKeepsMXERecord(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, zoneKeepsMXERecord(tc.hosts, tc.prior))
+			got, err := zoneKeepsMXERecord(tc.hosts, tc.prior)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// TestIsPriorRecord: the MERGE writes and the MXE plan check pick the live rows a
+// resource owns with one rule. A prior CNAME or MX address is normalised the way
+// the write normalises it, so it matches the live row with or without its
+// trailing dot.
+func TestIsPriorRecord(t *testing.T) {
+	live := func(name, recordType, address string) namecheap.DomainsDNSHostRecordDetailed {
+		return namecheap.DomainsDNSHostRecordDetailed{
+			Name: namecheap.String(name), Type: namecheap.String(recordType), Address: namecheap.String(address),
+		}
+	}
+	prior := func(hostname, recordType, address string) namecheap.DomainsDNSHostRecord {
+		return namecheap.DomainsDNSHostRecord{
+			HostName: namecheap.String(hostname), RecordType: namecheap.String(recordType), Address: namecheap.String(address),
+		}
+	}
+
+	cases := []struct {
+		name  string
+		live  namecheap.DomainsDNSHostRecordDetailed
+		prior []namecheap.DomainsDNSHostRecord
+		want  bool
+	}{
+		{"CNAME without its trailing dot", live("www", "CNAME", "example.net."), []namecheap.DomainsDNSHostRecord{prior("www", "CNAME", "example.net")}, true},
+		{"CNAME with its trailing dot", live("www", "CNAME", "example.net."), []namecheap.DomainsDNSHostRecord{prior("www", "CNAME", "example.net.")}, true},
+		{"MX without its trailing dot", live("@", "MX", "mail.example.net."), []namecheap.DomainsDNSHostRecord{prior("@", "MX", "mail.example.net")}, true},
+		{"MX with its trailing dot", live("@", "MX", "mail.example.net."), []namecheap.DomainsDNSHostRecord{prior("@", "MX", "mail.example.net.")}, true},
+		{"case-insensitive host", live("www", "A", "10.0.0.1"), []namecheap.DomainsDNSHostRecord{prior("WWW", "A", "10.0.0.1")}, true},
+		{"different address", live("www", "A", "10.0.0.1"), []namecheap.DomainsDNSHostRecord{prior("www", "A", "10.0.0.2")}, false},
+		{"no prior records", live("www", "A", "10.0.0.1"), nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := isPriorRecord(tc.live, tc.prior)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	_, err := isPriorRecord(live("@", "CAA", `0 issue "ca.example"`), []namecheap.DomainsDNSHostRecord{prior("@", "CAA", "not a caa value")})
+	assert.Error(t, err, "an unparsable prior CAA value is reported, as the MERGE write reports it")
 }
