@@ -72,6 +72,12 @@ this resource does not manage. Set it with
 Namecheap dashboard, before creating MX records here; otherwise the API rejects
 the write and the provider surfaces the reason.
 
+The underlying SDK moves the mail mode to match the mail records a write adds:
+the first MX record moves `NONE` to `MX`, and an MXE record that leaves no MX
+record on the domain moves `MX` to `MXE`, the only mode Namecheap serves MXE
+records in. This resource has no attribute for the mode, so the apply reports
+such a change as a warning.
+
 !> **Domains using Private Email or Google Workspace cannot be managed with this
 resource yet.** Those zones hold their mail provider's MX records while the zone
 type stays `OX`/`GMAIL`, a combination the underlying SDK's validation rejects —
