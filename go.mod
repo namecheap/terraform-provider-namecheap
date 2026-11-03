@@ -5,7 +5,7 @@ require (
 	github.com/hashicorp/terraform-plugin-log v0.11.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
 	github.com/hashicorp/terraform-plugin-testing v1.16.0
-	github.com/namecheap/go-namecheap-sdk/v2 v2.10.8-0.20261030144832-c7092e69311b
+	github.com/namecheap/go-namecheap-sdk/v2 v2.10.8-0.20261103145407-729516257d32
 	github.com/stretchr/testify v1.12.1
 )
 
