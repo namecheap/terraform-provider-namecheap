@@ -75,7 +75,9 @@ keep applying, but that use is not supported and has known problems: changing
 `mx_pref` on an existing `MX` record fails with a concurrent-change error
 ([#382](https://github.com/namecheap/terraform-provider-namecheap/issues/382)),
 and the records only survive while the domain's email routing is set to Custom MX
-(or MXE). A future major version will refuse them.
+(or MXE). A write that still adds an `MX` or `MXE` record moves the domain's
+email routing (`EmailType`) to match the mail records left on the domain, and
+the apply reports that as a warning. A future major version will refuse them.
 
 Records of every other type work on any domain, including ones whose mail is
 handled by Private Email, Google Workspace or email forwarding: a change here

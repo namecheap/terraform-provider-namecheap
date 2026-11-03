@@ -107,6 +107,48 @@ func TestUpdateRecordsMerge_WithEmailType(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
+func TestUpdateRecordsMerge_KeepsZoneEmailTypeWhenLastMXGoes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
+				{Name: "@", Type: "MX", Address: "mail.old.com.", MXPref: 10, TTL: 1800},
+			}))
+		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "MX", r.FormValue("EmailType"))
+			assert.Equal(t, "A", r.FormValue("RecordType1"))
+			assert.Empty(t, r.FormValue("RecordType2"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+
+	oldRecords := []interface{}{
+		map[string]interface{}{
+			"hostname": "@",
+			"type":     "MX",
+			"address":  "mail.old.com.",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+	newRecords := []interface{}{
+		map[string]interface{}{
+			"hostname": "www",
+			"type":     "A",
+			"address":  "1.2.3.4",
+			"mx_pref":  10,
+			"ttl":      1800,
+		},
+	}
+
+	diags := updateRecordsMerge(context.Background(), "test.com", nil, oldRecords, newRecords, client)
+	assert.False(t, diags.HasError())
+}
+
 func TestUpdateRecordsMerge_EmptyRemoteRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()

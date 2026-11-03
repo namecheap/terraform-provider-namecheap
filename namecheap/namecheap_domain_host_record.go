@@ -274,7 +274,7 @@ func resourceNamecheapDomainHostRecordCreate(ctx context.Context, data *schema.R
 		return hostRecordExistsError(domain, data, existing)
 	}
 
-	_, err := client.DomainsDNS.AddRecordsWithContext(ctx, domain,
+	result, err := client.DomainsDNS.AddRecordsWithContext(ctx, domain,
 		[]namecheap.DomainsDNSHostRecord{record},
 		namecheap.WithRetryOnConflict(hostRecordRetryAttempts))
 	if err != nil {
@@ -282,7 +282,7 @@ func resourceNamecheapDomainHostRecordCreate(ctx context.Context, data *schema.R
 	}
 
 	data.SetId(hostRecordID(domain, data.Get("type").(string), data.Get("hostname").(string), data.Get("address").(string)))
-	return resourceNamecheapDomainHostRecordRead(ctx, data, meta)
+	return append(hostRecordMailModeWarning(domain, result), resourceNamecheapDomainHostRecordRead(ctx, data, meta)...)
 }
 
 func resourceNamecheapDomainHostRecordRead(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -334,13 +334,14 @@ func resourceNamecheapDomainHostRecordUpdate(ctx context.Context, data *schema.R
 	// whenever an update returns an error — whichever step failed. Restoring them in
 	// one place is what stops a refused or failed update from orphaning the record
 	// this resource still owns. See hostRecordRestoreBeforeChange.
-	if diags := hostRecordApplyUpdate(ctx, client, data, domain); diags.HasError() {
+	diags := hostRecordApplyUpdate(ctx, client, data, domain)
+	if diags.HasError() {
 		hostRecordRestoreBeforeChange(data)
 		return diags
 	}
 
 	data.SetId(hostRecordID(domain, data.Get("type").(string), data.Get("hostname").(string), data.Get("address").(string)))
-	return resourceNamecheapDomainHostRecordRead(ctx, data, meta)
+	return append(diags, resourceNamecheapDomainHostRecordRead(ctx, data, meta)...)
 }
 
 // hostRecordApplyUpdate checks the zone and performs the update's write. It is
@@ -384,13 +385,13 @@ func hostRecordApplyUpdate(ctx context.Context, client *namecheap.Client, data *
 		}
 	}
 
-	_, err := client.DomainsDNS.UpsertRecordsWithContext(ctx, domain, hostRecordSelector(before),
+	result, err := client.DomainsDNS.UpsertRecordsWithContext(ctx, domain, hostRecordSelector(before),
 		[]namecheap.DomainsDNSHostRecord{target},
 		namecheap.WithRetryOnConflict(hostRecordRetryAttempts))
 	if err != nil {
 		return hostRecordWriteError(domain, "update", err)
 	}
-	return nil
+	return hostRecordMailModeWarning(domain, result)
 }
 
 func resourceNamecheapDomainHostRecordDelete(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -414,14 +415,40 @@ func resourceNamecheapDomainHostRecordDelete(ctx context.Context, data *schema.R
 		return nil
 	}
 
-	_, err := client.DomainsDNS.DeleteRecordsWithContext(ctx, domain, hostRecordSelector(record),
+	result, err := client.DomainsDNS.DeleteRecordsWithContext(ctx, domain, hostRecordSelector(record),
 		namecheap.WithRetryOnConflict(hostRecordRetryAttempts))
 	if err != nil {
 		return hostRecordWriteError(domain, "delete", err)
 	}
 
 	data.SetId("")
-	return nil
+	// The SDK never moves the mail mode on a delete, which adds no record, so
+	// this cannot fire today. It is defensive: an SDK that ever did would not
+	// move the mode silently.
+	return hostRecordMailModeWarning(domain, result)
+}
+
+// hostRecordMailModeWarning reports a mail-mode change the write made on its
+// own. This resource does not manage the domain's EmailType, but the SDK moves
+// it to match the mail records a write adds: the first MX record moves NONE to
+// MX, and an MXE record that leaves no MX record behind moves MX to MXE, the
+// only mode Namecheap serves MXE records in. A delete never moves it, so the
+// call on the delete path is defensive. Without
+// this warning the change would show nowhere: the resource has no attribute
+// for the mode.
+func hostRecordMailModeWarning(domain string, result *namecheap.RecordChangeResult) diag.Diagnostics {
+	if result == nil || result.EmailType == result.EmailTypeBefore {
+		return nil
+	}
+	return diag.Diagnostics{{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("This write moved %s's mail mode (EmailType) from %s to %s", domain, result.EmailTypeBefore, result.EmailType),
+		Detail: "namecheap_domain_host_record does not manage the domain's mail mode (EmailType), but Namecheap keeps MX " +
+			"records only in MX mode and serves MXE records only in MXE mode, so a write that adds one moves the mode to " +
+			"match the mail records left on the domain: MX while any MX record remains, otherwise MXE.\n\n" +
+			"If a namecheap_domain_records resource sets email_type for this domain, its next plan shows the mode " +
+			"changing back. Manage MX and MXE records together with email_type there to keep the mode in one place.",
+	}}
 }
 
 func resourceNamecheapDomainHostRecordImport(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
