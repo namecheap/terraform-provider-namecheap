@@ -34,6 +34,9 @@ because neither knows about the other.
   of hosts.
 - **Use `namecheap_domain_records`** when one configuration should own the whole
   zone, zone-file style — including the guarantee that nothing else exists.
+- **Mail records (`MX`, `MXE`) always go in `namecheap_domain_records`**, together
+  with the domain's `email_type`. This resource does not support them; see
+  [Mail records](#mail-records).
 
 ## Concurrent changes to one domain
 
@@ -47,8 +50,7 @@ apply per domain at a time, and leave the zone alone while it runs.
 
 ## Records this resource cannot tell apart
 
-A record is identified by its host, type and address — plus the preference for
-`MX`, so a primary and a backup mail server naming the same host stay distinct.
+A record is identified by its host, type and address.
 
 Two records that agree on all of those and differ only in TTL cannot be selected
 individually through the API, so any operation on them is refused with an error
@@ -61,37 +63,32 @@ you at `terraform import` — and so is *changing* one onto the identity of a re
 that already exists, whether or not Terraform manages it. Writing either would
 leave the zone holding two records that nothing can tell apart.
 
-The import ID carries no preference, so an `MX` record sharing its host and target
-with another at a different preference is ambiguous on import for the same reason.
-
 ## Mail records
 
-MX and MXE records are tied to the domain's email routing (`EmailType`), which
-this resource does not manage. Set it with
-[`namecheap_domain_records`](./domain_records.md)' `email_type`, or in the
-Namecheap dashboard, before creating MX records here; otherwise the API rejects
-the write and the provider surfaces the reason.
+!> **`MX` and `MXE` records are not supported by this resource.** They belong to
+the domain's email routing (`email_type`), which this resource does not manage.
+Manage them with [`namecheap_domain_records`](./domain_records.md), which writes
+the records and `email_type` together.
 
-!> **Domains using Private Email or Google Workspace cannot be managed with this
-resource yet.** Those zones hold their mail provider's MX records while the zone
-type stays `OX`/`GMAIL`, a combination the underlying SDK's validation rejects —
-so *any* change through this resource fails, including one to an unrelated A
-record. Use [`namecheap_domain_records`](./domain_records.md) for those domains.
-Tracked in [go-namecheap-sdk#162](https://github.com/namecheap/go-namecheap-sdk/issues/162).
+The provider does not refuse `MX` or `MXE` here yet, so existing configurations
+keep applying, but that use is not supported and has known problems: changing
+`mx_pref` on an existing `MX` record fails with a concurrent-change error
+([#382](https://github.com/namecheap/terraform-provider-namecheap/issues/382)),
+and the records only survive while the domain's email routing is set to Custom MX
+(or MXE). A future major version will refuse them.
+
+Records of every other type work on any domain, including ones whose mail is
+handled by Private Email, Google Workspace or email forwarding: a change here
+leaves the domain's email routing as it is.
 
 ## Argument Reference
 
 - `domain` - (Required, Force New) The registered root domain the record belongs to (e.g. `example.com`). Must be a root domain on the account, not a subdomain.
 - `hostname` - (Required, Force New) The sub-domain the record answers for, or `@` for the domain itself (e.g. `www`). Must not be empty — write `@` for the apex.
-- `type` - (Required, Force New) The record type: `A`, `AAAA`, `ALIAS`, `CAA`, `CNAME`, `MX`, `MXE`, `NS`, `TXT`, `URL`, `URL301`, `FRAME`.
-- `address` - (Required) The record's value, whose meaning depends on `type`: an IP address for `A`/`AAAA`, a hostname for `CNAME`/`MX`/`NS`, arbitrary text for `TXT`, a URL for `URL`/`URL301`/`FRAME`. Edited on the existing record; not Force New.
+- `type` - (Required, Force New) The record type: `A`, `AAAA`, `ALIAS`, `CAA`, `CNAME`, `NS`, `TXT`, `URL`, `URL301`, `FRAME`. `MX` and `MXE` are still accepted but not supported; see [Mail records](#mail-records).
+- `address` - (Required) The record's value, whose meaning depends on `type`: an IP address for `A`/`AAAA`, a hostname for `CNAME`/`NS`, arbitrary text for `TXT`, a URL for `URL`/`URL301`/`FRAME`. Edited on the existing record; not Force New.
 - `ttl` - (Optional) Time to live in seconds, between `60` and `60000`. Defaults to `1800`. Edited on the existing record; not Force New.
-- `mx_pref` - (Optional) MX preference, lower being preferred, between `0` and `255`. Defaults to `10`. Edited on the existing record; not Force New.
-
--> `mx_pref` applies to `MX` records only, where it is part of the record's
-identity — a primary and a backup mail server may name the same host, and the
-preference is what tells them apart. For every other type Namecheap stores a fixed
-`10` whatever is sent, so a value set there is ignored.
+- `mx_pref` - (Optional) MX preference, between `0` and `255`, defaulting to `10`. It applies only to `MX` records, which this resource does not support; leave it unset. For every other type Namecheap stores a fixed `10` whatever is sent.
 
 ### What replaces a record and what edits it
 
@@ -99,15 +96,15 @@ preference is what tells them apart. For every other type Namecheap stores a fix
 **destroys the record and creates a new one** — the plan says
 `-/+ destroy and then create replacement`.
 
-`address`, `ttl` and `mx_pref` are **edited on the record that is already there**:
+`address` and `ttl` are **edited on the record that is already there**:
 the plan shows `~ update in-place`, one write swaps the value, and the name keeps
 resolving throughout. Changing `address` also re-renders the resource's `id`, which
 contains it. If such a change is rejected by the API, the record is left exactly as
 it was and the next plan proposes the same change again.
 
 -> The case of `domain` and `hostname` is kept as you write it, as is an address
-the API only re-spells (the trailing dot it adds to a `CNAME`, `ALIAS`, `NS` or
-`MX` target). Only a genuine change out-of-band shows up as drift.
+the API only re-spells (the trailing dot it adds to a `CNAME`, `ALIAS` or `NS`
+target). Only a genuine change out-of-band shows up as drift.
 
 ## Attribute Reference
 
