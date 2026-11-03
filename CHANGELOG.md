@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.9.9](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.8...v2.9.9) (2026-11-03)
+
+
+### Bug Fixes
+
+* a plan with email_type = "MXE" and no MXE record now fails instead of leaving the domain with no mail server ([048ef56](https://github.com/namecheap/terraform-provider-namecheap/commit/048ef5669054c039c89d65ad90d7778f0168129f))
+* **deps:** bump go-namecheap-sdk to v2.10.8 ([048ef56](https://github.com/namecheap/terraform-provider-namecheap/commit/048ef5669054c039c89d65ad90d7778f0168129f))
+* **docs:** mark MX and MXE as unsupported in namecheap_domain_host_record ([#383](https://github.com/namecheap/terraform-provider-namecheap/issues/383)) ([0d2f418](https://github.com/namecheap/terraform-provider-namecheap/commit/0d2f418aefbe73065c6acd9cd3e67585b640dc4c))
+* keep the domain's mail mode (EmailType) when namecheap_domain_records has no email_type; a record change in OVERWRITE mode no longer switches Private Email, Google Workspace or forwarding domains to "No email service" ([048ef56](https://github.com/namecheap/terraform-provider-namecheap/commit/048ef5669054c039c89d65ad90d7778f0168129f))
+* namecheap_domain_host_record warns when a write moves the domain's mail mode, such as MX to MXE ([048ef56](https://github.com/namecheap/terraform-provider-namecheap/commit/048ef5669054c039c89d65ad90d7778f0168129f))
+* removing email_type, the last MX record or the whole namecheap_domain_records resource no longer changes the domain's mail mode; set email_type = "NONE" to turn mail off ([048ef56](https://github.com/namecheap/terraform-provider-namecheap/commit/048ef5669054c039c89d65ad90d7778f0168129f))
+
 ## [2.9.8](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.7...v2.9.8) (2026-10-29)
 
 
