@@ -150,11 +150,7 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 // and leaves it to the apply.
 func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
 	config := diff.GetRawConfig()
-	if config.IsNull() || !config.IsKnown() {
-		return nil
-	}
-	emailType := config.GetAttr("email_type")
-	if !emailType.IsKnown() || emailType.IsNull() || emailType.AsString() != namecheap.EmailTypeMXE {
+	if emailType := configuredEmailType(config); emailType == nil || *emailType != namecheap.EmailTypeMXE {
 		return nil
 	}
 	hasMXE, known := configHasMXERecord(config.GetAttr("record"))
@@ -251,25 +247,16 @@ func zoneKeepsMXERecord(hosts *[]namecheap.DomainsDNSHostRecordDetailed, priorRe
 	return false, nil
 }
 
-// configuredEmailType returns email_type when the configuration sets it and nil
-// when it is left out. email_type is Computed, so data.Get also returns the mode
-// a read stored; only a configured value asks a write to set the zone's mode,
-// and nil makes the write keep the mode the zone has at that moment.
-//
-// Terraform always passes the configuration to Create and Update. ResourceData
-// built without one (the unit tests use TestResourceData) has no raw config, so
-// the value set on it is taken instead.
-func configuredEmailType(data *schema.ResourceData) *string {
-	config := data.GetRawConfig()
-	if config.IsNull() {
-		if v, ok := data.GetOk("email_type"); ok {
-			emailType := v.(string)
-			return &emailType
-		}
+// configuredEmailType returns the email_type a configuration sets, or nil when
+// it leaves it out or the value is not known yet. Writes take it from the
+// configuration because email_type is Computed: state holds the mode the last
+// refresh read, and nil makes a write keep the mode the zone has when it runs.
+func configuredEmailType(config cty.Value) *string {
+	if config.IsNull() || !config.IsKnown() {
 		return nil
 	}
 	v := config.GetAttr("email_type")
-	if !v.IsKnown() || v.IsNull() {
+	if v.IsNull() || !v.IsKnown() {
 		return nil
 	}
 	emailType := v.AsString()
@@ -281,7 +268,7 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 
 	domain := strings.ToLower(data.Get("domain").(string))
 	mode := strings.ToUpper(data.Get("mode").(string))
-	emailType := configuredEmailType(data)
+	emailType := configuredEmailType(data.GetRawConfig())
 
 	var records []interface{}
 	var nameservers []interface{}
@@ -394,6 +381,11 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		}
 
 		_ = data.Set("record", []interface{}{})
+		// Custom nameservers leave no Namecheap mail mode in effect, so clear one
+		// stored while the domain used Namecheap DNS.
+		if _, ok := data.GetOk("email_type"); ok {
+			_ = data.Set("email_type", "")
+		}
 	} else {
 		if mode == ncModeMerge {
 			realRecords, realEmailType, recordDiags := readRecordsMerge(ctx, domain, records, client)
@@ -459,7 +451,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	oldNameserversLen := len(oldNameservers)
 	newNameserversLen := len(newNameservers)
 
-	emailType := configuredEmailType(data)
+	emailType := configuredEmailType(data.GetRawConfig())
 
 	if mode == ncModeMerge {
 		ncMutexKV.Lock(domain)
