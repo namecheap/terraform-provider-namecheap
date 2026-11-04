@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/go-cty/cty"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 )
 
@@ -18,6 +21,21 @@ func newTestClient(baseURL string) *namecheap.Client {
 	})
 	client.BaseURL = baseURL
 	return client
+}
+
+// recordsDataWithConfig returns ResourceData for namecheap_domain_records whose
+// raw configuration sets only attrs, as Terraform passes it to Create and
+// Update. TestResourceData has no raw configuration at all.
+func recordsDataWithConfig(attrs map[string]cty.Value) *schema.ResourceData {
+	r := resourceNamecheapDomainRecords()
+	config := map[string]cty.Value{}
+	for name, ty := range r.CoreConfigSchema().ImpliedType().AttributeTypes() {
+		config[name] = cty.NullVal(ty)
+	}
+	for name, v := range attrs {
+		config[name] = v
+	}
+	return r.Data(&terraform.InstanceState{RawConfig: cty.ObjectVal(config)})
 }
 
 // getHostsXML generates a GetHosts API response XML

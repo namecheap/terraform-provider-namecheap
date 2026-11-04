@@ -143,4 +143,70 @@ resource "namecheap_domain_records" "test" {
 			},
 		})
 	})
+
+	// The stored mode is the one the refresh read, and it can be stale by the
+	// time a write runs. Here "mail" sets OX and "web", which leaves email_type
+	// out, writes after it in the same apply; both refreshed as GMAIL. "web"
+	// must resend the OX the zone now has, not the GMAIL in its state, or it
+	// undoes the write of "mail".
+	t.Run("a records-only write resends the mode set earlier in the same apply", func(t *testing.T) {
+		twoResources := func(address string) string {
+			return fmt.Sprintf(`
+resource "namecheap_domain_records" "mail" {
+  domain     = "%[1]s"
+  mode       = "MERGE"
+  email_type = "OX"
+
+  record {
+    hostname = "mail"
+    type     = "A"
+    address  = "10.0.0.9"
+  }
+}
+
+resource "namecheap_domain_records" "web" {
+  domain = "%[1]s"
+  mode   = "MERGE"
+
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "%[2]s"
+  }
+
+  depends_on = [namecheap_domain_records.mail]
+}
+`, domain, address)
+		}
+
+		m := newNamecheapMock(t)
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				mockPreCheck(t, m)
+				m.seed(domain, nil, "GMAIL", nil)
+			},
+			ProviderFactories: mockProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: twoResources("10.0.0.1"),
+					Check:  mockCheckEmailType(m, domain, "OX"),
+				},
+				{
+					// The mode is switched to GMAIL outside Terraform, so both
+					// resources refresh as GMAIL and "mail" plans the change back.
+					PreConfig: func() {
+						m.seed(domain, []hostEntry{
+							{Name: "mail", Type: "A", Address: "10.0.0.9", MXPref: 10, TTL: 1800},
+							{Name: "www", Type: "A", Address: "10.0.0.1", MXPref: 10, TTL: 1800},
+						}, "GMAIL", nil)
+					},
+					Config: twoResources("10.0.0.2"),
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckEmailType(m, domain, "OX"),
+						mockCheckHostContains(m, domain, "www", "A", "10.0.0.2"),
+					),
+				},
+			},
+		})
+	})
 }
