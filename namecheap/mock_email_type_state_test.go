@@ -44,7 +44,8 @@ resource "namecheap_domain_records" "test" {
 		resource.Test(t, resource.TestCase{
 			PreCheck: func() {
 				mockPreCheck(t, m)
-				m.seed(domain, []hostEntry{{Name: "www", Type: "A", Address: "10.0.0.1", TTL: 1800}}, "GMAIL", nil)
+				// getHosts reports MXPref="10" on every row, MX or not.
+				m.seed(domain, []hostEntry{{Name: "www", Type: "A", Address: "10.0.0.1", MXPref: 10, TTL: 1800}}, "GMAIL", nil)
 			},
 			ProviderFactories: mockProviderFactories(),
 			CheckDestroy:      mockCheckEmailType(m, domain, "GMAIL"),
