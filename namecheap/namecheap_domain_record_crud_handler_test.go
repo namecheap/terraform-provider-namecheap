@@ -797,7 +797,7 @@ func TestResourceRecordRead_MergeWithEmailType(t *testing.T) {
 	assert.Equal(t, "MX", data.Get("email_type").(string))
 }
 
-func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
+func TestResourceRecordRead_ImportStoresEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		switch r.FormValue("Command") {
@@ -821,10 +821,9 @@ func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
 
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-	// Pins current behavior: email_type is refreshed from the remote response
-	// only when it is already present in state, so the import path leaves it
-	// unset even though the API reports "MX".
-	assert.Equal(t, "", data.Get("email_type").(string))
+	// Every read stores the zone's mail mode, so the import path picks up the
+	// "MX" the API reports even though email_type was absent from state.
+	assert.Equal(t, "MX", data.Get("email_type").(string))
 	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
 }
 

@@ -53,8 +53,11 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"nameservers"},
 				Type:          schema.TypeString,
 				Optional:      true,
-				ValidateFunc:  validation.StringInSlice(namecheap.AllowedEmailTypeValues, false),
-				Description:   fmt.Sprintf("Possible values: %s", strings.TrimSpace(strings.Join(namecheap.AllowedEmailTypeValues, ", "))),
+				// Computed: every read stores the zone's mail mode, import
+				// included, and leaving email_type out keeps that mode.
+				Computed:     true,
+				ValidateFunc: validation.StringInSlice(namecheap.AllowedEmailTypeValues, false),
+				Description:  fmt.Sprintf("Possible values: %s. Leave it out to keep the domain's current mail mode, which is then read into state.", strings.TrimSpace(strings.Join(namecheap.AllowedEmailTypeValues, ", "))),
 			},
 			"mode": {
 				Type:         schema.TypeString,
@@ -248,20 +251,40 @@ func zoneKeepsMXERecord(hosts *[]namecheap.DomainsDNSHostRecordDetailed, priorRe
 	return false, nil
 }
 
+// configuredEmailType returns email_type when the configuration sets it and nil
+// when it is left out. email_type is Computed, so data.Get also returns the mode
+// a read stored; only a configured value asks a write to set the zone's mode,
+// and nil makes the write keep the mode the zone has at that moment.
+//
+// Terraform always passes the configuration to Create and Update. ResourceData
+// built without one (the unit tests use TestResourceData) has no raw config, so
+// the value set on it is taken instead.
+func configuredEmailType(data *schema.ResourceData) *string {
+	config := data.GetRawConfig()
+	if config.IsNull() {
+		if v, ok := data.GetOk("email_type"); ok {
+			emailType := v.(string)
+			return &emailType
+		}
+		return nil
+	}
+	v := config.GetAttr("email_type")
+	if !v.IsKnown() || v.IsNull() {
+		return nil
+	}
+	emailType := v.AsString()
+	return &emailType
+}
+
 func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*namecheap.Client)
 
 	domain := strings.ToLower(data.Get("domain").(string))
 	mode := strings.ToUpper(data.Get("mode").(string))
+	emailType := configuredEmailType(data)
 
-	var emailType *string
 	var records []interface{}
 	var nameservers []interface{}
-
-	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
-		emailTypeString := emailTypeRaw.(string)
-		emailType = &emailTypeString
-	}
 
 	if recordsRaw, ok := data.GetOk("record"); ok {
 		records = recordsRaw.(*schema.Set).List()
@@ -321,14 +344,8 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 	domain := strings.ToLower(data.Get("domain").(string))
 	mode := strings.ToUpper(data.Get("mode").(string))
 
-	var emailType *string
 	var records []interface{}
 	var nameservers []interface{}
-
-	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
-		emailTypeString := emailTypeRaw.(string)
-		emailType = &emailTypeString
-	}
 
 	if recordsRaw, ok := data.GetOk("record"); ok {
 		records = recordsRaw.(*schema.Set).List()
@@ -386,7 +403,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			diags = append(diags, recordDiags...)
 			_ = data.Set("record", *realRecords)
 
-			if emailType != nil {
+			if realEmailType != nil {
 				_ = data.Set("email_type", *realEmailType)
 			}
 		}
@@ -398,7 +415,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			}
 			diags = append(diags, recordDiags...)
 			_ = data.Set("record", *realRecords)
-			if emailType != nil {
+			if realEmailType != nil {
 				_ = data.Set("email_type", *realEmailType)
 			}
 
@@ -442,12 +459,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	oldNameserversLen := len(oldNameservers)
 	newNameserversLen := len(newNameservers)
 
-	var emailType *string
-
-	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
-		emailTypeString := emailTypeRaw.(string)
-		emailType = &emailTypeString
-	}
+	emailType := configuredEmailType(data)
 
 	if mode == ncModeMerge {
 		ncMutexKV.Lock(domain)
