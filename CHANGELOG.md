@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.10](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.9...v2.9.10) (2026-11-05)
+
+
+### Bug Fixes
+
+* removing email_type from a namecheap_domain_records configuration no longer plans a change; leaving it out keeps the domain's mail mode, and every refresh reads that mode into state. After upgrading, the first refresh records the current mode in each namecheap_domain_records state that leaves email_type out; Terraform reports that as a change made outside Terraform only when something references email_type ([502e326](https://github.com/namecheap/terraform-provider-namecheap/commit/502e3269d3f51d35e87d78c782b7b8e172eae1b0))
+* terraform import of namecheap_domain_records now stores the domain's mail mode (email_type), so the first plan after importing a Private Email or Google Workspace domain no longer proposes a change ([502e326](https://github.com/namecheap/terraform-provider-namecheap/commit/502e3269d3f51d35e87d78c782b7b8e172eae1b0))
+
 ## [2.9.9](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.8...v2.9.9) (2026-11-03)
 
 
