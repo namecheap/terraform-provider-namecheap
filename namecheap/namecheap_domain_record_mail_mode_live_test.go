@@ -190,4 +190,127 @@ func TestAccNamecheapDomainRecordsMailMode(t *testing.T) {
 			},
 		})
 	})
+
+	// Import used to leave email_type out of state, so the first plan after
+	// importing a Google Workspace domain proposed "+ email_type". Every read
+	// now stores the zone's mode, and leaving email_type out keeps it.
+	t.Run("import_stores_the_zone_mail_mode", func(t *testing.T) {
+		var resp namecheap.DomainsDNSGetHostsCommandResponse
+
+		config := func(emailType string) string {
+			line := ""
+			if emailType != "" {
+				line = fmt.Sprintf("email_type = %q", emailType)
+			}
+			return fmt.Sprintf(`
+				resource "namecheap_domain_records" "mail-mode" {
+					domain = "%s"
+					mode   = "MERGE"
+					%s
+
+					record {
+						hostname = "keep-mode"
+						type     = "A"
+						address  = "203.0.113.10"
+					}
+				}
+			`, *testAccDomain, line)
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				setDomainRecords(t, namecheap.String(namecheap.EmailTypeGmail), &[]namecheap.DomainsDNSHostRecord{
+					{
+						HostName:   namecheap.String("keep-mode"),
+						RecordType: namecheap.String(namecheap.RecordTypeA),
+						Address:    namecheap.String("203.0.113.10"),
+						TTL:        namecheap.Int(1800),
+					},
+				})
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&resp),
+				testAccDomainRecordsEmailType(&resp, namecheap.EmailTypeGmail),
+				testAccDomainRecordsLength(&resp, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config:             config(namecheap.EmailTypeGmail),
+					ResourceName:       "namecheap_domain_records.mail-mode",
+					ImportState:        true,
+					ImportStateId:      *testAccDomain,
+					ImportStatePersist: true,
+					ImportStateCheck: func(states []*terraform.InstanceState) error {
+						if got := states[0].Attributes["email_type"]; got != namecheap.EmailTypeGmail {
+							return fmt.Errorf("imported email_type = %q, want %q", got, namecheap.EmailTypeGmail)
+						}
+						return nil
+					},
+				},
+				{
+					Config:   config(namecheap.EmailTypeGmail),
+					PlanOnly: true,
+				},
+				{
+					Config:   config(""),
+					PlanOnly: true,
+				},
+			},
+		})
+	})
+
+	// A record-only MERGE config on a Google Workspace domain: create and an
+	// address change leave the zone on GMAIL, and the refresh reads it into state.
+	t.Run("merge_without_email_type_keeps_a_gmail_zone", func(t *testing.T) {
+		var resp namecheap.DomainsDNSGetHostsCommandResponse
+
+		config := func(address string) string {
+			return fmt.Sprintf(`
+				resource "namecheap_domain_records" "mail-mode" {
+					domain = "%s"
+					mode   = "MERGE"
+
+					record {
+						hostname = "keep-mode"
+						type     = "A"
+						address  = "%s"
+					}
+				}
+			`, *testAccDomain, address)
+		}
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				setDomainRecords(t, namecheap.String(namecheap.EmailTypeGmail), nil)
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&resp),
+				testAccDomainRecordsEmailType(&resp, namecheap.EmailTypeGmail),
+				testAccDomainRecordsLength(&resp, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: config("203.0.113.10"),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&resp),
+						testAccDomainRecordsEmailType(&resp, namecheap.EmailTypeGmail),
+						testAccDomainRecordsLength(&resp, 1),
+					),
+				},
+				{
+					Config: config("203.0.113.11"),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&resp),
+						testAccDomainRecordsEmailType(&resp, namecheap.EmailTypeGmail),
+						testAccDomainRecordsLength(&resp, 1),
+						resource.TestCheckResourceAttr("namecheap_domain_records.mail-mode", "email_type", namecheap.EmailTypeGmail),
+					),
+				},
+			},
+		})
+	})
 }

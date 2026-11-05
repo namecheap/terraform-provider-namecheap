@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/assert"
@@ -205,7 +206,7 @@ func TestResourceRecordCreate_WithEmailType(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
+	data := recordsDataWithConfig(map[string]cty.Value{"email_type": cty.StringVal("MX")})
 	_ = data.Set("domain", "test.com")
 	_ = data.Set("mode", ncModeOverwrite)
 	_ = data.Set("email_type", "MX")
@@ -479,6 +480,27 @@ func TestResourceRecordRead_OverwriteWithCustomNameservers(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
+// A domain on custom nameservers has no Namecheap mail mode in effect, so a read
+// clears the one stored while it was on Namecheap DNS, as it clears record.
+func TestResourceRecordRead_CustomNameserversClearsEmailType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := resourceNamecheapDomainRecords().TestResourceData()
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeMerge)
+	_ = data.Set("email_type", "GMAIL")
+	_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
+
+	diags := resourceRecordRead(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "", data.Get("email_type").(string))
+}
+
 func TestResourceRecordRead_GetListAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -619,13 +641,14 @@ func TestResourceRecordUpdate_MergeEmailTypeOnly(t *testing.T) {
 		case "namecheap.domains.dns.getHosts":
 			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
 		case "namecheap.domains.dns.setHosts":
+			assert.Equal(t, "FWD", r.FormValue("EmailType"))
 			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
+	data := recordsDataWithConfig(map[string]cty.Value{"email_type": cty.StringVal("FWD")})
 	data.SetId("test.com")
 	_ = data.Set("domain", "test.com")
 	_ = data.Set("mode", ncModeMerge)
@@ -633,6 +656,38 @@ func TestResourceRecordUpdate_MergeEmailTypeOnly(t *testing.T) {
 
 	diags := resourceRecordUpdate(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
+}
+
+// email_type is Computed, so state holds the mode the last refresh read. A
+// config that leaves email_type out must resend the mode the zone has when the
+// write runs, not that stored one: another resource on the domain may have
+// changed it since the refresh.
+func TestResourceRecordUpdate_OverwriteWithoutConfiguredEmailTypeSendsLiveMode(t *testing.T) {
+	var sent atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(true, nil))
+		case "namecheap.domains.dns.getHosts":
+			_, _ = fmt.Fprint(w, getHostsXML("OX", nil))
+		case "namecheap.domains.dns.setHosts":
+			sent.Store(r.FormValue("EmailType"))
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(server.URL)
+	data := recordsDataWithConfig(nil)
+	data.SetId("test.com")
+	_ = data.Set("domain", "test.com")
+	_ = data.Set("mode", ncModeOverwrite)
+	_ = data.Set("email_type", "GMAIL")
+
+	diags := resourceRecordUpdate(context.TODO(), data, client)
+	assert.False(t, diags.HasError())
+	assert.Equal(t, "OX", sent.Load())
 }
 
 func TestResourceRecordUpdate_OverwriteNoEmailNoRecordsResetsToNone(t *testing.T) {
@@ -797,7 +852,7 @@ func TestResourceRecordRead_MergeWithEmailType(t *testing.T) {
 	assert.Equal(t, "MX", data.Get("email_type").(string))
 }
 
-func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
+func TestResourceRecordRead_ImportStoresEmailType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		switch r.FormValue("Command") {
@@ -821,10 +876,9 @@ func TestResourceRecordRead_ImportWithoutEmailTypeInState(t *testing.T) {
 
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-	// Pins current behavior: email_type is refreshed from the remote response
-	// only when it is already present in state, so the import path leaves it
-	// unset even though the API reports "MX".
-	assert.Equal(t, "", data.Get("email_type").(string))
+	// Every read stores the zone's mail mode, so the import path picks up the
+	// "MX" the API reports even though email_type was absent from state.
+	assert.Equal(t, "MX", data.Get("email_type").(string))
 	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
 }
 

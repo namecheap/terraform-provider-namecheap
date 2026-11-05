@@ -53,8 +53,11 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"nameservers"},
 				Type:          schema.TypeString,
 				Optional:      true,
-				ValidateFunc:  validation.StringInSlice(namecheap.AllowedEmailTypeValues, false),
-				Description:   fmt.Sprintf("Possible values: %s", strings.TrimSpace(strings.Join(namecheap.AllowedEmailTypeValues, ", "))),
+				// Computed: every read stores the zone's mail mode, import
+				// included, and leaving email_type out keeps that mode.
+				Computed:     true,
+				ValidateFunc: validation.StringInSlice(namecheap.AllowedEmailTypeValues, false),
+				Description:  fmt.Sprintf("Possible values: %s. Leave it out to keep the domain's current mail mode, which is then read into state.", strings.TrimSpace(strings.Join(namecheap.AllowedEmailTypeValues, ", "))),
 			},
 			"mode": {
 				Type:         schema.TypeString,
@@ -147,11 +150,7 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 // and leaves it to the apply.
 func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
 	config := diff.GetRawConfig()
-	if config.IsNull() || !config.IsKnown() {
-		return nil
-	}
-	emailType := config.GetAttr("email_type")
-	if !emailType.IsKnown() || emailType.IsNull() || emailType.AsString() != namecheap.EmailTypeMXE {
+	if emailType := configuredEmailType(config); emailType == nil || *emailType != namecheap.EmailTypeMXE {
 		return nil
 	}
 	hasMXE, known := configHasMXERecord(config.GetAttr("record"))
@@ -248,20 +247,31 @@ func zoneKeepsMXERecord(hosts *[]namecheap.DomainsDNSHostRecordDetailed, priorRe
 	return false, nil
 }
 
+// configuredEmailType returns the email_type a configuration sets, or nil when
+// it leaves it out or the value is not known yet. Writes take it from the
+// configuration because email_type is Computed: state holds the mode the last
+// refresh read, and nil makes a write keep the mode the zone has when it runs.
+func configuredEmailType(config cty.Value) *string {
+	if config.IsNull() || !config.IsKnown() {
+		return nil
+	}
+	v := config.GetAttr("email_type")
+	if v.IsNull() || !v.IsKnown() {
+		return nil
+	}
+	emailType := v.AsString()
+	return &emailType
+}
+
 func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*namecheap.Client)
 
 	domain := strings.ToLower(data.Get("domain").(string))
 	mode := strings.ToUpper(data.Get("mode").(string))
+	emailType := configuredEmailType(data.GetRawConfig())
 
-	var emailType *string
 	var records []interface{}
 	var nameservers []interface{}
-
-	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
-		emailTypeString := emailTypeRaw.(string)
-		emailType = &emailTypeString
-	}
 
 	if recordsRaw, ok := data.GetOk("record"); ok {
 		records = recordsRaw.(*schema.Set).List()
@@ -321,14 +331,8 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 	domain := strings.ToLower(data.Get("domain").(string))
 	mode := strings.ToUpper(data.Get("mode").(string))
 
-	var emailType *string
 	var records []interface{}
 	var nameservers []interface{}
-
-	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
-		emailTypeString := emailTypeRaw.(string)
-		emailType = &emailTypeString
-	}
 
 	if recordsRaw, ok := data.GetOk("record"); ok {
 		records = recordsRaw.(*schema.Set).List()
@@ -377,6 +381,11 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		}
 
 		_ = data.Set("record", []interface{}{})
+		// Custom nameservers leave no Namecheap mail mode in effect, so clear one
+		// stored while the domain used Namecheap DNS.
+		if _, ok := data.GetOk("email_type"); ok {
+			_ = data.Set("email_type", "")
+		}
 	} else {
 		if mode == ncModeMerge {
 			realRecords, realEmailType, recordDiags := readRecordsMerge(ctx, domain, records, client)
@@ -386,7 +395,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			diags = append(diags, recordDiags...)
 			_ = data.Set("record", *realRecords)
 
-			if emailType != nil {
+			if realEmailType != nil {
 				_ = data.Set("email_type", *realEmailType)
 			}
 		}
@@ -398,7 +407,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			}
 			diags = append(diags, recordDiags...)
 			_ = data.Set("record", *realRecords)
-			if emailType != nil {
+			if realEmailType != nil {
 				_ = data.Set("email_type", *realEmailType)
 			}
 
@@ -442,12 +451,7 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 	oldNameserversLen := len(oldNameservers)
 	newNameserversLen := len(newNameservers)
 
-	var emailType *string
-
-	if emailTypeRaw, ok := data.GetOk("email_type"); ok {
-		emailTypeString := emailTypeRaw.(string)
-		emailType = &emailTypeString
-	}
+	emailType := configuredEmailType(data.GetRawConfig())
 
 	if mode == ncModeMerge {
 		ncMutexKV.Lock(domain)
