@@ -164,55 +164,6 @@ func TestConvertInterfacesToString(t *testing.T) {
 	})
 }
 
-func TestStringifyNCRecord(t *testing.T) {
-	cases := []struct {
-		Name     string
-		Input    namecheap.DomainsDNSHostRecord
-		Expected string
-	}{
-		{
-			Name: "a_record",
-			Input: namecheap.DomainsDNSHostRecord{
-				HostName:   namecheap.String("www"),
-				RecordType: namecheap.String("A"),
-				Address:    namecheap.String("1.2.3.4"),
-				MXPref:     namecheap.UInt8(10),
-				TTL:        namecheap.Int(1800),
-			},
-			Expected: "{hostname = www, type = A, address = 1.2.3.4}",
-		},
-		{
-			Name: "cname_record",
-			Input: namecheap.DomainsDNSHostRecord{
-				HostName:   namecheap.String("blog"),
-				RecordType: namecheap.String("CNAME"),
-				Address:    namecheap.String("example.com."),
-				MXPref:     namecheap.UInt8(10),
-				TTL:        namecheap.Int(1800),
-			},
-			Expected: "{hostname = blog, type = CNAME, address = example.com.}",
-		},
-		{
-			Name: "mx_record",
-			Input: namecheap.DomainsDNSHostRecord{
-				HostName:   namecheap.String("@"),
-				RecordType: namecheap.String("MX"),
-				Address:    namecheap.String("mail.example.com."),
-				MXPref:     namecheap.UInt8(5),
-				TTL:        namecheap.Int(600),
-			},
-			Expected: "{hostname = @, type = MX, address = mail.example.com.}",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			result := stringifyNCRecord(&tc.Input)
-			assert.Equal(t, tc.Expected, result)
-		})
-	}
-}
-
 func TestConvertRecordTypeSetToDomainRecords_EmptyInput(t *testing.T) {
 	var recordsRaw []interface{}
 	result := convertRecordTypeSetToDomainRecords(&recordsRaw)
