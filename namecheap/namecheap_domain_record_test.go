@@ -510,6 +510,40 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 						}),
 					),
 				},
+				{
+					// The record is now in state: a TTL change is an in-place
+					// update the zone takes in one write, still one copy.
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							record {
+								hostname = "sub2"
+								type = "A"
+								address = "33.33.33.33"
+							}
+
+							record {
+								hostname = "sub1"
+								type = "A"
+								address = "22.22.22.22"
+								ttl = 600
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 2),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String(namecheap.RecordTypeA),
+							Address: namecheap.String("22.22.22.22"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(600),
+						}),
+					),
+				},
 			},
 		})
 	})
