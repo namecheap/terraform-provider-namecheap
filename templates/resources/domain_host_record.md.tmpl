@@ -23,11 +23,21 @@ per record, `for_each` over a map, per-record import.
 
 ## Choosing between this and `namecheap_domain_records`
 
-~> **Do not point both at the same domain.** `namecheap_domain_records` manages a
-domain's entire record set; this resource manages one record within it. Used
-together on one domain they fight — the zone-level resource will delete records
-this one created (in `OVERWRITE` mode) or fight over ownership (in `MERGE`),
-because neither knows about the other.
+~> **Do not manage the records of one domain with both.** `namecheap_domain_records`
+with `record` blocks manages a set of records; this resource manages one record.
+Used together on one domain they fight — the zone-level resource will delete
+records this one created (in `OVERWRITE` mode) or fight over ownership (in
+`MERGE`), because neither knows about the other.
+
+The one combination that works is a mail-only `namecheap_domain_records`: `MERGE`
+mode (the default), `email_type` and **no** `record` blocks. It holds no records,
+so it never writes or deletes one, and each record gets its own
+`namecheap_domain_host_record`:
+
+{{tffile "examples/resources/domain_host_record/example_3.tf"}}
+
+Import the mail-only resource by the plain domain name (`example.com`, not
+`example.com/zone`); see the [importing guide](../guides/importing.md).
 
 - **Use `namecheap_domain_host_record`** when different records are owned by
   different people, modules or workspaces, or when you want `for_each` over a map

@@ -46,7 +46,7 @@ resource "namecheap_domain_records" "my-domain2-com" {
 - `mode` - (Optional) Possible values: `MERGE` (default), `OVERWRITE`. **Warning: `OVERWRITE` mode replaces the entire DNS zone — all existing records not present in the Terraform configuration will be permanently deleted, including records created manually, by other tools, or by other Terraform resources.** Use `MERGE` mode if you only want to manage a subset of records.
 
   Since v2.5.0, the provider warns before this happens: `terraform plan` shows a warning enumerating any live record that isn't in your configuration, and `terraform apply` warns again immediately before deleting them (covering the case where the record only appeared after your last refresh). Each warning includes ready-to-paste `record { ... }` blocks — add them to your configuration to adopt those records instead of losing them, and the next plan will be empty. See the [OVERWRITE safety guide](../guides/namecheap_domain_records_guide.md#overwrite) for details.
-- `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`. Leave it out to keep the domain's current mail mode: while the domain uses Namecheap DNS, every refresh and import reads that mode into state, so removing `email_type` from the configuration plans no change. Set `email_type = "NONE"` to turn mail off.
+- `email_type` - (Optional) Possible values: NONE, FWD, MXE, MX, OX, GMAIL. Conflicts with `nameservers`. Leave it out to keep the domain's current mail mode: while the domain uses Namecheap DNS, every refresh and import, with either import ID, reads that mode into state, so removing `email_type` from the configuration plans no change. Set `email_type = "NONE"` to turn mail off.
 - `record` - (Optional) (see [below for nested schema](#nestedblock--record)) Might contain one or more `record` records. Conflicts with `nameservers`
 - `nameservers` - (Optional) List of nameservers. Conflicts with `email_type` and `record`
 
@@ -64,8 +64,25 @@ resource "namecheap_domain_records" "my-domain2-com" {
 
 ## Import
 
-Domain records can be imported by domain name, e.g.,
+The import ID chooses what the import stores:
+
+| ID | Stored in state | Use it when |
+|---|---|---|
+| `example.com` | `email_type`, custom `nameservers`; no `record` | the configuration declares no records, or only some of the zone's records |
+| `example.com/zone` | the above and every record of the zone | the configuration declares the whole zone, or is generated with `-generate-config-out` |
 
 ```shell
+# The domain name imports the domain's settings (email_type, custom nameservers)
+# and no records. Records the configuration declares are adopted on the first apply.
 terraform import namecheap_domain_records.main example.com
+
+# <domain>/zone imports every record of the zone as well, for a configuration
+# that declares all of them.
+terraform import namecheap_domain_records.main example.com/zone
 ```
+
+~> In `MERGE` mode the records in state are the ones this resource owns, and it
+deletes an owned record that the configuration no longer declares. Import with
+`/zone` only into a configuration that declares every record: one that is left
+out shows in the plan as removed and is deleted on apply. The [importing guide](../guides/importing.md#namecheap_domain_records-two-import-ids)
+has the details.

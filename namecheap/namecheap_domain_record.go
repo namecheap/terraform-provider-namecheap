@@ -15,7 +15,10 @@ import (
 const (
 	ncModeMerge     = "MERGE"
 	ncModeOverwrite = "OVERWRITE"
-	ncModeImport    = "IMPORT"
+
+	// recordsImportScopeZone is the import ID suffix that asks for the whole
+	// zone: "example.com/zone". The plain "example.com" imports no records.
+	recordsImportScopeZone = "zone"
 )
 
 func resourceNamecheapDomainRecords() *schema.Resource {
@@ -29,16 +32,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 		CustomizeDiff: customizeRecordsDiff,
 
 		Importer: &schema.ResourceImporter{
-			StateContext: func(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-				if err := data.Set("domain", data.Id()); err != nil {
-					return nil, err
-				}
-				if err := data.Set("mode", ncModeImport); err != nil {
-					return nil, err
-				}
-
-				return []*schema.ResourceData{data}, nil
-			},
+			StateContext: importRecordsState,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -138,6 +132,104 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 		))
 	}
 	return
+}
+
+// parseRecordsImportID splits an import ID into the domain and the import
+// scope: "example.com" imports the domain's settings and no records,
+// "example.com/zone" imports every record too.
+func parseRecordsImportID(id string) (domain string, wholeZone bool, err error) {
+	domain, scope, hasScope := strings.Cut(id, "/")
+	if hasScope && scope != recordsImportScopeZone {
+		return "", false, fmt.Errorf(
+			"unexpected import ID %q: use %q to import the domain's settings without its records, "+
+				"or %q to import every record of the zone as well",
+			id, "example.com", "example.com/"+recordsImportScopeZone)
+	}
+	if _, errs := validateDomainIsNotSubdomain(domain, "domain"); len(errs) > 0 {
+		return "", false, fmt.Errorf("unexpected import ID %q: %w", id, errs[0])
+	}
+	return domain, hasScope, nil
+}
+
+// importRecordsState imports a domain by one of two IDs. Read cannot see the
+// configuration, so it cannot tell the records a configuration declares from
+// the rest of the zone; the ID says which of the two the import is for.
+//
+// "example.com" stores no records. In MERGE the records in state are the ones
+// the resource owns, and the next apply deletes an owned record that the
+// configuration does not declare, so an import must not hand it records nobody
+// declared. A declared record that is already live is adopted by the first
+// apply (mergeRecords).
+//
+// "example.com/zone" stores every record, for a configuration that declares
+// the whole zone or is generated with -generate-config-out. The resource then
+// owns them all: one the configuration leaves out is planned for removal, as
+// for any record block removed from a MERGE configuration.
+//
+// Custom nameservers are one setting of the domain, not rows of a zone, and are
+// stored by both forms. The refresh Terraform runs after the import stores
+// email_type.
+func importRecordsState(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	domain, wholeZone, err := parseRecordsImportID(data.Id())
+	if err != nil {
+		return nil, err
+	}
+	client := meta.(*namecheap.Client)
+	apiDomain := strings.ToLower(domain)
+
+	data.SetId(apiDomain)
+	if err := data.Set("domain", domain); err != nil {
+		return nil, err
+	}
+	if err := data.Set("mode", ncModeMerge); err != nil {
+		return nil, err
+	}
+
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, apiDomain)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateGetListResponse(nsResponse); err != nil {
+		return nil, fmt.Errorf("unable to read DNS state for domain %s: %w", apiDomain, err)
+	}
+
+	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
+		nameservers, diags := readNameserversOverwrite(nsResponse)
+		if err := firstDiagError(diags); err != nil {
+			return nil, err
+		}
+		if err := data.Set("nameservers", *nameservers); err != nil {
+			return nil, err
+		}
+		return []*schema.ResourceData{data}, nil
+	}
+
+	if wholeZone {
+		records, _, _, diags := readRecordsOverwrite(ctx, apiDomain, nil, client)
+		if err := firstDiagError(diags); err != nil {
+			return nil, err
+		}
+		if err := data.Set("record", *records); err != nil {
+			return nil, err
+		}
+	}
+
+	return []*schema.ResourceData{data}, nil
+}
+
+// firstDiagError returns the first error in diags as an error, for callers
+// that report through an error value, or nil when diags holds none.
+func firstDiagError(diags diag.Diagnostics) error {
+	for _, d := range diags {
+		if d.Severity != diag.Error {
+			continue
+		}
+		if d.Detail != "" {
+			return fmt.Errorf("%s: %s", d.Summary, d.Detail)
+		}
+		return fmt.Errorf("%s", d.Summary)
+	}
+	return nil
 }
 
 // customizeRecordsDiff fails the plan when email_type = "MXE" would leave the
@@ -371,7 +463,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			_ = data.Set("nameservers", *realNameservers)
 		}
 
-		if mode == ncModeOverwrite || mode == ncModeImport {
+		if mode == ncModeOverwrite {
 			realNameservers, nsDiags := readNameserversOverwrite(nsResponse)
 			if nsDiags.HasError() {
 				return nsDiags
@@ -400,7 +492,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			}
 		}
 
-		if mode == ncModeOverwrite || mode == ncModeImport {
+		if mode == ncModeOverwrite {
 			realRecords, realEmailType, unmanagedRecords, recordDiags := readRecordsOverwrite(ctx, domain, records, client)
 			if recordDiags.HasError() {
 				return recordDiags
@@ -411,9 +503,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 				_ = data.Set("email_type", *realEmailType)
 			}
 
-			// Refresh-time warning only for state mode - IMPORT is adopting
-			// these records, not about to delete them (#65, #250).
-			if mode == ncModeOverwrite && len(unmanagedRecords) > 0 {
+			if len(unmanagedRecords) > 0 {
 				diags = append(diags, buildUnmanagedDeletionWarning(domain, unmanagedRecords, "will delete"))
 			}
 		}
@@ -421,10 +511,6 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		if nameservers != nil {
 			_ = data.Set("nameservers", []string{})
 		}
-	}
-
-	if mode == ncModeImport {
-		_ = data.Set("mode", ncModeMerge)
 	}
 
 	return diags
