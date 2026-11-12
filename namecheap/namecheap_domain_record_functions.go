@@ -245,7 +245,8 @@ func deleteNameserversOverwrite(ctx context.Context, domain string, client *name
 	return nil
 }
 
-// createRecordsMerge merges new records with already existing ones on Namecheap
+// createRecordsMerge adds records to the ones already on Namecheap. A record
+// that is already live is adopted, not refused: see mergeRecords.
 func createRecordsMerge(ctx context.Context, domain string, emailType *string, records []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
 	if err != nil {
@@ -256,49 +257,16 @@ func createRecordsMerge(ctx context.Context, domain string, emailType *string, r
 		return diagFromClientError(err)
 	}
 
-	recordsConverted := convertRecordTypeSetToDomainRecords(&records)
-	newRecordsMap := make(map[string]*namecheap.DomainsDNSHostRecord)
-	var newDomainRecords []namecheap.DomainsDNSHostRecord
-
+	// Create removes the default parking records; update and delete keep
+	// whatever is live.
+	var liveRecords []namecheap.DomainsDNSHostRecordDetailed
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
-		filteredRemoteRecords := filterDefaultParkingRecords(remoteRecordsResponse.DomainDNSGetHostsResult.Hosts, &domain)
-		for _, remoteRecord := range *filteredRemoteRecords {
-			remoteRecordHash := hashRecord(*remoteRecord.Name, *remoteRecord.Type, *remoteRecord.Address)
-			domainRecord := namecheap.DomainsDNSHostRecord{
-				HostName:   remoteRecord.Name,
-				RecordType: remoteRecord.Type,
-				Address:    remoteRecord.Address,
-				MXPref:     namecheap.UInt8(uint8(*remoteRecord.MXPref)),
-				TTL:        remoteRecord.TTL,
-			}
-
-			newRecordsMap[remoteRecordHash] = &domainRecord
-		}
+		liveRecords = *filterDefaultParkingRecords(remoteRecordsResponse.DomainDNSGetHostsResult.Hosts, &domain)
 	}
 
-	for _, record := range *recordsConverted {
-		fixedAddress, err := getFixedAddressOfRecord(&record)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-		recordHash := hashRecord(*record.HostName, *record.RecordType, *fixedAddress)
-
-		if newRecordsMap[recordHash] != nil {
-			return diag.Diagnostics{
-				diag.Diagnostic{
-					Severity: diag.Error,
-					Summary:  "Duplicate record",
-					Detail:   fmt.Sprintf("Record %s is already exist!", stringifyNCRecord(&record)),
-				},
-			}
-		}
-
-		newRecord := record
-		newRecordsMap[recordHash] = &newRecord
-	}
-
-	for _, record := range newRecordsMap {
-		newDomainRecords = append(newDomainRecords, *record)
+	newDomainRecords, err := mergeRecords(liveRecords, nil, *convertRecordTypeSetToDomainRecords(&records))
+	if err != nil {
+		return diagFromClientError(err)
 	}
 
 	// Without email_type the resource owns records, not the mail mode: resend
@@ -523,7 +491,8 @@ func unmanagedRecordsOverwrite(ctx context.Context, domain string, referenceReco
 	return unmanagedRecords, emailType, nil
 }
 
-// updateRecordsMerge fetches remote records, remove previousRecords from remote, add currentRecords and return the final list
+// updateRecordsMerge replaces previousRecords, the records this resource wrote
+// last, with currentRecords and keeps every other live record: see mergeRecords.
 // NOTE: method has address fix. Refer to getFixedAddressOfRecord
 func updateRecordsMerge(ctx context.Context, domain string, emailType *string, previousRecords []interface{}, currentRecords []interface{}, client *namecheap.Client) diag.Diagnostics {
 	remoteRecordsResponse, err := client.DomainsDNS.GetHostsWithContext(ctx, domain)
@@ -535,30 +504,15 @@ func updateRecordsMerge(ctx context.Context, domain string, emailType *string, p
 		return diagFromClientError(err)
 	}
 
-	var newRecordList []namecheap.DomainsDNSHostRecord
-	previousRecordsMapped := convertRecordTypeSetToDomainRecords(&previousRecords)
-	currentRecordsMapped := convertRecordTypeSetToDomainRecords(&currentRecords)
-
+	var liveRecords []namecheap.DomainsDNSHostRecordDetailed
 	if remoteRecordsResponse.DomainDNSGetHostsResult.Hosts != nil {
-		for _, remoteRecord := range *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts {
-			found, err := isPriorRecord(remoteRecord, *previousRecordsMapped)
-			if err != nil {
-				return diagFromClientError(err)
-			}
-
-			if !found {
-				newRecordList = append(newRecordList, namecheap.DomainsDNSHostRecord{
-					HostName:   remoteRecord.Name,
-					RecordType: remoteRecord.Type,
-					Address:    remoteRecord.Address,
-					MXPref:     namecheap.UInt8(uint8(*remoteRecord.MXPref)),
-					TTL:        remoteRecord.TTL,
-				})
-			}
-		}
+		liveRecords = *remoteRecordsResponse.DomainDNSGetHostsResult.Hosts
 	}
 
-	newRecordList = append(newRecordList, *currentRecordsMapped...)
+	newRecordList, err := mergeRecords(liveRecords, *convertRecordTypeSetToDomainRecords(&previousRecords), *convertRecordTypeSetToDomainRecords(&currentRecords))
+	if err != nil {
+		return diagFromClientError(err)
+	}
 
 	if emailType == nil {
 		emailType = resendEmailType(remoteRecordsResponse)
@@ -681,6 +635,50 @@ func resendEmailType(response *namecheap.DomainsDNSGetHostsCommandResponse) *str
 		return nil
 	}
 	return emailType
+}
+
+// mergeRecords builds the zone a MERGE write sends: every live record, in the
+// order getHosts returned it, except the ones this resource owns, followed by
+// the configured records. A live record is owned when it is in previous (the
+// records this resource wrote last, so a record removed from config is deleted)
+// or in configured. A configured record that is already live is the same
+// record, matched on hostname, type and address as isPriorRecord matches: it is
+// adopted, written once with the configured TTL and MX preference, instead of
+// being written a second time next to the live copy. Live records the resource
+// never declared, duplicates included, pass through unchanged. The error is
+// getFixedAddressOfRecord's, for a CAA value it cannot parse.
+func mergeRecords(live []namecheap.DomainsDNSHostRecordDetailed, previous, configured []namecheap.DomainsDNSHostRecord) ([]namecheap.DomainsDNSHostRecord, error) {
+	// Check every configured address even when no live record needs matching,
+	// so an invalid CAA value fails before the write on an empty zone too.
+	for i := range configured {
+		if _, err := getFixedAddressOfRecord(&configured[i]); err != nil {
+			return nil, err
+		}
+	}
+
+	var zone []namecheap.DomainsDNSHostRecord
+	for _, liveRecord := range live {
+		owned, err := isPriorRecord(liveRecord, previous)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			if owned, err = isPriorRecord(liveRecord, configured); err != nil {
+				return nil, err
+			}
+		}
+		if owned {
+			continue
+		}
+		zone = append(zone, namecheap.DomainsDNSHostRecord{
+			HostName:   liveRecord.Name,
+			RecordType: liveRecord.Type,
+			Address:    liveRecord.Address,
+			MXPref:     namecheap.UInt8(uint8(*liveRecord.MXPref)),
+			TTL:        liveRecord.TTL,
+		})
+	}
+	return append(zone, configured...), nil
 }
 
 // isPriorRecord reports whether live, a row read from the zone, is one of prior,
@@ -900,10 +898,4 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
-}
-
-// stringifyNCRecord returns a string with hostname, record type and address of the record
-// This function mostly serves to print error details for user
-func stringifyNCRecord(record *namecheap.DomainsDNSHostRecord) string {
-	return fmt.Sprintf("{hostname = %s, type = %s, address = %s}", *record.HostName, *record.RecordType, *record.Address)
 }

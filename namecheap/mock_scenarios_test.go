@@ -163,44 +163,6 @@ resource "namecheap_domain_records" "test" {
 		})
 	})
 
-	// Two MERGE resources declaring the same record must be rejected by the
-	// provider's duplicate detection.
-	t.Run("duplicate_conflict", func(t *testing.T) {
-		m := newNamecheapMock(t)
-		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { mockPreCheck(t, m) },
-			ProviderFactories: mockProviderFactories(),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-resource "namecheap_domain_records" "test" {
-  domain = "%[1]s"
-  mode   = "MERGE"
-
-  record {
-    hostname = "sub1"
-    type     = "A"
-    address  = "22.22.22.22"
-  }
-}
-
-resource "namecheap_domain_records" "test_two" {
-  domain = "%[1]s"
-  mode   = "MERGE"
-
-  record {
-    hostname = "sub1"
-    type     = "A"
-    address  = "22.22.22.22"
-  }
-}
-`, mockScenarioDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate record"),
-				},
-			},
-		})
-	})
-
 	// MX record with an email type: the provider appends a trailing dot to the
 	// MX address on write, so the mock persists the dotted form (as the real API
 	// does) while the round-trip stays diff-free.

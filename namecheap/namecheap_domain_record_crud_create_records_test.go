@@ -83,7 +83,10 @@ func TestCreateRecordsMerge_WithExistingRecords(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
-func TestCreateRecordsMerge_DuplicateRecord(t *testing.T) {
+// A declared record that already exists live is the same record: create adopts
+// it, writing one copy with the configured TTL, instead of refusing.
+func TestCreateRecordsMerge_AdoptsExistingRecord(t *testing.T) {
+	var written []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		command := r.FormValue("Command")
@@ -94,8 +97,10 @@ func TestCreateRecordsMerge_DuplicateRecord(t *testing.T) {
 			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
 			}))
+		case "namecheap.domains.dns.setHosts":
+			written = setHostsRows(r)
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		default:
-			// Should not reach setHosts
 			t.Fatalf("unexpected command: %s", command)
 		}
 	}))
@@ -108,13 +113,13 @@ func TestCreateRecordsMerge_DuplicateRecord(t *testing.T) {
 			"type":     "A",
 			"address":  "1.2.3.4",
 			"mx_pref":  10,
-			"ttl":      1800,
+			"ttl":      300,
 		},
 	}
 
 	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
-	assert.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Summary, "Duplicate record")
+	assert.False(t, diags.HasError(), "%v", diags)
+	assert.Equal(t, []string{"www A 1.2.3.4 ttl=300"}, written)
 }
 
 func TestCreateRecordsMerge_FiltersParkingRecords(t *testing.T) {
@@ -533,7 +538,8 @@ func TestCreateRecordsMerge_CNAMEDotFixNoDuplicate(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
-func TestCreateRecordsMerge_CNAMEDotFixDetectsDuplicate(t *testing.T) {
+func TestCreateRecordsMerge_CNAMEDotFixAdoptsExisting(t *testing.T) {
+	var written []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		command := r.FormValue("Command")
@@ -544,12 +550,15 @@ func TestCreateRecordsMerge_CNAMEDotFixDetectsDuplicate(t *testing.T) {
 			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
 				{Name: "www", Type: "CNAME", Address: "target.example.com.", MXPref: 10, TTL: 1800},
 			}))
+		case "namecheap.domains.dns.setHosts":
+			written = setHostsRows(r)
+			_, _ = fmt.Fprint(w, setHostsSuccessXML())
 		}
 	}))
 	defer server.Close()
 
 	client := newTestClient(server.URL)
-	// Same CNAME without dot - should detect as duplicate after dot fix
+	// Same CNAME without dot: the dot fix makes it the same record, adopted.
 	records := []interface{}{
 		map[string]interface{}{
 			"hostname": "www",
@@ -561,8 +570,8 @@ func TestCreateRecordsMerge_CNAMEDotFixDetectsDuplicate(t *testing.T) {
 	}
 
 	diags := createRecordsMerge(context.Background(), "test.com", nil, records, client)
-	assert.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Summary, "Duplicate record")
+	assert.False(t, diags.HasError(), "%v", diags)
+	assert.Len(t, written, 1)
 }
 
 func TestCreateRecordsMerge_ResolvesEmailTypeWhenNil(t *testing.T) {

@@ -383,13 +383,23 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 		})
 	})
 
-	t.Run("create_duplicate_records_conflict_merge", func(t *testing.T) {
+	// A declared record that is already live is adopted on create: one copy,
+	// with the configured TTL, instead of a "Duplicate record" refusal. The
+	// resource then owns it, so destroy removes it.
+	t.Run("create_adopts_existing_record_merge", func(t *testing.T) {
 		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
 
 		resource.Test(t, resource.TestCase{
 			PreCheck: func() {
 				resetDomainNameservers(t)
-				resetDomainRecords(t)
+				setDomainRecords(t, namecheap.String(namecheap.EmailTypeNone), &[]namecheap.DomainsDNSHostRecord{
+					{
+						HostName:   namecheap.String("sub1"),
+						RecordType: namecheap.String(namecheap.RecordTypeA),
+						Address:    namecheap.String("22.22.22.22"),
+						TTL:        namecheap.Int(1800),
+					},
+				})
 			},
 			ProviderFactories: testAccProviderFactories,
 			CheckDestroy: resource.ComposeTestCheckFunc(
@@ -407,6 +417,7 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 								hostname = "sub1"
 								type = "A"
 								address = "22.22.22.22"
+								ttl = 300
 							}
 						}
 					`, *testAccDomain),
@@ -415,38 +426,123 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 						testAccDomainRecordsLength(&domainRecordsResp, 1),
 						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
 							Name:    namecheap.String("sub1"),
-							Type:    namecheap.String("A"),
+							Type:    namecheap.String(namecheap.RecordTypeA),
 							Address: namecheap.String("22.22.22.22"),
 							MXPref:  namecheap.Int(10),
-							TTL:     namecheap.Int(1800),
+							TTL:     namecheap.Int(300),
 						}),
+					),
+				},
+			},
+		})
+	})
+
+	// A record added to config that is already live is adopted on update: the
+	// zone keeps one copy of it, not the live one plus an appended one.
+	t.Run("update_adopts_existing_record_merge", func(t *testing.T) {
+		var domainRecordsResp namecheap.DomainsDNSGetHostsCommandResponse
+
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				resetDomainNameservers(t)
+				setDomainRecords(t, namecheap.String(namecheap.EmailTypeNone), &[]namecheap.DomainsDNSHostRecord{
+					{
+						HostName:   namecheap.String("sub1"),
+						RecordType: namecheap.String(namecheap.RecordTypeA),
+						Address:    namecheap.String("22.22.22.22"),
+						TTL:        namecheap.Int(1800),
+					},
+				})
+			},
+			ProviderFactories: testAccProviderFactories,
+			CheckDestroy: resource.ComposeTestCheckFunc(
+				testAccDomainRecordsAPIFetch(&domainRecordsResp),
+				testAccDomainRecordsLength(&domainRecordsResp, 0),
+			),
+			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							record {
+								hostname = "sub2"
+								type = "A"
+								address = "33.33.33.33"
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 2),
 					),
 				},
 				{
 					Config: fmt.Sprintf(`
 						resource "namecheap_domain_records" "my-domain" {
-							domain = "%[1]s"
+							domain = "%s"
 							mode = "MERGE"
 
 							record {
-								hostname = "sub1"
+								hostname = "sub2"
 								type = "A"
-								address = "22.22.22.22"
+								address = "33.33.33.33"
 							}
-						}
-
-						resource "namecheap_domain_records" "my-domain-two" {
-							domain = "%[1]s"
-							mode = "MERGE"
 
 							record {
 								hostname = "sub1"
 								type = "A"
 								address = "22.22.22.22"
+								ttl = 300
 							}
 						}
 					`, *testAccDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate record"),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 2),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String(namecheap.RecordTypeA),
+							Address: namecheap.String("22.22.22.22"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(300),
+						}),
+					),
+				},
+				{
+					// The record is now in state: a TTL change is an in-place
+					// update the zone takes in one write, still one copy.
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							record {
+								hostname = "sub2"
+								type = "A"
+								address = "33.33.33.33"
+							}
+
+							record {
+								hostname = "sub1"
+								type = "A"
+								address = "22.22.22.22"
+								ttl = 600
+							}
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainRecordsAPIFetch(&domainRecordsResp),
+						testAccDomainRecordsLength(&domainRecordsResp, 2),
+						testAccDomainRecordsContain(&domainRecordsResp, &namecheap.DomainsDNSHostRecordDetailed{
+							Name:    namecheap.String("sub1"),
+							Type:    namecheap.String(namecheap.RecordTypeA),
+							Address: namecheap.String("22.22.22.22"),
+							MXPref:  namecheap.Int(10),
+							TTL:     namecheap.Int(600),
+						}),
+					),
 				},
 			},
 		})

@@ -49,10 +49,13 @@ The same workflow works for both: `record` items and `nameservers`.
 
 -> This is the default behavior, however, we recommend to set the mode explicitly.
 
-~> Upon creating a new resource with the records or nameservers that already exist, the provider will throw a duplicate
-error.
+~> A declared record that already exists on the domain, matched on `hostname`, `type` and `address`, is adopted
+rather than added a second time: the provider writes it once, with the `ttl` and `mx_pref` from your configuration, and
+the resource owns it from then on. Removing it from the configuration, or destroying the resource, deletes it, even if
+it existed before Terraform. Declaring nameservers that already exist still fails with a duplicate error.
 
-The `MERGE` mode allows you to control records related to the same domain as a different resources.
+The `MERGE` mode allows you to control records related to the same domain as a different resources. Declare each record
+in one resource only: two resources declaring the same record both own it, and destroying either one deletes it.
 
 ```terraform
 resource "namecheap_domain_records" "blog-my-domain-com" {
