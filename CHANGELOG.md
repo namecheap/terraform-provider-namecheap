@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.11](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.10...v2.9.11) (2026-11-12)
+
+
+### Bug Fixes
+
+* adopt live records that match config in MERGE mode instead of refusing or duplicating ([#391](https://github.com/namecheap/terraform-provider-namecheap/issues/391)) ([b1dd77a](https://github.com/namecheap/terraform-provider-namecheap/commit/b1dd77af6df2a95073a74c8ab71f6de48c112bd5))
+
 ## [2.9.10](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.9...v2.9.10) (2026-11-05)
 
 
