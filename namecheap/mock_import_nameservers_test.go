@@ -130,6 +130,134 @@ resource "namecheap_domain_records" "dns" {
 		})
 	})
 
+	// MERGE does not need an import: a create adopts the declared nameservers
+	// that are already live, where it used to fail with "Duplicate nameserver".
+	t.Run("a config applied without an import adopts live nameservers", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		cfg := config(ncModeMerge, declared, "")
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m); seed(m, all) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckNameservers(m, domain, undeclared...),
+			Steps: []resource.TestStep{
+				{
+					Config: cfg,
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr(recordsResource, "nameservers.#", "2"),
+						mockCheckNameservers(m, domain, all...),
+					),
+				},
+				{Config: cfg, PlanOnly: true},
+			},
+		})
+	})
+
+	// Taking the nameservers out of a MERGE configuration releases the ones the
+	// resource set and keeps the rest. It used to reset the whole delegation.
+	t.Run("removing the nameservers from a config keeps the ones it did not set", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m); seed(m, undeclared) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckNameservers(m, domain, undeclared...),
+			Steps: []resource.TestStep{
+				{
+					Config: config(ncModeMerge, declared, ""),
+					Check:  mockCheckNameservers(m, domain, all...),
+				},
+				{
+					Config: config(ncModeMerge, nil, ""),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr(recordsResource, "nameservers.#", "0"),
+						mockCheckNameservers(m, domain, undeclared...),
+					),
+				},
+			},
+		})
+		if n := m.commandCount(setDefault); n != 0 {
+			t.Fatalf("%d setDefault call(s), want 0: the domain stays delegated", n)
+		}
+	})
+
+	// Records and email_type need Namecheap DNS. A MERGE resource does not move
+	// a domain off nameservers it does not manage to write them: the plan fails,
+	// where the apply used to reset the delegation with only the records in the
+	// plan.
+	const wwwBlock = `
+  record {
+    hostname = "www"
+    type     = "A"
+    address  = "203.0.113.10"
+  }
+`
+	delegatedElsewhere := regexp.MustCompile(`(?s)is\s+delegated\s+to\s+custom\s+nameservers\s+this\s+resource\s+does\s+not\s+manage.*` +
+		`ns3\.manual\.net.*` + regexp.QuoteMeta(domain+"/zone"))
+	for name, body := range map[string]string{"records": wwwBlock, "email_type": "  email_type = \"GMAIL\"\n"} {
+		t.Run("adding "+name+" to a resource of a domain delegated elsewhere fails at plan", func(t *testing.T) {
+			m := newNamecheapMock(t)
+			resource.Test(t, resource.TestCase{
+				PreCheck:          func() { mockPreCheck(t, m); seed(m, all) },
+				ProviderFactories: mockProviderFactories(),
+				CheckDestroy:      mockCheckNameservers(m, domain, all...),
+				Steps: []resource.TestStep{
+					importStep(domain, config(ncModeMerge, nil, "")),
+					{Config: config(ncModeMerge, nil, "")},
+					{
+						Config:      config(ncModeMerge, nil, body),
+						ExpectError: delegatedElsewhere,
+					},
+					{Config: config(ncModeMerge, nil, "")},
+				},
+			})
+			noDelegationChange(t, m)
+		})
+	}
+
+	// The resource set two of the four nameservers. Replacing them with records
+	// would leave the domain on the other two, so that plan fails as well.
+	t.Run("replacing its nameservers with records fails at plan while others remain", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m); seed(m, undeclared) },
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckNameservers(m, domain, undeclared...),
+			Steps: []resource.TestStep{
+				{Config: config(ncModeMerge, declared, "")},
+				{
+					Config:      config(ncModeMerge, nil, wwwBlock),
+					ExpectError: delegatedElsewhere,
+				},
+				{
+					Config: config(ncModeMerge, declared, ""),
+					Check:  mockCheckNameservers(m, domain, all...),
+				},
+			},
+		})
+	})
+
+	// When the resource manages every nameserver, the plan lists their removal,
+	// and the apply returns the domain to Namecheap DNS and writes the records.
+	t.Run("replacing its nameservers with records moves the domain to Namecheap DNS", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		resource.Test(t, resource.TestCase{
+			PreCheck:          func() { mockPreCheck(t, m) },
+			ProviderFactories: mockProviderFactories(),
+			Steps: []resource.TestStep{
+				{
+					Config: config(ncModeMerge, declared, ""),
+					Check:  mockCheckNameservers(m, domain, declared...),
+				},
+				{
+					Config: config(ncModeMerge, nil, wwwBlock),
+					Check: resource.ComposeTestCheckFunc(
+						mockCheckNameserversDefault(m, domain),
+						assertZoneHas(m, "www", "A", "203.0.113.10"),
+					),
+				},
+			},
+		})
+	})
+
 	t.Run("/zone ID with a config that declares every nameserver plans no change", func(t *testing.T) {
 		m := newNamecheapMock(t)
 		cfg := config(ncModeMerge, all, "")

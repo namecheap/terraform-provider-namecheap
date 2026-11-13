@@ -61,46 +61,37 @@ func TestCreateNameserversMerge_MergesWithExisting(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
-func TestCreateNameserversMerge_DuplicateDetection(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		command := r.FormValue("Command")
+// A declared nameserver that is already live is adopted: the list is sent with
+// it once, next to the live nameservers this resource did not declare.
+func TestCreateNameserversMerge_AdoptsLiveNameserver(t *testing.T) {
+	cases := []struct {
+		name string
+		live []string
+		want string
+	}{
+		{"same case", []string{"ns1.example.com", "ns2.example.com"}, "ns1.example.com,ns2.example.com,ns3.example.com"},
+		{"another case", []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}, "NS1.EXAMPLE.COM,NS2.EXAMPLE.COM,ns3.example.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				switch r.FormValue("Command") {
+				case "namecheap.domains.dns.getList":
+					_, _ = fmt.Fprint(w, getListXML(false, tc.live))
+				case "namecheap.domains.dns.setCustom":
+					sent = r.FormValue("Nameservers")
+					_, _ = fmt.Fprint(w, setCustomSuccessXML())
+				}
+			}))
+			defer server.Close()
 
-		switch command {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com"}))
-		default:
-			t.Fatalf("should not call setCustom on duplicate: %s", command)
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	nameservers := []string{"ns1.example.com", "ns3.example.com"}
-
-	diags := createNameserversMerge(context.Background(), "test.com", nameservers, client)
-	assert.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Detail, "ns1.example.com")
-	assert.Contains(t, diags[0].Detail, "already exist")
-}
-
-func TestCreateNameserversMerge_DuplicateCaseInsensitive(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		command := r.FormValue("Command")
-
-		switch command {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(false, []string{"NS1.EXAMPLE.COM", "NS2.EXAMPLE.COM"}))
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	nameservers := []string{"ns1.example.com", "ns3.example.com"}
-
-	diags := createNameserversMerge(context.Background(), "test.com", nameservers, client)
-	assert.True(t, diags.HasError())
+			diags := createNameserversMerge(context.Background(), "test.com", []string{"ns1.example.com", "ns3.example.com"}, newTestClient(server.URL))
+			assert.False(t, diags.HasError(), "%v", diags)
+			assert.Equal(t, tc.want, sent)
+		})
+	}
 }
 
 func TestCreateNameserversOverwrite_Simple(t *testing.T) {

@@ -3,7 +3,6 @@ package namecheap_provider
 import (
 	"context"
 	"fmt"
-	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"slices"
@@ -27,9 +26,11 @@ func validateGetHostsResponse(response *namecheap.DomainsDNSGetHostsCommandRespo
 	return nil
 }
 
-// createNameserversMerge has the following behaviour:
-// - if nameservers have been set manually, then this method merge the provided ones with manually set
-// - else this is overwriting existent ones
+// createNameserversMerge adds nameservers to the ones the domain already uses,
+// so the ones set in the Namecheap dashboard or by another resource stay. A
+// nameserver that is already live is adopted, not refused and not sent twice,
+// as a record is: see mergeRecords. A domain on Namecheap DNS is delegated to
+// the given nameservers.
 func createNameserversMerge(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
@@ -40,44 +41,36 @@ func createNameserversMerge(ctx context.Context, domain string, nameservers []st
 		return diagFromClientError(err)
 	}
 
-	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, nameservers)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-	} else {
-		var newNameservers []string
-		if nsResponse.DomainDNSGetListResult.Nameservers != nil {
-			newNameservers = append(newNameservers, *nsResponse.DomainDNSGetListResult.Nameservers...)
-		}
+	newNameservers := nameservers
+	if live := nsResponse.DomainDNSGetListResult.Nameservers; !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && live != nil {
+		newNameservers = append(append([]string{}, *live...), nameserversNotIn(nameservers, *live)...)
+	}
 
-		for index, nameserver := range nameservers {
-			if nsResponse.DomainDNSGetListResult.Nameservers != nil {
-				for _, remoteNameserver := range *nsResponse.DomainDNSGetListResult.Nameservers {
-					if strings.EqualFold(nameserver, remoteNameserver) {
-						return diag.Diagnostics{diag.Diagnostic{
-							Severity: diag.Error,
-							Summary:  "Duplicate nameserver",
-							Detail:   fmt.Sprintf("Nameserver %s is already exist!", nameserver),
-							AttributePath: cty.Path{
-								cty.GetAttrStep{Name: "nameservers"},
-								cty.IndexStep{Key: cty.NumberIntVal(int64(index))},
-							},
-						}}
-					}
-				}
-			}
-
-			newNameservers = append(newNameservers, nameserver)
-		}
-
-		_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
-		if err != nil {
-			return diagFromClientError(err)
-		}
+	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
+	if err != nil {
+		return diagFromClientError(err)
 	}
 
 	return nil
+}
+
+// delegatedDomainDiagnostic says why records and email_type are not written to
+// a domain delegated to nameservers the resource does not manage, and what to
+// do about it. The plan check and the apply report it in the same words.
+func delegatedDomainDiagnostic(domain string, unmanaged []string) diag.Diagnostic {
+	zoneID := domain + "/" + recordsImportScopeZone
+	return diag.Diagnostic{
+		Severity: diag.Error,
+		Summary:  fmt.Sprintf("%s is delegated to custom nameservers this resource does not manage", domain),
+		Detail: fmt.Sprintf("The domain uses nameservers that are not in the state of this resource:\n\n  %s\n\n"+
+			"Records and email_type take effect only while the domain uses Namecheap DNS, and in MERGE mode the "+
+			"resource does not remove nameservers it does not manage. Move the domain to Namecheap DNS in the "+
+			"Namecheap dashboard, or import the resource again with the ID %q so that it manages these nameservers "+
+			"and the plan lists their removal:\n\n"+
+			"  terraform state rm <address>\n"+
+			"  terraform import <address> %s",
+			strings.Join(unmanaged, "\n  "), zoneID, zoneID),
+	}
 }
 
 // createNameserversOverwrite force overwrites the nameservers

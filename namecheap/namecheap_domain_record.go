@@ -248,7 +248,60 @@ func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta i
 	if err := checkModeSwitchRemovesNothingUnlisted(ctx, diff, meta); err != nil {
 		return err
 	}
+	if err := checkDomainNotDelegatedElsewhere(ctx, diff, meta); err != nil {
+		return err
+	}
 	return checkMXEHasMXERecord(ctx, diff, meta)
+}
+
+// checkDomainNotDelegatedElsewhere fails the plan that writes records or
+// email_type with a MERGE resource while the domain is delegated to custom
+// nameservers the resource does not manage.
+//
+// Records take effect only on Namecheap DNS. An update used to move such a
+// domain there first, which removed nameservers that were never in state, so
+// the plan showed added records and nothing about the delegation. The apply
+// refuses that now (resourceRecordUpdate); this check says so at plan time.
+//
+// Nameservers in state are not reported: the plan lists their removal, and the
+// apply returns the domain to Namecheap DNS when none is left. OVERWRITE is not
+// checked: it owns the delegation, and its refresh stores the live nameservers.
+// The check reads the delegation once, on plans of an existing resource that
+// change record or email_type. A failed read leaves the refusal to the apply.
+func checkDomainNotDelegatedElsewhere(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	if diff.Id() == "" || diff.HasChange("domain") {
+		return nil
+	}
+	if !diff.NewValueKnown("mode") || strings.ToUpper(diff.Get("mode").(string)) != ncModeMerge {
+		return nil
+	}
+	if !diff.HasChange("record") && !diff.HasChange("email_type") {
+		return nil
+	}
+	if !diff.GetRawConfig().GetAttr("nameservers").IsWhollyKnown() {
+		return nil
+	}
+	priorNameservers, nameservers := diff.GetChange("nameservers")
+	if nameservers.(*schema.Set).Len() > 0 {
+		return nil
+	}
+
+	client := meta.(*namecheap.Client)
+	domain := strings.ToLower(diff.Get("domain").(string))
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
+	if err != nil || validateGetListResponse(nsResponse) != nil {
+		return nil
+	}
+	live := nsResponse.DomainDNSGetListResult.Nameservers
+	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS || live == nil {
+		return nil
+	}
+	unmanaged := nameserversNotIn(*live, convertInterfacesToString(priorNameservers.(*schema.Set).List()))
+	if len(unmanaged) == 0 {
+		return nil
+	}
+	refusal := delegatedDomainDiagnostic(domain, unmanaged)
+	return fmt.Errorf("%s: %s", refusal.Summary, refusal.Detail)
 }
 
 // checkModeSwitchRemovesNothingUnlisted fails the plan that takes an existing
@@ -666,17 +719,30 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		return diag.Errorf("Unable to read DNS state for domain %s: the domain may not exist or may have been removed from the account", domain)
 	}
 
-	// If the previous state contains nameservers, but the new one does not contain,
-	// then reset nameservers before applying records.
-	// This case is possible when user removed nameservers lines and pasted records, so before applying records,
-	// we must reset nameservers to defaults, otherwise we will face API exception
-	if (mode == ncModeOverwrite && oldNameserversLen != 0 && newNameserversLen == 0) ||
-		// This condition resolves the issue if a user set up records on TF file, but in fact, manually enabled custom DNS.
-		// Before applying records, we have to set default DNS
-		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
+	delegated := !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS
+
+	// OVERWRITE owns the domain's delegation. With no nameservers in the
+	// configuration the domain goes back to Namecheap DNS before any record is
+	// written: records cannot be set on a delegated domain.
+	if mode == ncModeOverwrite && newNameserversLen == 0 && (oldNameserversLen != 0 || delegated) {
 		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 		if err != nil {
 			return diagFromClientError(err)
+		}
+	}
+
+	// MERGE manages only the nameservers in its state. The ones it set are
+	// released below, which returns the domain to Namecheap DNS when none is
+	// left. It does not remove nameservers set in the dashboard or by another
+	// resource to make room for records: the plan cannot list them, so that
+	// would change the domain's delegation with no trace in the plan.
+	if mode == ncModeMerge && delegated && newNameserversLen == 0 && (newRecordsLen != 0 || oldRecordsLen != 0 || emailType != nil) {
+		var live []string
+		if nsResponse.DomainDNSGetListResult.Nameservers != nil {
+			live = *nsResponse.DomainDNSGetListResult.Nameservers
+		}
+		if unmanaged := nameserversNotIn(live, convertInterfacesToString(oldNameservers)); len(unmanaged) > 0 {
+			return diag.Diagnostics{delegatedDomainDiagnostic(domain, unmanaged)}
 		}
 	}
 

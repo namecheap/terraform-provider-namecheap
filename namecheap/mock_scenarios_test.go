@@ -4,7 +4,6 @@ package namecheap_provider
 
 import (
 	"fmt"
-	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -251,14 +250,16 @@ func TestAccMockNameservers(t *testing.T) {
 		})
 	})
 
-	// Two MERGE resources sharing a nameserver must be rejected. Both declare two
-	// nameservers (satisfying the minimum-two rule) with one overlapping, so the
-	// duplicate — not the minimum-count — check is what fires.
-	t.Run("duplicate_conflict", func(t *testing.T) {
+	// Two MERGE resources may declare the same nameservers. The second adopts
+	// the ones the first set, as a record that is already live is adopted, and
+	// none is sent twice. Both declare the same two, so either destroy order
+	// returns the domain to Namecheap DNS without passing through one nameserver.
+	t.Run("shared_nameservers_adopted", func(t *testing.T) {
 		m := newNamecheapMock(t)
 		resource.Test(t, resource.TestCase{
 			PreCheck:          func() { mockPreCheck(t, m) },
 			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      mockCheckNameserversDefault(m, mockScenarioDomain),
 			Steps: []resource.TestStep{
 				{
 					Config: fmt.Sprintf(`
@@ -271,10 +272,15 @@ resource "namecheap_domain_records" "test" {
 resource "namecheap_domain_records" "test_two" {
   domain      = "%[1]s"
   mode        = "MERGE"
-  nameservers = ["ns-1467.awsdns-55.org", "ns-2000.awsdns-99.org"]
+  nameservers = ["ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"]
 }
 `, mockScenarioDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate nameserver"),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("namecheap_domain_records.test", "nameservers.#", "2"),
+						resource.TestCheckResourceAttr("namecheap_domain_records.test_two", "nameservers.#", "2"),
+						mockCheckNameservers(m, mockScenarioDomain,
+							"ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"),
+					),
 				},
 			},
 		})

@@ -328,7 +328,9 @@ _*ns1-2.nameserver.com are used as an example. Please use the nameservers provid
 system will not accept this. Thus, if you were provided with both the nameservers and IP address(es), only the
 nameservers should be inserted as custom nameservers.
 
--> It's recommended to use mode `OVERWRITE` with `nameservers` to prevent unobvious behavior. In `MERGE` mode the resource manages only the nameservers it declares: nameservers set in the Namecheap dashboard or by another resource stay next to them, an apply removes only the declared nameservers that left the configuration, and destroy removes only the ones this resource set.
+-> It's recommended to use mode `OVERWRITE` with `nameservers` to prevent unobvious behavior. In `MERGE` mode the resource manages only the nameservers it declares: nameservers set in the Namecheap dashboard or by another resource stay next to them, an apply removes only the declared nameservers that left the configuration, and destroy removes only the ones this resource set. A declared nameserver that the domain already uses is adopted.
+
+-> Records and `email_type` take effect only while the domain uses Namecheap DNS. In `MERGE` mode the resource does not move a domain off nameservers it does not manage in order to write them: the plan fails and names those nameservers. Move the domain to Namecheap DNS in the dashboard, or import the resource with the `<domain>/zone` ID so that it manages the nameservers and the plan lists their removal. `OVERWRITE` owns the delegation and moves the domain to Namecheap DNS itself.
 
 Nameservers changes do not propagate instantly. Once your nameservers are changed, it may take up to 24 hours (more, in
 rare cases) for local ISPs to update their DNS caches so that everyone can see your website.

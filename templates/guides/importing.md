@@ -117,10 +117,8 @@ configuration leaves out shows in the plan as removed.
 
 -> **`MERGE` mode does not need an import.** Applying a `MERGE` configuration to
 a domain that was never imported gives the same result as importing by the plain
-domain name first: declared records that already exist are adopted, everything
-else is left alone. Import first when the configuration declares nameservers
-the domain already uses, because a create refuses a nameserver that is already
-set while the apply after an import adopts it, or when you want the plan to
+domain name first: declared records and nameservers that already exist are
+adopted, everything else is left alone. Import first when you want the plan to
 show an `email_type` change before it is made.
 
 ~> **`OVERWRITE` mode: import with `/zone`.** An `OVERWRITE` configuration

@@ -894,7 +894,10 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 		})
 	})
 
-	t.Run("ns_on_conflict_merge", func(t *testing.T) {
+	// A second MERGE resource that declares nameservers the first one set adopts
+	// them, as a record that is already live is adopted. Both declare the same
+	// two, so either destroy order returns the domain to Namecheap DNS.
+	t.Run("ns_shared_adopted_merge", func(t *testing.T) {
 		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
 
 		resource.Test(t, resource.TestCase{
@@ -944,10 +947,17 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 
 							nameservers = [
 								"ns-1467.awsdns-55.org",
+								"ns-1076.awsdns-06.org",
 							]
 						}
 					`, *testAccDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate nameserver"),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr("namecheap_domain_records.my-domain-two", "nameservers.#", "2"),
+						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
+						testAccDomainNameserversLength(&domainNameserversResponse, 2),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1467.awsdns-55.org"),
+						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
+					),
 				},
 			},
 		})
