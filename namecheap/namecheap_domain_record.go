@@ -105,7 +105,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"email_type", "record"},
 				Type:          schema.TypeSet,
 				Optional:      true,
-				Description:   "Custom nameservers to delegate the domain to. Conflicts with `email_type` and `record`, which only apply while the domain uses Namecheap DNS.",
+				Description:   "Custom nameservers to delegate the domain to: the whole list, in MERGE and OVERWRITE mode alike. Leave it out for Namecheap DNS. Conflicts with `email_type` and `record`, which only apply while the domain uses Namecheap DNS.",
 				Elem: &schema.Schema{
 					Type:         schema.TypeString,
 					ValidateFunc: validation.StringIsNotEmpty,
@@ -165,24 +165,26 @@ func parseRecordsImportID(id string) (domain string, wholeZone bool, err error) 
 // configuration, so it cannot tell the records a configuration declares from
 // the rest of the zone; the ID says which of the two the import is for.
 //
-// "example.com" stores no records and no nameservers. In MERGE the records and
-// nameservers in state are the ones the resource owns, and the next apply
-// removes an owned one that the configuration does not declare, so an import
-// must not hand it any that nobody declared. A declared record or nameserver
-// that is already live is adopted by the first apply (mergeRecords,
-// updateNameserversMerge). This import makes no API call: the read Terraform
-// runs after it stores email_type and reports a domain it cannot reach.
+// "example.com" stores no records. In MERGE the records in state are the ones
+// the resource owns, and the next apply deletes an owned record that the
+// configuration does not declare, so an import must not hand it records nobody
+// declared. A declared record that is already live is adopted by the first
+// apply (mergeRecords).
 //
-// "example.com/zone" stores every record, or every custom nameserver of a
-// domain that is delegated, for a configuration that declares them all or is
-// generated with -generate-config-out. The resource then owns them all: one
-// the configuration leaves out is planned for removal, as for any record block
-// removed from a MERGE configuration.
+// "example.com/zone" stores every record, for a configuration that declares
+// the whole zone or is generated with -generate-config-out. The resource then
+// owns them all: one the configuration leaves out is planned for removal, as
+// for any record block removed from a MERGE configuration.
+//
+// Custom nameservers are one setting of the domain, not rows of a zone: the
+// resource manages the whole list in both modes, and both forms store it. The refresh Terraform runs after the import stores
+// email_type.
 func importRecordsState(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	domain, wholeZone, err := parseRecordsImportID(data.Id())
 	if err != nil {
 		return nil, err
 	}
+	client := meta.(*namecheap.Client)
 
 	data.SetId(domain)
 	if err := data.Set("domain", domain); err != nil {
@@ -191,11 +193,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 	if err := data.Set("mode", ncModeMerge); err != nil {
 		return nil, err
 	}
-	if !wholeZone {
-		return []*schema.ResourceData{data}, nil
-	}
 
-	client := meta.(*namecheap.Client)
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
 		// The same diagnostics a read gives: an API error alone does not say
@@ -207,7 +205,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 	}
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		nameservers, diags := readNameserversOverwrite(nsResponse)
+		nameservers, diags := readNameservers(nsResponse)
 		if err := firstDiagError(diags); err != nil {
 			return nil, err
 		}
@@ -217,12 +215,14 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 		return []*schema.ResourceData{data}, nil
 	}
 
-	records, _, _, diags := readRecordsOverwrite(ctx, domain, nil, client)
-	if err := firstDiagError(diags); err != nil {
-		return nil, err
-	}
-	if err := data.Set("record", *records); err != nil {
-		return nil, err
+	if wholeZone {
+		records, _, _, diags := readRecordsOverwrite(ctx, domain, nil, client)
+		if err := firstDiagError(diags); err != nil {
+			return nil, err
+		}
+		if err := data.Set("record", *records); err != nil {
+			return nil, err
+		}
 	}
 
 	return []*schema.ResourceData{data}, nil
@@ -245,81 +245,28 @@ func firstDiagError(diags diag.Diagnostics) error {
 
 // customizeRecordsDiff runs the checks that fail a plan before it writes.
 func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
-	if err := checkModeSwitchRemovesNothingUnlisted(ctx, diff, meta); err != nil {
-		return err
-	}
-	if err := checkDomainNotDelegatedElsewhere(ctx, diff, meta); err != nil {
+	if err := checkModeSwitchDeletesNoUnlistedRecord(ctx, diff, meta); err != nil {
 		return err
 	}
 	return checkMXEHasMXERecord(ctx, diff, meta)
 }
 
-// checkDomainNotDelegatedElsewhere fails the plan that writes records or
-// email_type with a MERGE resource while the domain is delegated to custom
-// nameservers the resource does not manage.
+// checkModeSwitchDeletesNoUnlistedRecord fails the plan that takes an existing
+// resource from MERGE to OVERWRITE while the zone holds records that are neither
+// in the configuration nor in state.
 //
-// Records take effect only on Namecheap DNS. An update used to move such a
-// domain there first, which removed nameservers that were never in state, so
-// the plan showed added records and nothing about the delegation. The apply
-// refuses that now (resourceRecordUpdate); this check says so at plan time.
+// OVERWRITE deletes every record the configuration does not declare, but a plan
+// can list a removal only for a record in state, and a MERGE state holds the
+// records the resource declared. So this plan would show a change of mode and
+// nothing else, and the apply would delete the rest of the zone. That is the
+// plan an OVERWRITE configuration gets after an import by the plain domain
+// name, which stores no records.
 //
-// Nameservers in state are not reported: the plan lists their removal, and the
-// apply returns the domain to Namecheap DNS when none is left. OVERWRITE is not
-// checked: it owns the delegation, and its refresh stores the live nameservers.
-// The check reads the delegation once, on plans of an existing resource that
-// change record or email_type. A failed read leaves the refusal to the apply.
-func checkDomainNotDelegatedElsewhere(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
-	if diff.Id() == "" || diff.HasChange("domain") {
-		return nil
-	}
-	if !diff.NewValueKnown("mode") || strings.ToUpper(diff.Get("mode").(string)) != ncModeMerge {
-		return nil
-	}
-	if !diff.HasChange("record") && !diff.HasChange("email_type") {
-		return nil
-	}
-	if !diff.GetRawConfig().GetAttr("nameservers").IsWhollyKnown() {
-		return nil
-	}
-	priorNameservers, nameservers := diff.GetChange("nameservers")
-	if nameservers.(*schema.Set).Len() > 0 {
-		return nil
-	}
-
-	client := meta.(*namecheap.Client)
-	domain := strings.ToLower(diff.Get("domain").(string))
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil || validateGetListResponse(nsResponse) != nil {
-		return nil
-	}
-	live := nsResponse.DomainDNSGetListResult.Nameservers
-	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS || live == nil {
-		return nil
-	}
-	unmanaged := nameserversNotIn(*live, convertInterfacesToString(priorNameservers.(*schema.Set).List()))
-	if len(unmanaged) == 0 {
-		return nil
-	}
-	refusal := delegatedDomainDiagnostic(domain, unmanaged)
-	return fmt.Errorf("%s: %s", refusal.Summary, refusal.Detail)
-}
-
-// checkModeSwitchRemovesNothingUnlisted fails the plan that takes an existing
-// resource from MERGE to OVERWRITE while the domain holds records, or custom
-// nameservers, that are neither in the configuration nor in state.
-//
-// OVERWRITE removes every record and nameserver the configuration does not
-// declare, but a plan can list a removal only for one in state, and a MERGE
-// state holds the ones the resource declared. So this plan would show a change
-// of mode and nothing else, and the apply would delete the rest of the zone or
-// replace the domain's delegation. That is the plan an OVERWRITE configuration
-// gets after an import by the plain domain name, which stores neither.
-//
-// A record or nameserver in state is not reported: the plan lists its removal,
-// which is how an import with the /zone ID lets a configuration remove the
-// rest. A new resource is not checked either; the apply warns about the records
-// it deletes. A failed read skips the check and leaves the warning to the apply.
-func checkModeSwitchRemovesNothingUnlisted(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+// A record in state is not reported: the plan lists its removal, which is how
+// an import with the /zone ID lets a configuration delete the rest of a zone.
+// A new resource is not checked either; the apply warns about what it deletes.
+// A failed read skips the check and leaves the warning to the apply.
+func checkModeSwitchDeletesNoUnlistedRecord(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
 	if diff.Id() == "" || diff.HasChange("domain") {
 		return nil
 	}
@@ -332,52 +279,21 @@ func checkModeSwitchRemovesNothingUnlisted(ctx context.Context, diff *schema.Res
 	}
 
 	config := diff.GetRawConfig()
-	// A value not known until apply cannot be matched against the domain, and
-	// would be reported as one the configuration does not declare.
-	if !config.GetAttr("record").IsWhollyKnown() || !config.GetAttr("nameservers").IsWhollyKnown() {
+	// A record with a value not known until apply cannot be matched against the
+	// zone, and would be reported as one the configuration does not declare.
+	if !config.GetAttr("record").IsWhollyKnown() {
 		return nil
 	}
-
-	client := meta.(*namecheap.Client)
-	domain := strings.ToLower(diff.Get("domain").(string))
-	zoneID := domain + "/" + recordsImportScopeZone
-	reimport := fmt.Sprintf("import the resource again with the ID %q, which stores them all, "+
-		"so that the plan lists each one it removes:\n\n"+
-		"  terraform state rm <address>\n"+
-		"  terraform import <address> %s", zoneID, zoneID)
-
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil || validateGetListResponse(nsResponse) != nil {
-		return nil
-	}
-	priorNameservers, nameservers := diff.GetChange("nameservers")
-
-	// A delegated domain has no records in effect. OVERWRITE replaces its
-	// nameservers with the configured ones, or with Namecheap DNS when the
-	// configuration has none.
-	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		listed := append(convertInterfacesToString(nameservers.(*schema.Set).List()),
-			convertInterfacesToString(priorNameservers.(*schema.Set).List())...)
-		var unlisted []string
-		if live := nsResponse.DomainDNSGetListResult.Nameservers; live != nil {
-			unlisted = nameserversNotIn(*live, listed)
-		}
-		if len(unlisted) == 0 {
-			return nil
-		}
-		return fmt.Errorf("changing mode from %s to %s would remove %d custom nameserver(s) of %s that are neither in the "+
-			"configuration nor in state, and the plan cannot list them:\n\n  %s\n\n"+
-			"To keep them, add them to nameservers. To remove them, %s",
-			ncModeMerge, ncModeOverwrite, len(unlisted), domain, strings.Join(unlisted, "\n  "), reimport)
-	}
-
 	// With nameservers the apply delegates the domain and writes no records.
-	if nameservers.(*schema.Set).Len() > 0 {
+	if nameservers := config.GetAttr("nameservers"); !nameservers.IsKnown() || (!nameservers.IsNull() && nameservers.LengthInt() > 0) {
 		return nil
 	}
 
 	priorRecords, records := diff.GetChange("record")
 	listed := append(records.(*schema.Set).List(), priorRecords.(*schema.Set).List()...)
+
+	client := meta.(*namecheap.Client)
+	domain := strings.ToLower(diff.Get("domain").(string))
 	unlisted, _, diags := unmanagedRecordsOverwrite(ctx, domain, listed, client)
 	if diags.HasError() || len(unlisted) == 0 {
 		return nil
@@ -385,8 +301,12 @@ func checkModeSwitchRemovesNothingUnlisted(ctx context.Context, diff *schema.Res
 
 	return fmt.Errorf("changing mode from %s to %s would delete %d record(s) of %s that are neither in the configuration "+
 		"nor in state, and the plan cannot list them:\n\n%s"+
-		"To delete them instead, %s",
-		ncModeMerge, ncModeOverwrite, len(unlisted), domain, describeRecordsToKeep(unlisted), reimport)
+		"To delete them instead, import the resource again with the ID %q, which stores every record of the zone, "+
+		"so that the plan lists each record it removes:\n\n"+
+		"  terraform state rm <address>\n"+
+		"  terraform import <address> %s",
+		ncModeMerge, ncModeOverwrite, len(unlisted), domain, describeRecordsToKeep(unlisted),
+		domain+"/"+recordsImportScopeZone, domain+"/"+recordsImportScopeZone)
 }
 
 // checkMXEHasMXERecord fails the plan when email_type = "MXE" would leave the
@@ -560,16 +480,8 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, recordDiags...)
 	}
 
-	if mode == ncModeMerge && nameservers != nil {
-		nsDiags := createNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
-		if nsDiags.HasError() {
-			return nsDiags
-		}
-		diags = append(diags, nsDiags...)
-	}
-
-	if mode == ncModeOverwrite && nameservers != nil {
-		nsDiags := createNameserversOverwrite(ctx, domain, convertInterfacesToString(nameservers), client)
+	if nameservers != nil {
+		nsDiags := setNameservers(ctx, domain, convertInterfacesToString(nameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -618,23 +530,15 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 	}
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		if mode == ncModeMerge {
-			realNameservers, nsDiags := readNameserversMerge(nsResponse, convertInterfacesToString(nameservers))
-			if nsDiags.HasError() {
-				return nsDiags
-			}
-			diags = append(diags, nsDiags...)
-			_ = data.Set("nameservers", *realNameservers)
+		// Every nameserver is stored, in both modes, so a plan lists each one
+		// an apply removes: a configuration without nameservers puts the domain
+		// on Namecheap DNS.
+		realNameservers, nsDiags := readNameservers(nsResponse)
+		if nsDiags.HasError() {
+			return nsDiags
 		}
-
-		if mode == ncModeOverwrite {
-			realNameservers, nsDiags := readNameserversOverwrite(nsResponse)
-			if nsDiags.HasError() {
-				return nsDiags
-			}
-			diags = append(diags, nsDiags...)
-			_ = data.Set("nameservers", *realNameservers)
-		}
+		diags = append(diags, nsDiags...)
+		_ = data.Set("nameservers", *realNameservers)
 
 		_ = data.Set("record", []interface{}{})
 		// Custom nameservers leave no Namecheap mail mode in effect, so clear one
@@ -719,39 +623,16 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		return diag.Errorf("Unable to read DNS state for domain %s: the domain may not exist or may have been removed from the account", domain)
 	}
 
-	delegated := !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS
-
-	// OVERWRITE owns the domain's delegation. With no nameservers in the
-	// configuration the domain goes back to Namecheap DNS before any record is
-	// written: records cannot be set on a delegated domain.
-	if mode == ncModeOverwrite && newNameserversLen == 0 && (oldNameserversLen != 0 || delegated) {
-		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-	}
-
-	// MERGE manages only the nameservers in its state. The ones it set are
-	// released below, which returns the domain to Namecheap DNS when none is
-	// left. It does not remove nameservers set in the dashboard or by another
-	// resource to make room for records: the plan cannot list them, so that
-	// would change the domain's delegation with no trace in the plan.
-	if mode == ncModeMerge && delegated && newNameserversLen == 0 && (newRecordsLen != 0 || oldRecordsLen != 0 || emailType != nil) {
-		var live []string
-		if nsResponse.DomainDNSGetListResult.Nameservers != nil {
-			live = *nsResponse.DomainDNSGetListResult.Nameservers
-		}
-		if unmanaged := nameserversNotIn(live, convertInterfacesToString(oldNameservers)); len(unmanaged) > 0 {
-			return diag.Diagnostics{delegatedDomainDiagnostic(domain, unmanaged)}
-		}
-	}
-
-	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+	// A configuration without nameservers means Namecheap DNS, in both modes.
+	// The domain goes back to it before any record is written, because records
+	// cannot be set on a delegated domain. The refresh stores the nameservers of
+	// a delegated domain, so the plan lists them as removed; the second condition
+	// covers a domain delegated after that refresh.
+	if newNameserversLen == 0 && (oldNameserversLen != 0 || !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS) {
+		nsDiags := resetNameservers(ctx, domain, client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
-		diags = append(diags, nsDiags...)
 	}
 
 	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) {
@@ -774,16 +655,8 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, recordDiags...)
 	}
 
-	if mode == ncModeOverwrite && newNameserversLen != 0 {
-		nsDiags := createNameserversOverwrite(ctx, domain, convertInterfacesToString(newNameservers), client)
-		if nsDiags.HasError() {
-			return nsDiags
-		}
-		diags = append(diags, nsDiags...)
-	}
-
-	if mode == ncModeMerge && newNameserversLen != 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+	if newNameserversLen != 0 {
+		nsDiags := setNameservers(ctx, domain, convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -856,12 +729,8 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 		return deleteRecordsOverwrite(ctx, domain, records, client)
 	}
 
-	if mode == ncModeMerge && nameserversLen != 0 {
-		return deleteNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
-	}
-
-	if mode == ncModeOverwrite && nameserversLen != 0 {
-		return deleteNameserversOverwrite(ctx, domain, client)
+	if nameserversLen != 0 {
+		return resetNameservers(ctx, domain, client)
 	}
 
 	return nil

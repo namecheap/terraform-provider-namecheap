@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
-	"slices"
 	"strings"
 )
 
@@ -26,55 +25,14 @@ func validateGetHostsResponse(response *namecheap.DomainsDNSGetHostsCommandRespo
 	return nil
 }
 
-// createNameserversMerge adds nameservers to the ones the domain already uses,
-// so the ones set in the Namecheap dashboard or by another resource stay. A
-// nameserver that is already live is adopted, not refused and not sent twice,
-// as a record is: see mergeRecords. A domain on Namecheap DNS is delegated to
-// the given nameservers.
-func createNameserversMerge(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil {
-		return diagFromClientError(err)
-	}
+// The custom nameservers of a domain are one setting, managed whole in MERGE
+// and OVERWRITE mode alike: the configured list is the domain's delegation, and
+// no nameservers means Namecheap DNS. Namecheap has no call that adds or removes
+// one nameserver, and a list shared between resources, as records are in MERGE,
+// had no way to show in a plan what an apply removes.
 
-	if err := validateGetListResponse(nsResponse); err != nil {
-		return diagFromClientError(err)
-	}
-
-	newNameservers := nameservers
-	if live := nsResponse.DomainDNSGetListResult.Nameservers; !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && live != nil {
-		newNameservers = append(append([]string{}, *live...), nameserversNotIn(nameservers, *live)...)
-	}
-
-	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
-	if err != nil {
-		return diagFromClientError(err)
-	}
-
-	return nil
-}
-
-// delegatedDomainDiagnostic says why records and email_type are not written to
-// a domain delegated to nameservers the resource does not manage, and what to
-// do about it. The plan check and the apply report it in the same words.
-func delegatedDomainDiagnostic(domain string, unmanaged []string) diag.Diagnostic {
-	zoneID := domain + "/" + recordsImportScopeZone
-	return diag.Diagnostic{
-		Severity: diag.Error,
-		Summary:  fmt.Sprintf("%s is delegated to custom nameservers this resource does not manage", domain),
-		Detail: fmt.Sprintf("The domain uses nameservers that are not in the state of this resource:\n\n  %s\n\n"+
-			"Records and email_type take effect only while the domain uses Namecheap DNS, and in MERGE mode the "+
-			"resource does not remove nameservers it does not manage. Move the domain to Namecheap DNS in the "+
-			"Namecheap dashboard, or import the resource again with the ID %q so that it manages these nameservers "+
-			"and the plan lists their removal:\n\n"+
-			"  terraform state rm <address>\n"+
-			"  terraform import <address> %s",
-			strings.Join(unmanaged, "\n  "), zoneID, zoneID),
-	}
-}
-
-// createNameserversOverwrite force overwrites the nameservers
-func createNameserversOverwrite(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
+// setNameservers delegates the domain to nameservers, replacing the ones it has.
+func setNameservers(ctx context.Context, domain string, nameservers []string, client *namecheap.Client) diag.Diagnostics {
 	_, err := client.DomainsDNS.SetCustomWithContext(ctx, domain, nameservers)
 	if err != nil {
 		return diagFromClientError(err)
@@ -83,170 +41,22 @@ func createNameserversOverwrite(ctx context.Context, domain string, nameservers 
 	return nil
 }
 
-// readNameserversMerge read real nameservers from an already fetched getList response, check whether there's
-// available the current ones, return only the records from currentNameservers argument that are really exist
-func readNameserversMerge(nsResponse *namecheap.DomainsDNSGetListCommandResponse, currentNameservers []string) (*[]string, diag.Diagnostics) {
-	if err := validateGetListResponse(nsResponse); err != nil {
-		return nil, diagFromClientError(err)
-	}
-
-	var foundNameservers []string
-
-	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && nsResponse.DomainDNSGetListResult.Nameservers != nil {
-		for _, currentNs := range currentNameservers {
-			for _, remoteNs := range *nsResponse.DomainDNSGetListResult.Nameservers {
-				if strings.EqualFold(currentNs, remoteNs) {
-					foundNameservers = append(foundNameservers, currentNs)
-					break
-				}
-			}
-		}
-	}
-
-	return &foundNameservers, nil
-}
-
-// readNameserversOverwrite returns remote real nameservers from an already fetched getList response
-func readNameserversOverwrite(nsResponse *namecheap.DomainsDNSGetListCommandResponse) (*[]string, diag.Diagnostics) {
+// readNameservers returns every custom nameserver of the domain from an already
+// fetched getList response, and none for a domain on Namecheap DNS.
+func readNameservers(nsResponse *namecheap.DomainsDNSGetListCommandResponse) (*[]string, diag.Diagnostics) {
 	if err := validateGetListResponse(nsResponse); err != nil {
 		return nil, diagFromClientError(err)
 	}
 
 	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS || nsResponse.DomainDNSGetListResult.Nameservers == nil {
 		return &[]string{}, nil
-	} else {
-		return nsResponse.DomainDNSGetListResult.Nameservers, nil
 	}
+
+	return nsResponse.DomainDNSGetListResult.Nameservers, nil
 }
 
-// nameserversNotIn returns the nameservers that are not in listed. The case of
-// a nameserver carries no meaning.
-func nameserversNotIn(nameservers []string, listed []string) []string {
-	var missing []string
-	for _, nameserver := range nameservers {
-		if !slices.ContainsFunc(listed, func(other string) bool { return strings.EqualFold(nameserver, other) }) {
-			missing = append(missing, nameserver)
-		}
-	}
-	return missing
-}
-
-// updateNameserversMerge replaces previousNameservers, the nameservers this
-// resource set last, with currentNameservers and keeps every other live
-// nameserver, so the ones set in the Namecheap dashboard stay. A current
-// nameserver that is already live is adopted, not sent twice: that is how the
-// first apply after an import by the plain domain name takes over the declared
-// nameservers of a delegated domain.
-func updateNameserversMerge(ctx context.Context, domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil {
-		return diagFromClientError(err)
-	}
-
-	if err := validateGetListResponse(nsResponse); err != nil {
-		return diagFromClientError(err)
-	}
-
-	var newNameservers []string
-
-	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && nsResponse.DomainDNSGetListResult.Nameservers != nil {
-		for _, remoteNs := range *nsResponse.DomainDNSGetListResult.Nameservers {
-			found := false
-
-			for _, prevNs := range previousNameservers {
-				if strings.EqualFold(prevNs, remoteNs) {
-					found = true
-				}
-			}
-
-			if !found {
-				newNameservers = append(newNameservers, remoteNs)
-			}
-		}
-	}
-
-	newNameservers = append(newNameservers, nameserversNotIn(currentNameservers, newNameservers)...)
-
-	if len(newNameservers) == 1 {
-		return diag.Errorf("Unable to proceed with one remaining nameserver, you must have at least 2 nameservers")
-	}
-
-	if len(newNameservers) == 0 {
-		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-		return nil
-	}
-
-	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, newNameservers)
-	if err != nil {
-		return diagFromClientError(err)
-	}
-
-	return nil
-}
-
-// deleteNameserversMerge deletes the only nameservers that have been set in terraform file
-// NOTE: be sure that after executing this method at least 2 nameservers should remain otherwise you will have a error
-// NOTE: if there's remained 0 nameservers, the default ones will be set
-func deleteNameserversMerge(ctx context.Context, domain string, previousNameservers []string, client *namecheap.Client) diag.Diagnostics {
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
-	if err != nil {
-		return diagFromClientError(err)
-	}
-
-	if err := validateGetListResponse(nsResponse); err != nil {
-		return diagFromClientError(err)
-	}
-
-	if *nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		// if upon removing you don't have custom nameservers, then nothing to remove
-		return nil
-	}
-
-	if nsResponse.DomainDNSGetListResult.Nameservers == nil {
-		return diag.Errorf("Invalid nameservers response (this is internal error, please report us about it)")
-	}
-
-	var remainNameservers []string
-
-	for _, remoteNs := range *nsResponse.DomainDNSGetListResult.Nameservers {
-		found := false
-
-		for _, currentNs := range previousNameservers {
-			if strings.EqualFold(remoteNs, currentNs) {
-				found = true
-			}
-		}
-
-		if !found {
-			remainNameservers = append(remainNameservers, remoteNs)
-		}
-	}
-
-	if len(remainNameservers) == 1 {
-		return diag.Errorf("Unable to proceed with one remaining nameserver, you must have at least 2 nameservers")
-	}
-
-	if len(remainNameservers) == 0 {
-		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-		return nil
-	}
-
-	_, err = client.DomainsDNS.SetCustomWithContext(ctx, domain, remainNameservers)
-	if err != nil {
-		return diagFromClientError(err)
-	}
-
-	return nil
-}
-
-// deleteNameserversOverwrite resets nameservers settings to default (set default Namecheap's nameservers)
-func deleteNameserversOverwrite(ctx context.Context, domain string, client *namecheap.Client) diag.Diagnostics {
+// resetNameservers returns the domain to Namecheap DNS.
+func resetNameservers(ctx context.Context, domain string, client *namecheap.Client) diag.Diagnostics {
 	_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
 	if err != nil {
 		return diagFromClientError(err)

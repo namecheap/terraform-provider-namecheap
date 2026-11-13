@@ -120,35 +120,16 @@ func TestImportRecordsState(t *testing.T) {
 		assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
 	})
 
-	// Nameservers follow the rule for records: in MERGE the ones in state are
-	// the ones the resource owns, so the plain ID stores none.
-	t.Run("the plain ID stores no custom nameservers", func(t *testing.T) {
-		data := importRecords(t, "test.com", "", nil, customNameservers)
-		assert.Equal(t, "test.com", data.Id())
-		assert.Equal(t, ncModeMerge, data.Get("mode"))
-		assert.Equal(t, 0, data.Get("nameservers").(*schema.Set).Len())
-		assert.Equal(t, 0, data.Get("record").(*schema.Set).Len())
-		assert.Equal(t, "", data.Get("email_type"))
-	})
-
-	t.Run("the /zone ID stores every custom nameserver", func(t *testing.T) {
-		data := importRecords(t, "test.com/zone", "", nil, customNameservers)
-		assert.Equal(t, "test.com", data.Id())
-		assert.Equal(t, ncModeMerge, data.Get("mode"))
-		assert.ElementsMatch(t, customNameservers, convertInterfacesToString(data.Get("nameservers").(*schema.Set).List()))
-		assert.Equal(t, 0, data.Get("record").(*schema.Set).Len())
-		assert.Equal(t, "", data.Get("email_type"))
-	})
-
-	// Everything the plain ID stores comes from the ID, and the read Terraform
-	// runs after the import reports a domain it cannot reach.
-	t.Run("the plain ID makes no API call", func(t *testing.T) {
-		data := resourceNamecheapDomainRecords().TestResourceData()
-		data.SetId("test.com")
-		imported, err := importRecordsState(context.TODO(), data, newTestClient("http://127.0.0.1:0"))
-		require.NoError(t, err)
-		require.Len(t, imported, 1)
-	})
+	for _, id := range []string{"test.com", "test.com/zone"} {
+		t.Run("custom nameservers are stored by "+id, func(t *testing.T) {
+			data := importRecords(t, id, "", nil, customNameservers)
+			assert.Equal(t, "test.com", data.Id())
+			assert.Equal(t, ncModeMerge, data.Get("mode"))
+			assert.ElementsMatch(t, customNameservers, convertInterfacesToString(data.Get("nameservers").(*schema.Set).List()))
+			assert.Equal(t, 0, data.Get("record").(*schema.Set).Len())
+			assert.Equal(t, "", data.Get("email_type"))
+		})
+	}
 
 	for _, id := range []string{"Test.com", "Test.com/zone"} {
 		t.Run("an upper-case domain is stored in lower case by "+id, func(t *testing.T) {
@@ -159,8 +140,7 @@ func TestImportRecordsState(t *testing.T) {
 	}
 
 	// An import is often the first call a new setup makes, so it is where a
-	// wrong key or a missing IP whitelist entry shows up. The /zone ID reads in
-	// the importer; after the plain ID the read that follows reports the same.
+	// wrong key or a missing IP whitelist entry shows up.
 	apiErrors := []struct {
 		code, message, want string
 	}{
@@ -176,7 +156,7 @@ func TestImportRecordsState(t *testing.T) {
 			t.Cleanup(server.Close)
 
 			data := resourceNamecheapDomainRecords().TestResourceData()
-			data.SetId("test.com/zone")
+			data.SetId("test.com")
 			_, err := importRecordsState(context.TODO(), data, newTestClient(server.URL))
 			require.Error(t, err)
 			assert.ErrorContains(t, err, tc.want)

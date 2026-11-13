@@ -4,6 +4,7 @@ package namecheap_provider
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -250,41 +251,33 @@ func TestAccMockNameservers(t *testing.T) {
 		})
 	})
 
-	// Two MERGE resources may declare the same nameservers. The second adopts
-	// the ones the first set, as a record that is already live is adopted, and
-	// none is sent twice. Both declare the same two, so either destroy order
-	// returns the domain to Namecheap DNS without passing through one nameserver.
-	t.Run("shared_nameservers_adopted", func(t *testing.T) {
-		m := newNamecheapMock(t)
-		resource.Test(t, resource.TestCase{
-			PreCheck:          func() { mockPreCheck(t, m) },
-			ProviderFactories: mockProviderFactories(),
-			CheckDestroy:      mockCheckNameserversDefault(m, mockScenarioDomain),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-resource "namecheap_domain_records" "test" {
-  domain      = "%[1]s"
-  mode        = "MERGE"
-  nameservers = ["ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"]
-}
-
-resource "namecheap_domain_records" "test_two" {
-  domain      = "%[1]s"
-  mode        = "MERGE"
-  nameservers = ["ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"]
-}
-`, mockScenarioDomain),
-					Check: resource.ComposeTestCheckFunc(
-						resource.TestCheckResourceAttr("namecheap_domain_records.test", "nameservers.#", "2"),
-						resource.TestCheckResourceAttr("namecheap_domain_records.test_two", "nameservers.#", "2"),
-						mockCheckNameservers(m, mockScenarioDomain,
-							"ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"),
-					),
+	// The configured nameservers are the domain's whole delegation in MERGE as
+	// in OVERWRITE. MERGE used to add them to the ones set in the dashboard, and
+	// no plan could list what a later apply removed from that shared list.
+	for _, mode := range []string{"MERGE", "OVERWRITE"} {
+		t.Run("replaces_dashboard_nameservers_"+strings.ToLower(mode), func(t *testing.T) {
+			m := newNamecheapMock(t)
+			resource.Test(t, resource.TestCase{
+				PreCheck: func() {
+					mockPreCheck(t, m)
+					m.seed(mockScenarioDomain, nil, "", []string{"ns1.dashboard.net", "ns2.dashboard.net"})
 				},
-			},
+				ProviderFactories: mockProviderFactories(),
+				CheckDestroy:      mockCheckNameserversDefault(m, mockScenarioDomain),
+				Steps: []resource.TestStep{
+					{
+						Config: mockNameserversConfig(mode,
+							"ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"),
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr(resourceName, "nameservers.#", "2"),
+							mockCheckNameservers(m, mockScenarioDomain,
+								"ns-1467.awsdns-55.org", "ns-1076.awsdns-06.org"),
+						),
+					},
+				},
+			})
 		})
-	})
+	}
 }
 
 // mockNameserversConfig builds a resource managing the given nameservers.

@@ -13,7 +13,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestResourceRecordCreate_MergeWithRecords(t *testing.T) {
@@ -66,44 +65,33 @@ func TestResourceRecordCreate_OverwriteWithRecords(t *testing.T) {
 	assert.Equal(t, "test.com", data.Id())
 }
 
-func TestResourceRecordCreate_MergeWithNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		switch r.FormValue("Command") {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(true, nil))
-		case "namecheap.domains.dns.setCustom":
-			_, _ = fmt.Fprint(w, setCustomSuccessXML())
-		}
-	}))
-	defer server.Close()
+// The configured nameservers are the domain's whole delegation in both modes:
+// a create sends that list and nothing else, whatever the domain uses now.
+func TestResourceRecordCreate_WithNameservers(t *testing.T) {
+	for _, mode := range []string{ncModeMerge, ncModeOverwrite} {
+		t.Run(mode, func(t *testing.T) {
+			var commands []string
+			var sent string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				commands = append(commands, strings.TrimPrefix(r.FormValue("Command"), "namecheap.domains.dns."))
+				sent = r.FormValue("Nameservers")
+				_, _ = fmt.Fprint(w, setCustomSuccessXML())
+			}))
+			defer server.Close()
 
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeMerge)
-	_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
+			data := resourceNamecheapDomainRecords().TestResourceData()
+			_ = data.Set("domain", "test.com")
+			_ = data.Set("mode", mode)
+			_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
 
-	diags := resourceRecordCreate(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-	assert.Equal(t, "test.com", data.Id())
-}
-
-func TestResourceRecordCreate_OverwriteWithNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, setCustomSuccessXML())
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeOverwrite)
-	_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
-
-	diags := resourceRecordCreate(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-	assert.Equal(t, "test.com", data.Id())
+			diags := resourceRecordCreate(context.TODO(), data, newTestClient(server.URL))
+			assert.False(t, diags.HasError(), "%v", diags)
+			assert.Equal(t, "test.com", data.Id())
+			assert.Equal(t, []string{"setCustom"}, commands)
+			assert.ElementsMatch(t, []string{"ns1.example.com", "ns2.example.com"}, strings.Split(sent, ","))
+		})
+	}
 }
 
 func TestResourceRecordCreate_MergeRecordsAPIError(t *testing.T) {
@@ -223,44 +211,30 @@ func TestResourceRecordDelete_OverwriteWithRecords(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
-func TestResourceRecordDelete_MergeWithNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		switch r.FormValue("Command") {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.example.com", "ns2.example.com", "ns3.example.com"}))
-		case "namecheap.domains.dns.setCustom":
-			_, _ = fmt.Fprint(w, setCustomSuccessXML())
-		}
-	}))
-	defer server.Close()
+// Destroying a resource that holds nameservers returns the domain to Namecheap
+// DNS, in both modes.
+func TestResourceRecordDelete_WithNameservers(t *testing.T) {
+	for _, mode := range []string{ncModeMerge, ncModeOverwrite} {
+		t.Run(mode, func(t *testing.T) {
+			var commands []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				commands = append(commands, strings.TrimPrefix(r.FormValue("Command"), "namecheap.domains.dns."))
+				_, _ = fmt.Fprint(w, setDefaultSuccessXML())
+			}))
+			defer server.Close()
 
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeMerge)
-	_ = data.Set("nameservers", []interface{}{"ns1.example.com"})
+			data := resourceNamecheapDomainRecords().TestResourceData()
+			data.SetId("test.com")
+			_ = data.Set("domain", "test.com")
+			_ = data.Set("mode", mode)
+			_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
 
-	diags := resourceRecordDelete(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-}
-
-func TestResourceRecordDelete_OverwriteWithNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, setDefaultSuccessXML())
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeOverwrite)
-	_ = data.Set("nameservers", []interface{}{"ns1.example.com", "ns2.example.com"})
-
-	diags := resourceRecordDelete(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
+			diags := resourceRecordDelete(context.TODO(), data, newTestClient(server.URL))
+			assert.False(t, diags.HasError(), "%v", diags)
+			assert.Equal(t, []string{"setDefault"}, commands)
+		})
+	}
 }
 
 func TestResourceRecordDelete_NoRecordsNoNameservers(t *testing.T) {
@@ -367,38 +341,70 @@ func TestResourceRecordRead_OverwriteWarnsAboutUnmanagedRecords(t *testing.T) {
 	}
 }
 
-func TestResourceRecordRead_MergeWithCustomNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
-	}))
-	defer server.Close()
+// A read stores every nameserver of a delegated domain, in both modes, so the
+// plan lists the ones an apply removes. MERGE used to keep only the ones
+// already in state, and hid a nameserver added in the dashboard.
+func TestResourceRecordRead_StoresEveryCustomNameserver(t *testing.T) {
+	for _, mode := range []string{ncModeMerge, ncModeOverwrite} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com", "ns3.dashboard.com"}))
+			}))
+			defer server.Close()
 
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeMerge)
-	_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
+			data := resourceNamecheapDomainRecords().TestResourceData()
+			data.SetId("test.com")
+			_ = data.Set("domain", "test.com")
+			_ = data.Set("mode", mode)
+			_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
 
-	diags := resourceRecordRead(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
+			diags := resourceRecordRead(context.TODO(), data, newTestClient(server.URL))
+			assert.False(t, diags.HasError(), "%v", diags)
+			assert.ElementsMatch(t, []string{"ns1.custom.com", "ns2.custom.com", "ns3.dashboard.com"},
+				convertInterfacesToString(data.Get("nameservers").(*schema.Set).List()))
+		})
+	}
 }
 
-func TestResourceRecordRead_OverwriteWithCustomNameservers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
-	}))
-	defer server.Close()
+// Records in the configuration mean Namecheap DNS, in both modes: an update
+// returns a delegated domain to it before it writes them.
+func TestResourceRecordUpdate_RecordsMoveDelegatedDomainToNamecheapDNS(t *testing.T) {
+	for _, mode := range []string{ncModeMerge, ncModeOverwrite} {
+		t.Run(mode, func(t *testing.T) {
+			var commands []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				command := r.FormValue("Command")
+				commands = append(commands, strings.TrimPrefix(command, "namecheap.domains.dns."))
+				switch command {
+				case "namecheap.domains.dns.getList":
+					_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
+				case "namecheap.domains.dns.setDefault":
+					_, _ = fmt.Fprint(w, setDefaultSuccessXML())
+				case "namecheap.domains.dns.getHosts":
+					_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
+				case "namecheap.domains.dns.setHosts":
+					_, _ = fmt.Fprint(w, setHostsSuccessXML())
+				}
+			}))
+			defer server.Close()
 
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeOverwrite)
-	_ = data.Set("nameservers", []interface{}{"ns1.custom.com", "ns2.custom.com"})
+			// Values given to Set do not show up in GetChange, which the update
+			// reads, so the record comes in as configuration.
+			data := schema.TestResourceDataRaw(t, resourceNamecheapDomainRecords().Schema, map[string]interface{}{
+				"domain": "test.com",
+				"mode":   mode,
+				"record": []interface{}{
+					map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
+				},
+			})
+			data.SetId("test.com")
 
-	diags := resourceRecordRead(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
+			diags := resourceRecordUpdate(context.TODO(), data, newTestClient(server.URL))
+			assert.False(t, diags.HasError(), "%v", diags)
+			assert.Equal(t, []string{"getList", "setDefault", "getHosts", "setHosts"}, commands)
+		})
+	}
 }
 
 // A domain on custom nameservers has no Namecheap mail mode in effect, so a read
@@ -519,90 +525,6 @@ func TestResourceRecordUpdate_MergeWithRecords(t *testing.T) {
 
 	diags := resourceRecordUpdate(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
-}
-
-// updateOnDelegatedDomain runs an update against a domain delegated to custom
-// nameservers that are not in state, and returns the commands it sent.
-func updateOnDelegatedDomain(t *testing.T, data *schema.ResourceData) (diag.Diagnostics, []string) {
-	t.Helper()
-	var commands []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		command := r.FormValue("Command")
-		commands = append(commands, strings.TrimPrefix(command, "namecheap.domains.dns."))
-		switch command {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.dns-host.net", "ns2.dns-host.net"}))
-		case "namecheap.domains.dns.setDefault":
-			_, _ = fmt.Fprint(w, setDefaultSuccessXML())
-		case "namecheap.domains.dns.getHosts":
-			_, _ = fmt.Fprint(w, getHostsXML("NONE", nil))
-		case "namecheap.domains.dns.setHosts":
-			_, _ = fmt.Fprint(w, setHostsSuccessXML())
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	return resourceRecordUpdate(context.TODO(), data, newTestClient(server.URL)), commands
-}
-
-// recordsDataWithPlannedRecord returns resource data whose plan adds one record.
-// Values given to Set do not show up in GetChange, which the update reads, so
-// the record comes in as configuration.
-func recordsDataWithPlannedRecord(t *testing.T, mode string) *schema.ResourceData {
-	t.Helper()
-	return schema.TestResourceDataRaw(t, resourceNamecheapDomainRecords().Schema, map[string]interface{}{
-		"domain": "test.com",
-		"mode":   mode,
-		"record": []interface{}{
-			map[string]interface{}{"hostname": "www", "type": "A", "address": "1.2.3.4", "mx_pref": 10, "ttl": 1800},
-		},
-	})
-}
-
-// MERGE manages only the nameservers in its state. An update used to move a
-// domain that was delegated in the dashboard back to Namecheap DNS before it
-// wrote records, with nothing in the plan about the delegation.
-func TestResourceRecordUpdate_MergeRefusesRecordsOnDomainDelegatedElsewhere(t *testing.T) {
-	diags, commands := updateOnDelegatedDomain(t, recordsDataWithPlannedRecord(t, ncModeMerge))
-	require.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Summary, "test.com is delegated to custom nameservers this resource does not manage")
-	assert.Contains(t, diags[0].Detail, "ns1.dns-host.net")
-	assert.Contains(t, diags[0].Detail, "ns2.dns-host.net")
-	assert.Contains(t, diags[0].Detail, `"test.com/zone"`)
-	assert.Equal(t, []string{"getList"}, commands, "a refused update must not write")
-}
-
-func TestResourceRecordUpdate_MergeRefusesEmailTypeOnDomainDelegatedElsewhere(t *testing.T) {
-	data := recordsDataWithConfig(map[string]cty.Value{"email_type": cty.StringVal("GMAIL")})
-	_ = data.Set("mode", ncModeMerge)
-	_ = data.Set("email_type", "GMAIL")
-
-	diags, commands := updateOnDelegatedDomain(t, data)
-	require.True(t, diags.HasError())
-	assert.Contains(t, diags[0].Summary, "delegated to custom nameservers this resource does not manage")
-	assert.Equal(t, []string{"getList"}, commands, "a refused update must not write")
-}
-
-// An update that writes neither records nor the mail mode has no reason to
-// touch the delegation. It used to reset it.
-func TestResourceRecordUpdate_MergeWithNothingToWriteLeavesDelegation(t *testing.T) {
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	_ = data.Set("mode", ncModeMerge)
-
-	diags, commands := updateOnDelegatedDomain(t, data)
-	assert.False(t, diags.HasError(), "%v", diags)
-	assert.Equal(t, []string{"getList"}, commands)
-}
-
-// OVERWRITE owns the delegation: records in the configuration mean Namecheap
-// DNS, so the domain is moved there before they are written.
-func TestResourceRecordUpdate_OverwriteMovesDelegatedDomainToNamecheapDNS(t *testing.T) {
-	diags, commands := updateOnDelegatedDomain(t, recordsDataWithPlannedRecord(t, ncModeOverwrite))
-	assert.False(t, diags.HasError(), "%v", diags)
-	assert.Equal(t, []string{"getList", "setDefault", "getHosts", "setHosts"}, commands)
 }
 
 func TestResourceRecordUpdate_GetListAPIError(t *testing.T) {

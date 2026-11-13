@@ -74,19 +74,12 @@ records you are going to declare. The ID tells it.
 
 | ID | Stored in state | Use it when |
 |---|---|---|
-| `example.com` | `email_type`; no records and no `nameservers` | the configuration declares no records, or only some of the zone's records |
-| `example.com/zone` | `email_type` and every record of the zone, or every custom nameserver of a delegated domain | the configuration declares the whole zone |
+| `example.com` | `email_type` and custom `nameservers`; no records | the configuration declares no records, or only some of the zone's records |
+| `example.com/zone` | the above and every record of the zone | the configuration declares the whole zone |
 
 This matters because of how `MERGE` mode (the default) works: the records in
 state are the ones the resource owns, and an owned record that is missing from
 the configuration is deleted on the next apply.
-
-Custom nameservers follow the same rule. After `example.com` the resource owns
-none of them: a nameserver you declare that the domain already uses is adopted
-by the first apply, and the ones you do not declare stay as they are. A
-configuration that declares no nameservers leaves the domain's delegation
-alone. After `example.com/zone` the resource owns every nameserver, and one the
-configuration leaves out shows in the plan as removed.
 
 - After **`example.com`** the resource owns no records. A record you declare
   that already exists in the zone is adopted by the first apply — the plan shows
@@ -117,9 +110,10 @@ configuration leaves out shows in the plan as removed.
 
 -> **`MERGE` mode does not need an import.** Applying a `MERGE` configuration to
 a domain that was never imported gives the same result as importing by the plain
-domain name first: declared records and nameservers that already exist are
-adopted, everything else is left alone. Import first when you want the plan to
-show an `email_type` change before it is made.
+domain name first: declared records that already exist are adopted, everything
+else is left alone. Import first when the domain uses custom nameservers, so
+that the plan shows what happens to them, or when you want the plan to show an
+`email_type` change before it is made.
 
 ~> **`OVERWRITE` mode: import with `/zone`.** An `OVERWRITE` configuration
 deletes every record it does not declare. After a `/zone` import the plan lists
@@ -303,14 +297,20 @@ resource "namecheap_domain_records" "portfolio" {
 }
 ```
 
-The plain domain name is deliberate here: it stores each domain's mail mode and
-none of its records or custom nameservers, so the plan after the import is
-empty, no record is at risk and a delegated domain stays delegated. Add records afterwards, per domain, in `record` blocks or as
+The plain domain name is deliberate here: it stores each domain's settings and
+none of its records, so no record is at risk and, for a domain on Namecheap DNS,
+the plan after the import is empty. Add records afterwards, per domain, in `record` blocks or as
 `namecheap_domain_host_record` resources. Do not adopt a portfolio with
 `mode = "OVERWRITE"` in the configuration: that mode owns the entire zone, so
 the plan after the import fails for every domain whose existing records the
 configuration does not list in full — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite).
+
+~> **Domains on custom nameservers.** The import stores a delegated domain's
+nameservers, and a configuration without `nameservers` means Namecheap DNS, so
+the plan lists them as removed. Applying that plan moves the domain off its DNS
+host. Give those domains their `nameservers`, or keep them out of this resource
+with `if !d.is_expired && d.is_our_dns`.
 
 -> A portfolio import reads the account listing plus one call per domain. On a
 large portfolio that can brush against Namecheap's per-minute rate limit; the
