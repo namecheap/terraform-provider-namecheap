@@ -55,3 +55,7 @@ deletes an owned record that the configuration no longer declares. Import with
 `/zone` only into a configuration that declares every record: one that is left
 out shows in the plan as removed and is deleted on apply. The [importing guide](../guides/importing.md#namecheap_domain_records-two-import-ids)
 has the details.
+
+~> With `mode = "OVERWRITE"` in the configuration, import with `/zone`. After an
+import by the plain domain name the plan fails while the zone holds a record the
+configuration does not declare, because it could not list that record as removed.

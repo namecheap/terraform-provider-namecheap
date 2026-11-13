@@ -243,7 +243,73 @@ func firstDiagError(diags diag.Diagnostics) error {
 	return nil
 }
 
-// customizeRecordsDiff fails the plan when email_type = "MXE" would leave the
+// customizeRecordsDiff runs the checks that fail a plan before it writes.
+func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	if err := checkModeSwitchDeletesNoUnlistedRecord(ctx, diff, meta); err != nil {
+		return err
+	}
+	return checkMXEHasMXERecord(ctx, diff, meta)
+}
+
+// checkModeSwitchDeletesNoUnlistedRecord fails the plan that takes an existing
+// resource from MERGE to OVERWRITE while the zone holds records that are neither
+// in the configuration nor in state.
+//
+// OVERWRITE deletes every record the configuration does not declare, but a plan
+// can list a removal only for a record in state, and a MERGE state holds the
+// records the resource declared. So this plan would show a change of mode and
+// nothing else, and the apply would delete the rest of the zone. That is the
+// plan an OVERWRITE configuration gets after an import by the plain domain
+// name, which stores no records.
+//
+// A record in state is not reported: the plan lists its removal, which is how
+// an import with the /zone ID lets a configuration delete the rest of a zone.
+// A new resource is not checked either; the apply warns about what it deletes.
+// A failed read skips the check and leaves the warning to the apply.
+func checkModeSwitchDeletesNoUnlistedRecord(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	if diff.Id() == "" || diff.HasChange("domain") {
+		return nil
+	}
+	if !diff.HasChange("mode") || !diff.NewValueKnown("mode") {
+		return nil
+	}
+	priorMode, mode := diff.GetChange("mode")
+	if strings.ToUpper(priorMode.(string)) != ncModeMerge || strings.ToUpper(mode.(string)) != ncModeOverwrite {
+		return nil
+	}
+
+	config := diff.GetRawConfig()
+	// A record with a value not known until apply cannot be matched against the
+	// zone, and would be reported as one the configuration does not declare.
+	if !config.GetAttr("record").IsWhollyKnown() {
+		return nil
+	}
+	// With nameservers the apply delegates the domain and writes no records.
+	if nameservers := config.GetAttr("nameservers"); !nameservers.IsKnown() || (!nameservers.IsNull() && nameservers.LengthInt() > 0) {
+		return nil
+	}
+
+	priorRecords, records := diff.GetChange("record")
+	listed := append(records.(*schema.Set).List(), priorRecords.(*schema.Set).List()...)
+
+	client := meta.(*namecheap.Client)
+	domain := strings.ToLower(diff.Get("domain").(string))
+	unlisted, _, diags := unmanagedRecordsOverwrite(ctx, domain, listed, client)
+	if diags.HasError() || len(unlisted) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("changing mode from %s to %s would delete %d record(s) of %s that are neither in the configuration "+
+		"nor in state, and the plan cannot list them:\n\n%s"+
+		"To delete them instead, import the resource again with the ID %q, which stores every record of the zone, "+
+		"so that the plan lists each record it removes:\n\n"+
+		"  terraform state rm <address>\n"+
+		"  terraform import <address> %s",
+		ncModeMerge, ncModeOverwrite, len(unlisted), domain, describeRecordsToKeep(unlisted),
+		domain+"/"+recordsImportScopeZone, domain+"/"+recordsImportScopeZone)
+}
+
+// checkMXEHasMXERecord fails the plan when email_type = "MXE" would leave the
 // zone with no MXE record. Namecheap accepts that write and puts the zone on
 // MXE with nothing to publish, so the domain is left without a mail server.
 //
@@ -251,7 +317,7 @@ func firstDiagError(diags diag.Diagnostics) error {
 // another resource manages counts too, so when the configuration has none the
 // live zone is read, once per plan that writes; a failed read skips the check
 // and leaves it to the apply.
-func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+func checkMXEHasMXERecord(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
 	config := diff.GetRawConfig()
 	if emailType := configuredEmailType(config); emailType == nil || *emailType != namecheap.EmailTypeMXE {
 		return nil

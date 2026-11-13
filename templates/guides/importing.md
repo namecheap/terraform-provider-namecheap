@@ -117,8 +117,9 @@ when you want the plan to show an `email_type` change before it is made.
 ~> **`OVERWRITE` mode: import with `/zone`.** An `OVERWRITE` configuration
 deletes every record it does not declare. After a `/zone` import the plan lists
 those records as removed. After an import by the plain domain name the state
-holds no records, so the plan lists nothing as removed and the apply deletes
-them all the same, with only a warning during the apply.
+holds no records, so the plan could not list them as removed. The provider
+fails that plan instead and names every record the apply would have deleted,
+with paste-ready `record` blocks: declare them, or import again with `/zone`.
 
 ### Releasing records from state
 
@@ -135,8 +136,9 @@ terraform import namecheap_domain_records.example example.com
 Records still declared in the configuration are adopted again by the next apply.
 
 `OVERWRITE` mode is different: there the configuration is the whole zone
-whatever the state holds, and the provider warns about every record it is about
-to delete.
+whatever the state holds, so records cannot be released this way. After an
+import by the plain domain name, the plan of an `OVERWRITE` configuration fails
+while the zone holds a record the configuration does not declare.
 
 ### Managing only some of a zone's records
 
@@ -298,9 +300,9 @@ The plain domain name is deliberate here: it stores each domain's settings and
 none of its records, so the plan after the import is empty and no record is at
 risk. Add records afterwards, per domain, in `record` blocks or as
 `namecheap_domain_host_record` resources. Do not adopt a portfolio with
-`mode = "OVERWRITE"` in the configuration: that mode owns the entire zone, so an
-apply against a configuration that does not list every existing record will
-**delete** the ones you did not write down — see the
+`mode = "OVERWRITE"` in the configuration: that mode owns the entire zone, so
+the plan after the import fails for every domain whose existing records the
+configuration does not list in full — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite).
 
 -> A portfolio import reads the account listing plus one call per domain. On a
@@ -320,5 +322,6 @@ large portfolio that can brush against Namecheap's per-minute rate limit; the
    state and are left alone; records you do declare show as added and are
    adopted, not duplicated. After a `/zone` import a record absent from the
    configuration shows as removed — add it to the configuration unless you mean
-   to delete it. In `OVERWRITE` mode the provider also warns and lists such
-   records, with paste-ready `record` blocks.
+   to delete it. With `mode = "OVERWRITE"` in the configuration, the plan after
+   an import by the plain domain name fails while the zone holds such records,
+   and lists them with paste-ready `record` blocks.

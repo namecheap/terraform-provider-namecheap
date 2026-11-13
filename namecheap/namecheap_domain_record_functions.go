@@ -827,27 +827,32 @@ func filterDefaultParkingRecords(records *[]namecheap.DomainsDNSHostRecordDetail
 // are not present in the Terraform configuration. tense is the verb used in
 // the summary/detail text (e.g. "will delete", "deleted").
 func buildUnmanagedDeletionWarning(domain string, unmanaged []namecheap.DomainsDNSHostRecordDetailed, tense string) diag.Diagnostic {
-	var detail strings.Builder
-
-	for _, record := range unmanaged {
-		detail.WriteString(formatRecordSummaryLine(&record))
-		detail.WriteString("\n")
-	}
-
-	detail.WriteString("\nTo keep these records, add them to your configuration:\n\n")
-	for _, record := range unmanaged {
-		detail.WriteString(formatRecordHCL(&record))
-		detail.WriteString("\n\n")
-	}
-
-	detail.WriteString("See the OVERWRITE mode safety notes in the namecheap_domain_records resource docs, " +
-		"or switch to MERGE mode if this domain's DNS is shared with other tools or Terraform configurations.")
-
 	return diag.Diagnostic{
 		Severity: diag.Warning,
 		Summary:  fmt.Sprintf("OVERWRITE mode %s %d record(s) not present in the configuration for %s", tense, len(unmanaged), domain),
-		Detail:   detail.String(),
+		Detail: describeRecordsToKeep(unmanaged) +
+			"See the OVERWRITE mode safety notes in the namecheap_domain_records resource docs, " +
+			"or switch to MERGE mode if this domain's DNS is shared with other tools or Terraform configurations.",
 	}
+}
+
+// describeRecordsToKeep lists records, one line each, and then the paste-ready
+// record blocks that keep them. It ends with a blank line.
+func describeRecordsToKeep(records []namecheap.DomainsDNSHostRecordDetailed) string {
+	var text strings.Builder
+
+	for _, record := range records {
+		text.WriteString(formatRecordSummaryLine(&record))
+		text.WriteString("\n")
+	}
+
+	text.WriteString("\nTo keep these records, add them to your configuration:\n\n")
+	for _, record := range records {
+		text.WriteString(formatRecordHCL(&record))
+		text.WriteString("\n\n")
+	}
+
+	return text.String()
 }
 
 // formatRecordSummaryLine renders one human-readable line for a live DNS
