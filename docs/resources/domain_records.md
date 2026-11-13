@@ -68,16 +68,16 @@ The import ID chooses what the import stores:
 
 | ID | Stored in state | Use it when |
 |---|---|---|
-| `example.com` | `email_type`, custom `nameservers`; no `record` | the configuration declares no records, or only some of the zone's records |
-| `example.com/zone` | the above and every record of the zone | the configuration declares the whole zone, or is generated with `-generate-config-out` |
+| `example.com` | `email_type`; no `record` and no `nameservers` | the configuration declares no records, or only some of the zone's records |
+| `example.com/zone` | `email_type` and every record of the zone, or every custom nameserver of a delegated domain | the configuration declares the whole zone, or is generated with `-generate-config-out` |
 
 ```shell
-# The domain name imports the domain's settings (email_type, custom nameservers)
-# and no records. Records the configuration declares are adopted on the first apply.
+# The domain name imports the domain's mail mode (email_type), no records and no
+# custom nameservers. The ones the configuration declares are adopted on the first apply.
 terraform import namecheap_domain_records.main example.com
 
-# <domain>/zone imports every record of the zone as well, for a configuration
-# that declares all of them.
+# <domain>/zone imports every record of the zone as well, or every custom
+# nameserver of a delegated domain, for a configuration that declares all of them.
 terraform import namecheap_domain_records.main example.com/zone
 ```
 
@@ -88,5 +88,6 @@ out shows in the plan as removed and is deleted on apply. The [importing guide](
 has the details.
 
 ~> With `mode = "OVERWRITE"` in the configuration, import with `/zone`. After an
-import by the plain domain name the plan fails while the zone holds a record the
-configuration does not declare, because it could not list that record as removed.
+import by the plain domain name the plan fails while the domain holds a record or
+a custom nameserver the configuration does not declare, because it could not list
+it as removed.

@@ -114,7 +114,9 @@ This is the one case the provider refuses instead of warning. A `MERGE` state ho
 - **Keep the records:** paste the blocks into the configuration and plan again.
 - **Delete the records:** import the resource again with the `<domain>/zone` ID (`terraform state rm`, then `terraform import`). That import stores every record of the zone, so the plan lists each one it removes. See the [importing guide](importing.md#namecheap_domain_records-two-import-ids).
 
-The check costs one extra API call, on plans that change `mode` only.
+Custom nameservers are checked the same way. `OVERWRITE` replaces a delegated domain's nameservers with the configured ones, or moves it back to Namecheap DNS when the configuration has none, so the plan fails while the domain uses a nameserver that is neither in the configuration nor in state. Add the nameservers to `nameservers` to keep them, or import with the `<domain>/zone` ID so that the plan lists each one it removes.
+
+The check costs up to two extra API calls, on plans that change `mode` only.
 
 If you'd rather not review this list every time a shared domain drifts, use [`MERGE`](#merge) mode instead — it only ever touches the records it manages.
 
@@ -326,7 +328,7 @@ _*ns1-2.nameserver.com are used as an example. Please use the nameservers provid
 system will not accept this. Thus, if you were provided with both the nameservers and IP address(es), only the
 nameservers should be inserted as custom nameservers.
 
--> It's recommended to use mode `OVERWRITE` with `nameservers` to prevent unobvious behavior.
+-> It's recommended to use mode `OVERWRITE` with `nameservers` to prevent unobvious behavior. In `MERGE` mode the resource manages only the nameservers it declares: nameservers set in the Namecheap dashboard or by another resource stay next to them, an apply removes only the declared nameservers that left the configuration, and destroy removes only the ones this resource set.
 
 Nameservers changes do not propagate instantly. Once your nameservers are changed, it may take up to 24 hours (more, in
 rare cases) for local ISPs to update their DNS caches so that everyone can see your website.

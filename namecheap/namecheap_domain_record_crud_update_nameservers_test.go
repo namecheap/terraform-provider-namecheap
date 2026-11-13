@@ -38,6 +38,34 @@ func TestUpdateNameserversMerge_ReplacesOldWithNew(t *testing.T) {
 	assert.False(t, diags.HasError())
 }
 
+// A declared nameserver that is already live is adopted: the list is sent with
+// it once, and the nameservers nobody declared stay.
+func TestUpdateNameserversMerge_AdoptsLiveNameservers(t *testing.T) {
+	var sent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		switch r.FormValue("Command") {
+		case "namecheap.domains.dns.getList":
+			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.dns.com", "ns2.dns.com", "ns3.manual.com", "ns4.manual.com"}))
+		case "namecheap.domains.dns.setCustom":
+			sent = r.FormValue("Nameservers")
+			_, _ = fmt.Fprint(w, setCustomSuccessXML())
+		}
+	}))
+	defer server.Close()
+
+	// No previous nameservers: the state of an import by the plain domain name.
+	diags := updateNameserversMerge(context.Background(), "test.com", nil, []string{"NS1.dns.com", "ns2.dns.com"}, newTestClient(server.URL))
+	assert.False(t, diags.HasError(), "%v", diags)
+	assert.Equal(t, "ns1.dns.com,ns2.dns.com,ns3.manual.com,ns4.manual.com", sent)
+}
+
+func TestNameserversNotIn(t *testing.T) {
+	assert.Equal(t, []string{"ns3.example.com"}, nameserversNotIn([]string{"ns1.example.com", "ns3.example.com"}, []string{"NS1.example.com", "ns2.example.com"}))
+	assert.Empty(t, nameserversNotIn([]string{"ns1.example.com"}, []string{"ns1.example.com"}))
+	assert.Empty(t, nameserversNotIn(nil, []string{"ns1.example.com"}))
+}
+
 func TestUpdateNameserversMerge_OnlyOneRemains_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()

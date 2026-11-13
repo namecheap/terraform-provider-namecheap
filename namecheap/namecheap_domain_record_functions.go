@@ -6,6 +6,7 @@ import (
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
+	"slices"
 	"strings"
 )
 
@@ -125,8 +126,24 @@ func readNameserversOverwrite(nsResponse *namecheap.DomainsDNSGetListCommandResp
 	}
 }
 
-// readNameserversOverwrite fetches real nameservers from API, remove previousNameservers records, insert currentNameservers
-// thus, we have a merge between manually set ones via Namecheap Domain Control Panel and via terraform
+// nameserversNotIn returns the nameservers that are not in listed. The case of
+// a nameserver carries no meaning.
+func nameserversNotIn(nameservers []string, listed []string) []string {
+	var missing []string
+	for _, nameserver := range nameservers {
+		if !slices.ContainsFunc(listed, func(other string) bool { return strings.EqualFold(nameserver, other) }) {
+			missing = append(missing, nameserver)
+		}
+	}
+	return missing
+}
+
+// updateNameserversMerge replaces previousNameservers, the nameservers this
+// resource set last, with currentNameservers and keeps every other live
+// nameserver, so the ones set in the Namecheap dashboard stay. A current
+// nameserver that is already live is adopted, not sent twice: that is how the
+// first apply after an import by the plain domain name takes over the declared
+// nameservers of a delegated domain.
 func updateNameserversMerge(ctx context.Context, domain string, previousNameservers []string, currentNameservers []string, client *namecheap.Client) diag.Diagnostics {
 	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
@@ -155,7 +172,7 @@ func updateNameserversMerge(ctx context.Context, domain string, previousNameserv
 		}
 	}
 
-	newNameservers = append(newNameservers, currentNameservers...)
+	newNameservers = append(newNameservers, nameserversNotIn(currentNameservers, newNameservers)...)
 
 	if len(newNameservers) == 1 {
 		return diag.Errorf("Unable to proceed with one remaining nameserver, you must have at least 2 nameservers")
