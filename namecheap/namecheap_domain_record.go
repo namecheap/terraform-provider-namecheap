@@ -457,7 +457,14 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 
 	var diags diag.Diagnostics
 
-	if mode == ncModeMerge && records != nil {
+	// A MERGE configuration with email_type and nothing else still sets the mail
+	// mode: it is written with the records the zone already has. Without this
+	// the create wrote nothing, state said the mode was set, and it took a
+	// second apply to set it. OVERWRITE is left out: with no records it would
+	// delete the whole zone, and its next plan lists those removals first.
+	mailModeOnly := emailType != nil && records == nil && nameservers == nil
+
+	if mode == ncModeMerge && (records != nil || mailModeOnly) {
 		recordDiags := createRecordsMerge(ctx, domain, emailType, records, client)
 		if recordDiags.HasError() {
 			return recordDiags
