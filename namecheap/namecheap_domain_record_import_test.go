@@ -21,6 +21,8 @@ func TestParseRecordsImportID(t *testing.T) {
 	}{
 		{id: "example.com", wantDomain: "example.com"},
 		{id: "example.com/zone", wantDomain: "example.com", wantWholeZone: true},
+		{id: "Example.COM", wantDomain: "example.com"},
+		{id: "Example.COM/zone", wantDomain: "example.com", wantWholeZone: true},
 		{id: "example.com/", wantErr: "unexpected import ID"},
 		{id: "example.com/ZONE", wantErr: "unexpected import ID"},
 		{id: "example.com/records", wantErr: "unexpected import ID"},
@@ -73,6 +75,13 @@ func importRecords(t *testing.T, id, emailType string, hosts []hostEntry, namese
 	return imported[0]
 }
 
+func TestSuppressDomainCaseDiff(t *testing.T) {
+	assert.True(t, suppressDomainCaseDiff("domain", "example.com", "Example.COM", nil))
+	assert.True(t, suppressDomainCaseDiff("domain", "Example.com", "example.com", nil))
+	assert.False(t, suppressDomainCaseDiff("domain", "example.com", "example.org", nil))
+	assert.False(t, suppressDomainCaseDiff("domain", "", "example.com", nil), "a create is never suppressed")
+}
+
 func TestImportRecordsState(t *testing.T) {
 	zone := []hostEntry{
 		{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
@@ -122,11 +131,38 @@ func TestImportRecordsState(t *testing.T) {
 		})
 	}
 
-	t.Run("an upper-case domain is kept as typed and looked up in lower case", func(t *testing.T) {
-		data := importRecords(t, "Test.com", "NONE", zone, nil)
-		assert.Equal(t, "test.com", data.Id())
-		assert.Equal(t, "Test.com", data.Get("domain"))
-	})
+	for _, id := range []string{"Test.com", "Test.com/zone"} {
+		t.Run("an upper-case domain is stored in lower case by "+id, func(t *testing.T) {
+			data := importRecords(t, id, "NONE", zone, nil)
+			assert.Equal(t, "test.com", data.Id())
+			assert.Equal(t, "test.com", data.Get("domain"))
+		})
+	}
+
+	// An import is often the first call a new setup makes, so it is where a
+	// wrong key or a missing IP whitelist entry shows up.
+	apiErrors := []struct {
+		code, message, want string
+	}{
+		{"1011102", "API Key is invalid or API access has not been enabled", "IP not whitelisted"},
+		{"2019166", "Domain not found", "Verify the domain name is spelled correctly"},
+		{"2016166", "Domain is not associated with your account", "Domain not associated with this account"},
+	}
+	for _, tc := range apiErrors {
+		t.Run("API error "+tc.code+" keeps its remediation text", func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprint(w, apiErrorXML(tc.code, tc.message))
+			}))
+			t.Cleanup(server.Close)
+
+			data := resourceNamecheapDomainRecords().TestResourceData()
+			data.SetId("test.com")
+			_, err := importRecordsState(context.TODO(), data, newTestClient(server.URL))
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.want)
+			assert.ErrorContains(t, err, tc.code)
+		})
+	}
 
 	t.Run("an unknown scope fails before any API call", func(t *testing.T) {
 		data := resourceNamecheapDomainRecords().TestResourceData()

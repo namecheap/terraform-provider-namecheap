@@ -5,6 +5,7 @@ package namecheap_provider
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -274,6 +275,50 @@ resource "namecheap_domain_host_record" "www" {
 			},
 		})
 	})
+
+	// The case of a domain name carries no meaning. A difference in case between
+	// the import ID and the configuration must not plan a replacement, which
+	// would delete every record the resource manages and create them again.
+	for name, spelling := range map[string]struct{ id, configDomain string }{
+		"an upper-case import ID with a lower-case config": {id: strings.ToUpper(domain) + "/zone", configDomain: domain},
+		"a lower-case import ID with an upper-case config": {id: zoneID, configDomain: strings.ToUpper(domain)},
+	} {
+		t.Run(name+" plans no change", func(t *testing.T) {
+			m := newNamecheapMock(t)
+			config := fmt.Sprintf(`
+resource "namecheap_domain_records" "mail" {
+  domain     = %q
+  email_type = "GMAIL"
+%s}
+`, spelling.configDomain, wwwBlock+homeBlock)
+
+			resource.Test(t, resource.TestCase{
+				PreCheck:          func() { mockPreCheck(t, m); seed(m) },
+				ProviderFactories: mockProviderFactories(),
+				Steps: []resource.TestStep{
+					{
+						Config:             config,
+						ResourceName:       recordsResource,
+						ImportState:        true,
+						ImportStateId:      spelling.id,
+						ImportStatePersist: true,
+					},
+					{
+						Config:   config,
+						PlanOnly: true,
+					},
+					{
+						Config: config,
+						Check: resource.ComposeTestCheckFunc(
+							resource.TestCheckResourceAttr(recordsResource, "id", domain),
+							resource.TestCheckResourceAttr(recordsResource, "domain", domain),
+							mockCheckHostCount(m, domain, 2),
+						),
+					},
+				},
+			})
+		})
+	}
 
 	t.Run("an unknown scope is refused", func(t *testing.T) {
 		m := newNamecheapMock(t)

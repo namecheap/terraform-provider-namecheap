@@ -42,6 +42,9 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ForceNew:     true,
 				Description:  "Purchased available domain name on your account",
 				ValidateFunc: validateDomainIsNotSubdomain,
+				// Without this a domain spelled in another case than state holds
+				// it, after an import for one, would replace the resource.
+				DiffSuppressFunc: suppressDomainCaseDiff,
 			},
 			"email_type": {
 				ConflictsWith: []string{"nameservers"},
@@ -134,9 +137,16 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 	return
 }
 
+// suppressDomainCaseDiff hides a change of case in a domain name: the case
+// carries no meaning and every API call sends the name in lower case.
+func suppressDomainCaseDiff(_, oldValue, newValue string, _ *schema.ResourceData) bool {
+	return strings.EqualFold(oldValue, newValue)
+}
+
 // parseRecordsImportID splits an import ID into the domain and the import
 // scope: "example.com" imports the domain's settings and no records,
-// "example.com/zone" imports every record too.
+// "example.com/zone" imports every record too. The domain is returned in lower
+// case, the spelling every API call uses.
 func parseRecordsImportID(id string) (domain string, wholeZone bool, err error) {
 	domain, scope, hasScope := strings.Cut(id, "/")
 	if hasScope && scope != recordsImportScopeZone {
@@ -148,7 +158,7 @@ func parseRecordsImportID(id string) (domain string, wholeZone bool, err error) 
 	if _, errs := validateDomainIsNotSubdomain(domain, "domain"); len(errs) > 0 {
 		return "", false, fmt.Errorf("unexpected import ID %q: %w", id, errs[0])
 	}
-	return domain, hasScope, nil
+	return strings.ToLower(domain), hasScope, nil
 }
 
 // importRecordsState imports a domain by one of two IDs. Read cannot see the
@@ -175,9 +185,8 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 		return nil, err
 	}
 	client := meta.(*namecheap.Client)
-	apiDomain := strings.ToLower(domain)
 
-	data.SetId(apiDomain)
+	data.SetId(domain)
 	if err := data.Set("domain", domain); err != nil {
 		return nil, err
 	}
@@ -185,12 +194,14 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 		return nil, err
 	}
 
-	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, apiDomain)
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
 	if err != nil {
-		return nil, err
+		// The same diagnostics a read gives: an API error alone does not say
+		// that the IP is not whitelisted or the domain is on another account.
+		return nil, firstDiagError(diagFromClientError(err))
 	}
 	if err := validateGetListResponse(nsResponse); err != nil {
-		return nil, fmt.Errorf("unable to read DNS state for domain %s: %w", apiDomain, err)
+		return nil, fmt.Errorf("unable to read DNS state for domain %s: %w", domain, err)
 	}
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
@@ -205,7 +216,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 	}
 
 	if wholeZone {
-		records, _, _, diags := readRecordsOverwrite(ctx, apiDomain, nil, client)
+		records, _, _, diags := readRecordsOverwrite(ctx, domain, nil, client)
 		if err := firstDiagError(diags); err != nil {
 			return nil, err
 		}
