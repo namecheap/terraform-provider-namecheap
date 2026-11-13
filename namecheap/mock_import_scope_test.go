@@ -130,6 +130,42 @@ resource "namecheap_domain_host_record" "www" {
 		})
 	})
 
+	// MERGE does not need an import: the same mail-only configuration applied to
+	// a domain that was never imported sets the mail mode in one apply and leaves
+	// every record alone. The create used to write nothing, so state said GMAIL
+	// while the zone stayed on NONE until a second apply.
+	t.Run("a mail-only config applied without an import sets the mail mode", func(t *testing.T) {
+		m := newNamecheapMock(t)
+		untouched := resource.ComposeTestCheckFunc(
+			assertZoneHas(m, "www", "A", "203.0.113.10"),
+			assertZoneHas(m, "home", "A", "198.51.100.7"),
+			mockCheckHostCount(m, domain, 2),
+			mockCheckEmailType(m, domain, "GMAIL"),
+		)
+		resource.Test(t, resource.TestCase{
+			PreCheck: func() {
+				mockPreCheck(t, m)
+				m.seed(domain, []hostEntry{
+					{Name: "www", Type: "A", Address: "203.0.113.10", MXPref: 10, TTL: 1800},
+					{Name: "home", Type: "A", Address: "198.51.100.7", MXPref: 10, TTL: 60},
+				}, "NONE", nil)
+			},
+			ProviderFactories: mockProviderFactories(),
+			CheckDestroy:      untouched,
+			Steps: []resource.TestStep{
+				{
+					Config: records(""),
+					Check: resource.ComposeTestCheckFunc(
+						resource.TestCheckResourceAttr(recordsResource, "email_type", "GMAIL"),
+						resource.TestCheckResourceAttr(recordsResource, "record.#", "0"),
+						untouched,
+					),
+				},
+				{Config: records(""), PlanOnly: true},
+			},
+		})
+	})
+
 	// A record the configuration declares is adopted by the first apply; the
 	// plan shows it being added to state. The undeclared row is never touched,
 	// destroy included.
