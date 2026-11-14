@@ -538,6 +538,13 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			return nsDiags
 		}
 		diags = append(diags, nsDiags...)
+		// A nameserver state did not hold was set outside this resource, and
+		// the plan after this refresh removes it unless the configuration
+		// declares it. An import stores the nameservers before the first
+		// read, so it does not warn.
+		if warning := nameserversNotInStateWarning(domain, convertInterfacesToString(nameservers), *realNameservers); warning != nil {
+			diags = append(diags, *warning)
+		}
 		_ = data.Set("nameservers", *realNameservers)
 
 		_ = data.Set("record", []interface{}{})

@@ -656,6 +656,53 @@ func buildUnmanagedDeletionWarning(domain string, unmanaged []namecheap.DomainsD
 	}
 }
 
+// nameserversNotInStateWarning tells the user that the domain has nameservers
+// the resource did not have in state: set in the dashboard, or declared by a
+// second resource under the shared list earlier versions kept in MERGE mode.
+// nameservers is the domain's whole list, so the next apply removes them unless
+// the configuration declares them, and with none in state the domain returns to
+// Namecheap DNS. The plan shows either only as nameservers being removed; the
+// warning names what to write to keep them. It is nil when state holds every
+// live nameserver.
+func nameserversNotInStateWarning(domain string, inState []string, live []string) *diag.Diagnostic {
+	known := make(map[string]bool, len(inState))
+	for _, nameserver := range inState {
+		known[strings.ToLower(nameserver)] = true
+	}
+	var unknown []string
+	for _, nameserver := range live {
+		if !known[strings.ToLower(nameserver)] {
+			unknown = append(unknown, nameserver)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	declaration := "  nameservers = [\"" + strings.Join(live, "\", \"") + "\"]"
+	if len(inState) == 0 {
+		return &diag.Diagnostic{
+			Severity: diag.Warning,
+			Summary:  fmt.Sprintf("%s was moved to custom nameservers outside Terraform", domain),
+			Detail: fmt.Sprintf("The domain now uses %s. A namecheap_domain_records without `nameservers` means Namecheap DNS, "+
+				"so unless the configuration declares them the plan lists them as removed, and applying it moves the domain "+
+				"back to Namecheap DNS.\n\n"+
+				"To keep the delegation, declare it in place of `record` and `email_type`:\n\n%s\n\n"+
+				"To return to Namecheap DNS, apply the plan.",
+				strings.Join(live, ", "), declaration),
+		}
+	}
+	return &diag.Diagnostic{
+		Severity: diag.Warning,
+		Summary:  fmt.Sprintf("%s has nameservers this resource did not set", domain),
+		Detail: fmt.Sprintf("The domain also uses %s, set outside this resource. `nameservers` is the domain's whole list, "+
+			"in MERGE and OVERWRITE mode alike, so the plan lists every nameserver the configuration does not declare as "+
+			"removed.\n\n"+
+			"To keep the domain's nameservers as they are, declare all of them in one resource:\n\n%s\n",
+			strings.Join(unknown, ", "), declaration),
+	}
+}
+
 // describeRecordsToKeep lists records, one line each, and then the paste-ready
 // record blocks that keep them. It ends with a blank line.
 func describeRecordsToKeep(records []namecheap.DomainsDNSHostRecordDetailed) string {

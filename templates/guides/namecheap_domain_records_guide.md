@@ -334,6 +334,11 @@ nameservers should be inserted as custom nameservers.
 - Destroying a resource that holds nameservers returns the domain to Namecheap DNS.
 - Declare a domain's nameservers in one resource only.
 
+-> **Declare the nameservers of every delegated domain.** When a refresh finds a nameserver that state does not hold,
+set in the Namecheap dashboard or by another resource, the provider prints a warning with the `nameservers` line that
+keeps the domain as it is. Without that line the plan removes the nameserver, and a configuration with no `nameservers`
+returns the domain to Namecheap DNS. Every nameserver an apply removes is listed in the plan first.
+
 Earlier versions merged the declared nameservers with the ones already set when the mode was `MERGE`, and kept the rest out of state. A `MERGE` configuration that declares only some of a domain's nameservers now plans the removal of the others: add them to `nameservers` to keep them.
 
 Nameservers changes do not propagate instantly. Once your nameservers are changed, it may take up to 24 hours (more, in

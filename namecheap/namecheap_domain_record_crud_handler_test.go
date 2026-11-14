@@ -366,6 +366,68 @@ func TestResourceRecordRead_StoresEveryCustomNameserver(t *testing.T) {
 	}
 }
 
+// nameservers is the domain's whole list, so a nameserver that state does not
+// hold is removed by the next apply, and with none in the configuration the
+// domain returns to Namecheap DNS. The plan shows that only as nameservers
+// being removed, so the refresh warns and names the way to keep them. A list
+// that state already holds in full is the resource's own, or was imported: no
+// warning then.
+func TestResourceRecordRead_WarnsAboutNameserversNotInState(t *testing.T) {
+	live := []string{"ns1.custom.com", "ns2.custom.com"}
+	read := func(t *testing.T, mode string, inState []interface{}) diag.Diagnostics {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = fmt.Fprint(w, getListXML(false, live))
+		}))
+		defer server.Close()
+
+		data := resourceNamecheapDomainRecords().TestResourceData()
+		data.SetId("test.com")
+		_ = data.Set("domain", "test.com")
+		_ = data.Set("mode", mode)
+		if inState != nil {
+			_ = data.Set("nameservers", inState)
+		}
+
+		diags := resourceRecordRead(context.TODO(), data, newTestClient(server.URL))
+		assert.False(t, diags.HasError(), "%v", diags)
+		assert.ElementsMatch(t, live, convertInterfacesToString(data.Get("nameservers").(*schema.Set).List()))
+		return diags
+	}
+
+	for _, mode := range []string{ncModeMerge, ncModeOverwrite} {
+		t.Run(mode+": warns when state holds no nameservers", func(t *testing.T) {
+			diags := read(t, mode, nil)
+			if assert.Len(t, diags, 1) {
+				assert.Equal(t, diag.Warning, diags[0].Severity)
+				assert.Contains(t, diags[0].Summary, "test.com")
+				assert.Contains(t, diags[0].Detail, `nameservers = ["ns1.custom.com", "ns2.custom.com"]`)
+				assert.Contains(t, diags[0].Detail, "Namecheap DNS")
+			}
+		})
+
+		t.Run(mode+": is silent when state holds the delegation", func(t *testing.T) {
+			assert.Empty(t, read(t, mode, []interface{}{"ns1.custom.com", "ns2.custom.com"}))
+		})
+
+		// A nameserver someone added, or one a second resource declared under
+		// the shared list earlier versions kept in MERGE mode.
+		t.Run(mode+": warns about a nameserver that state does not hold", func(t *testing.T) {
+			diags := read(t, mode, []interface{}{"ns1.custom.com", "NS9.custom.com"})
+			if assert.Len(t, diags, 1) {
+				assert.Equal(t, diag.Warning, diags[0].Severity)
+				assert.Contains(t, diags[0].Summary, "test.com")
+				assert.Contains(t, diags[0].Detail, "also uses ns2.custom.com,")
+				assert.Contains(t, diags[0].Detail, `nameservers = ["ns1.custom.com", "ns2.custom.com"]`)
+				assert.NotContains(t, diags[0].Detail, "Namecheap DNS")
+			}
+		})
+
+		t.Run(mode+": compares nameservers without case", func(t *testing.T) {
+			assert.Empty(t, read(t, mode, []interface{}{"NS1.custom.com", "ns2.CUSTOM.com"}))
+		})
+	}
+}
+
 // Records in the configuration mean Namecheap DNS, in both modes: an update
 // returns a delegated domain to it before it writes them.
 func TestResourceRecordUpdate_RecordsMoveDelegatedDomainToNamecheapDNS(t *testing.T) {
