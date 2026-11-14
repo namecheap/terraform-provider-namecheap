@@ -91,7 +91,7 @@ Central design pattern — every CRUD operation has paired implementations:
 - **MERGE** (default): Multiple Terraform configs manage different records on the same domain. Uses `ncMutexKV` for domain-level locking.
 - **OVERWRITE**: Single config owns all records for a domain.
 
-Naming convention: `{operation}Records{Mode}()`, `{operation}Nameservers{Mode}()`.
+Naming convention: `{operation}Records{Mode}()`. Custom nameservers are not mode-dependent: `nameservers` is the domain's whole delegation in both modes (`setNameservers`, `readNameservers`, `resetNameservers`).
 
 ## go-namecheap-sdk/v2
 

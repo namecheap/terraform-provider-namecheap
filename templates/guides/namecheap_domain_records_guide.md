@@ -45,14 +45,14 @@ achieve it.
 When resource has been removed, the only records that was present in terraform resource will be removed from your
 domain. The records that you have set manually will remain as is.
 
-The same workflow works for both: `record` items and `nameservers`.
+This applies to `record` items. [`nameservers`](#nameservers) are one setting of the domain and work the same in both modes.
 
 -> This is the default behavior, however, we recommend to set the mode explicitly.
 
 ~> A declared record that already exists on the domain, matched on `hostname`, `type` and `address`, is adopted
 rather than added a second time: the provider writes it once, with the `ttl` and `mx_pref` from your configuration, and
 the resource owns it from then on. Removing it from the configuration, or destroying the resource, deletes it, even if
-it existed before Terraform. Declaring nameservers that already exist still fails with a duplicate error.
+it existed before Terraform.
 
 The `MERGE` mode allows you to control records related to the same domain as a different resources. Declare each record
 in one resource only: two resources declaring the same record both own it, and destroying either one deletes it.
@@ -326,7 +326,20 @@ _*ns1-2.nameserver.com are used as an example. Please use the nameservers provid
 system will not accept this. Thus, if you were provided with both the nameservers and IP address(es), only the
 nameservers should be inserted as custom nameservers.
 
--> It's recommended to use mode `OVERWRITE` with `nameservers` to prevent unobvious behavior.
+~> `nameservers` works the same in `MERGE` and `OVERWRITE` mode: the list in the configuration is the domain's whole delegation.
+
+- Applying it replaces the nameservers the domain has, including ones set in the Namecheap dashboard.
+- Every refresh and import reads all of the domain's nameservers into state, so a nameserver added outside Terraform shows in the plan as removed.
+- A configuration without `nameservers` means Namecheap DNS. If the domain is delegated, the plan lists its nameservers as removed, and the apply moves the domain back to Namecheap DNS before it writes any record.
+- Destroying a resource that holds nameservers returns the domain to Namecheap DNS.
+- Declare a domain's nameservers in one resource only.
+
+-> **Declare the nameservers of every delegated domain.** When a refresh finds a nameserver that state does not hold,
+set in the Namecheap dashboard or by another resource, the provider prints a warning with the `nameservers` line that
+keeps the domain as it is. Without that line the plan removes the nameserver, and a configuration with no `nameservers`
+returns the domain to Namecheap DNS. Every nameserver an apply removes is listed in the plan first.
+
+Earlier versions merged the declared nameservers with the ones already set when the mode was `MERGE`, and kept the rest out of state. A `MERGE` configuration that declares only some of a domain's nameservers now plans the removal of the others: add them to `nameservers` to keep them.
 
 Nameservers changes do not propagate instantly. Once your nameservers are changed, it may take up to 24 hours (more, in
 rare cases) for local ISPs to update their DNS caches so that everyone can see your website.

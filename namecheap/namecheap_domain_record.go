@@ -105,7 +105,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ConflictsWith: []string{"email_type", "record"},
 				Type:          schema.TypeSet,
 				Optional:      true,
-				Description:   "Custom nameservers to delegate the domain to. Conflicts with `email_type` and `record`, which only apply while the domain uses Namecheap DNS.",
+				Description:   "Custom nameservers to delegate the domain to: the whole list, in MERGE and OVERWRITE mode alike. Leave it out for Namecheap DNS. Conflicts with `email_type` and `record`, which only apply while the domain uses Namecheap DNS.",
 				Elem: &schema.Schema{
 					Type:         schema.TypeString,
 					ValidateFunc: validation.StringIsNotEmpty,
@@ -176,8 +176,8 @@ func parseRecordsImportID(id string) (domain string, wholeZone bool, err error) 
 // owns them all: one the configuration leaves out is planned for removal, as
 // for any record block removed from a MERGE configuration.
 //
-// Custom nameservers are one setting of the domain, not rows of a zone, and are
-// stored by both forms. The refresh Terraform runs after the import stores
+// Custom nameservers are one setting of the domain, not rows of a zone: the
+// resource manages the whole list in both modes, and both forms store it. The refresh Terraform runs after the import stores
 // email_type.
 func importRecordsState(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	domain, wholeZone, err := parseRecordsImportID(data.Id())
@@ -205,7 +205,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 	}
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		nameservers, diags := readNameserversOverwrite(nsResponse)
+		nameservers, diags := readNameservers(nsResponse)
 		if err := firstDiagError(diags); err != nil {
 			return nil, err
 		}
@@ -480,16 +480,8 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, recordDiags...)
 	}
 
-	if mode == ncModeMerge && nameservers != nil {
-		nsDiags := createNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
-		if nsDiags.HasError() {
-			return nsDiags
-		}
-		diags = append(diags, nsDiags...)
-	}
-
-	if mode == ncModeOverwrite && nameservers != nil {
-		nsDiags := createNameserversOverwrite(ctx, domain, convertInterfacesToString(nameservers), client)
+	if nameservers != nil {
+		nsDiags := setNameservers(ctx, domain, convertInterfacesToString(nameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -538,23 +530,22 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 	}
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
-		if mode == ncModeMerge {
-			realNameservers, nsDiags := readNameserversMerge(nsResponse, convertInterfacesToString(nameservers))
-			if nsDiags.HasError() {
-				return nsDiags
-			}
-			diags = append(diags, nsDiags...)
-			_ = data.Set("nameservers", *realNameservers)
+		// Every nameserver is stored, in both modes, so a plan lists each one
+		// an apply removes: a configuration without nameservers puts the domain
+		// on Namecheap DNS.
+		realNameservers, nsDiags := readNameservers(nsResponse)
+		if nsDiags.HasError() {
+			return nsDiags
 		}
-
-		if mode == ncModeOverwrite {
-			realNameservers, nsDiags := readNameserversOverwrite(nsResponse)
-			if nsDiags.HasError() {
-				return nsDiags
-			}
-			diags = append(diags, nsDiags...)
-			_ = data.Set("nameservers", *realNameservers)
+		diags = append(diags, nsDiags...)
+		// A nameserver state did not hold was set outside this resource, and
+		// the plan after this refresh removes it unless the configuration
+		// declares it. An import stores the nameservers before the first
+		// read, so it does not warn.
+		if warning := nameserversNotInStateWarning(domain, convertInterfacesToString(nameservers), *realNameservers); warning != nil {
+			diags = append(diags, *warning)
 		}
+		_ = data.Set("nameservers", *realNameservers)
 
 		_ = data.Set("record", []interface{}{})
 		// Custom nameservers leave no Namecheap mail mode in effect, so clear one
@@ -639,26 +630,16 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		return diag.Errorf("Unable to read DNS state for domain %s: the domain may not exist or may have been removed from the account", domain)
 	}
 
-	// If the previous state contains nameservers, but the new one does not contain,
-	// then reset nameservers before applying records.
-	// This case is possible when user removed nameservers lines and pasted records, so before applying records,
-	// we must reset nameservers to defaults, otherwise we will face API exception
-	if (mode == ncModeOverwrite && oldNameserversLen != 0 && newNameserversLen == 0) ||
-		// This condition resolves the issue if a user set up records on TF file, but in fact, manually enabled custom DNS.
-		// Before applying records, we have to set default DNS
-		(!*nsResponse.DomainDNSGetListResult.IsUsingOurDNS && newNameserversLen == 0) {
-		_, err := client.DomainsDNS.SetDefaultWithContext(ctx, domain)
-		if err != nil {
-			return diagFromClientError(err)
-		}
-	}
-
-	if mode == ncModeMerge && oldNameserversLen != 0 && newNameserversLen == 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+	// A configuration without nameservers means Namecheap DNS, in both modes.
+	// The domain goes back to it before any record is written, because records
+	// cannot be set on a delegated domain. The refresh stores the nameservers of
+	// a delegated domain, so the plan lists them as removed; the second condition
+	// covers a domain delegated after that refresh.
+	if newNameserversLen == 0 && (oldNameserversLen != 0 || !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS) {
+		nsDiags := resetNameservers(ctx, domain, client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
-		diags = append(diags, nsDiags...)
 	}
 
 	if mode == ncModeMerge && (newRecordsLen != 0 || oldRecordsLen != 0) {
@@ -681,16 +662,8 @@ func resourceRecordUpdate(ctx context.Context, data *schema.ResourceData, meta i
 		diags = append(diags, recordDiags...)
 	}
 
-	if mode == ncModeOverwrite && newNameserversLen != 0 {
-		nsDiags := createNameserversOverwrite(ctx, domain, convertInterfacesToString(newNameservers), client)
-		if nsDiags.HasError() {
-			return nsDiags
-		}
-		diags = append(diags, nsDiags...)
-	}
-
-	if mode == ncModeMerge && newNameserversLen != 0 {
-		nsDiags := updateNameserversMerge(ctx, domain, convertInterfacesToString(oldNameservers), convertInterfacesToString(newNameservers), client)
+	if newNameserversLen != 0 {
+		nsDiags := setNameservers(ctx, domain, convertInterfacesToString(newNameservers), client)
 		if nsDiags.HasError() {
 			return nsDiags
 		}
@@ -763,12 +736,8 @@ func resourceRecordDelete(ctx context.Context, data *schema.ResourceData, meta i
 		return deleteRecordsOverwrite(ctx, domain, records, client)
 	}
 
-	if mode == ncModeMerge && nameserversLen != 0 {
-		return deleteNameserversMerge(ctx, domain, convertInterfacesToString(nameservers), client)
-	}
-
-	if mode == ncModeOverwrite && nameserversLen != 0 {
-		return deleteNameserversOverwrite(ctx, domain, client)
+	if nameserversLen != 0 {
+		return resetNameservers(ctx, domain, client)
 	}
 
 	return nil
