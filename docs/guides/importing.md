@@ -312,8 +312,9 @@ the plan lists them as removed. Applying that plan moves the domain off its DNS
 host. Give those domains their `nameservers`, or keep them out of this resource
 with `if !d.is_expired && d.is_our_dns`.
 
--> A portfolio import reads the account listing plus one call per domain. On a
-large portfolio that can brush against Namecheap's per-minute rate limit; the
+-> A portfolio import reads the account listing, then makes three API calls per
+domain while it imports (four with `/zone`) and two per domain on every later
+plan. On a large portfolio that can reach Namecheap's rate limits; the
 [CI and automation environments guide](ci-environments.md) explains the
 `requests_per_minute` and retry settings that pace it.
 

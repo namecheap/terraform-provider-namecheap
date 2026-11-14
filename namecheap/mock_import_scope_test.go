@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 )
 
@@ -66,6 +67,25 @@ resource "namecheap_domain_host_record" "www" {
   address  = %q
 }
 `, domain, address)
+	}
+
+	// importStores checks how many records the import put in state. The plan
+	// after the import cannot tell the two IDs apart on its own: a declared
+	// record that is missing from state makes it non-empty too.
+	importStores := func(want int) resource.ImportStateCheckFunc {
+		return func(states []*terraform.InstanceState) error {
+			if len(states) != 1 {
+				return fmt.Errorf("import returned %d resources, want 1", len(states))
+			}
+			got := states[0].Attributes["record.#"]
+			if got == "" {
+				got = "0"
+			}
+			if got != fmt.Sprint(want) {
+				return fmt.Errorf("imported record.# = %s, want %d", got, want)
+			}
+			return nil
+		}
 	}
 
 	// The walkthrough of the #355 reporter: a mail-only namecheap_domain_records
@@ -186,6 +206,7 @@ resource "namecheap_domain_host_record" "www" {
 					ImportState:        true,
 					ImportStateId:      domain,
 					ImportStatePersist: true,
+					ImportStateCheck:   importStores(0),
 				},
 				{
 					Config: records(wwwBlock),
@@ -213,6 +234,7 @@ resource "namecheap_domain_host_record" "www" {
 					ImportState:        true,
 					ImportStateId:      zoneID,
 					ImportStatePersist: true,
+					ImportStateCheck:   importStores(2),
 				},
 				{
 					Config:   records(wwwBlock + homeBlock),
@@ -257,6 +279,7 @@ resource "namecheap_domain_host_record" "www" {
 						ImportState:        true,
 						ImportStateId:      zoneID,
 						ImportStatePersist: true,
+						ImportStateCheck:   importStores(2),
 					},
 					{
 						Config:             records(blocks),

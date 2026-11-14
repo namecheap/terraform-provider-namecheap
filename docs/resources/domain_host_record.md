@@ -65,7 +65,7 @@ records this one created (in `OVERWRITE` mode) or fight over ownership (in
 
 The one combination that works is a mail-only `namecheap_domain_records`: `MERGE`
 mode (the default), `email_type` and **no** `record` blocks. It holds no records,
-so it never writes or deletes one, and each record gets its own
+so it leaves the records you manage alone, and each record gets its own
 `namecheap_domain_host_record`:
 
 ```terraform
@@ -87,6 +87,10 @@ resource "namecheap_domain_host_record" "www" {
 
 Import the mail-only resource by the plain domain name (`example.com`, not
 `example.com/zone`); see the [importing guide](../guides/importing.md).
+
+-> An apply that sets `email_type` removes the two default parking records of a
+new domain (the `www` CNAME to `parkingpage.namecheap.com` and the `@` URL
+redirect), as creating any `namecheap_domain_records` does.
 
 - **Use `namecheap_domain_host_record`** when different records are owned by
   different people, modules or workspaces, or when you want `for_each` over a map
