@@ -305,8 +305,9 @@ the plan after the import fails for every domain whose existing records the
 configuration does not list in full — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite).
 
--> A portfolio import reads the account listing plus one call per domain. On a
-large portfolio that can brush against Namecheap's per-minute rate limit; the
+-> A portfolio import reads the account listing, then makes three API calls per
+domain while it imports (four with `/zone`) and two per domain on every later
+plan. On a large portfolio that can reach Namecheap's rate limits; the
 [CI and automation environments guide](ci-environments.md) explains the
 `requests_per_minute` and retry settings that pace it.
 
