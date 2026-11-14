@@ -35,8 +35,10 @@ const (
 // other record on the domain untouched.
 //
 // This is the per-record counterpart to namecheap_domain_records, which owns a
-// domain's whole zone. The two are mutually exclusive per domain: pointing both
-// at the same domain makes each fight to impose its own view of the zone.
+// domain's whole zone. Records on one domain belong to one of the two: when both
+// hold records of the same domain, each imposes its own view of the zone. A
+// MERGE namecheap_domain_records with no record blocks holds none and only sets
+// the mail mode, so it can sit next to this resource.
 //
 // How a change is applied — the mechanics the resource page deliberately does not
 // carry, because none of it is actionable for a user beyond "change a domain from
@@ -54,7 +56,7 @@ const (
 // resource page.
 func resourceNamecheapDomainHostRecord() *schema.Resource {
 	return &schema.Resource{
-		Description: "Manages a single DNS host record on a domain, leaving all other records untouched. Mutually exclusive with namecheap_domain_records for the same domain.",
+		Description: "Manages a single DNS host record on a domain, leaving all other records untouched. On one domain it can sit next to a namecheap_domain_records that declares no records, and must not be combined with one that does.",
 
 		CreateContext: resourceNamecheapDomainHostRecordCreate,
 		ReadContext:   resourceNamecheapDomainHostRecordRead,

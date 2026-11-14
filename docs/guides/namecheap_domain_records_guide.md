@@ -107,6 +107,15 @@ Each warning lists every record about to be deleted (type, host, address, TTL, M
 
 Both warnings only ever run against data the read step already fetched, so they add at most one extra API call (the apply-time re-check) — never anything during `plan`/refresh beyond the read `OVERWRITE` already performs.
 
+#### Switching an existing resource from `MERGE` to `OVERWRITE`
+
+This is the one case the provider refuses instead of warning. A `MERGE` state holds only the records the resource declared, so the plan of the switch could show a change of `mode` and nothing else, while the apply would delete every other record of the zone. The plan fails while the zone holds a record that is neither in the configuration nor in state, and lists each such record with a ready-to-paste `record { ... }` block. The same applies to an `OVERWRITE` configuration after `terraform import` by the plain domain name, which stores no records. There are two ways on:
+
+- **Keep the records:** paste the blocks into the configuration and plan again.
+- **Delete the records:** import the resource again with the `<domain>/zone` ID (`terraform state rm`, then `terraform import`). That import stores every record of the zone, so the plan lists each one it removes. See the [importing guide](importing.md#namecheap_domain_records-two-import-ids).
+
+The check costs one extra API call, on plans that change `mode` only.
+
 If you'd rather not review this list every time a shared domain drifts, use [`MERGE`](#merge) mode instead — it only ever touches the records it manages.
 
 ## Email type

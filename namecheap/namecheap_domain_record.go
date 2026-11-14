@@ -15,7 +15,10 @@ import (
 const (
 	ncModeMerge     = "MERGE"
 	ncModeOverwrite = "OVERWRITE"
-	ncModeImport    = "IMPORT"
+
+	// recordsImportScopeZone is the import ID suffix that asks for the whole
+	// zone: "example.com/zone". The plain "example.com" imports no records.
+	recordsImportScopeZone = "zone"
 )
 
 func resourceNamecheapDomainRecords() *schema.Resource {
@@ -29,16 +32,7 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 		CustomizeDiff: customizeRecordsDiff,
 
 		Importer: &schema.ResourceImporter{
-			StateContext: func(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-				if err := data.Set("domain", data.Id()); err != nil {
-					return nil, err
-				}
-				if err := data.Set("mode", ncModeImport); err != nil {
-					return nil, err
-				}
-
-				return []*schema.ResourceData{data}, nil
-			},
+			StateContext: importRecordsState,
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -48,6 +42,9 @@ func resourceNamecheapDomainRecords() *schema.Resource {
 				ForceNew:     true,
 				Description:  "Purchased available domain name on your account",
 				ValidateFunc: validateDomainIsNotSubdomain,
+				// Without this a domain spelled in another case than state holds
+				// it, after an import for one, would replace the resource.
+				DiffSuppressFunc: suppressDomainCaseDiff,
 			},
 			"email_type": {
 				ConflictsWith: []string{"nameservers"},
@@ -140,7 +137,179 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 	return
 }
 
-// customizeRecordsDiff fails the plan when email_type = "MXE" would leave the
+// suppressDomainCaseDiff hides a change of case in a domain name: the case
+// carries no meaning and every API call sends the name in lower case.
+func suppressDomainCaseDiff(_, oldValue, newValue string, _ *schema.ResourceData) bool {
+	return strings.EqualFold(oldValue, newValue)
+}
+
+// parseRecordsImportID splits an import ID into the domain and the import
+// scope: "example.com" imports the domain's settings and no records,
+// "example.com/zone" imports every record too. The domain is returned in lower
+// case, the spelling every API call uses.
+func parseRecordsImportID(id string) (domain string, wholeZone bool, err error) {
+	domain, scope, hasScope := strings.Cut(id, "/")
+	if hasScope && scope != recordsImportScopeZone {
+		return "", false, fmt.Errorf(
+			"unexpected import ID %q: use %q to import the domain's settings without its records, "+
+				"or %q to import every record of the zone as well",
+			id, "example.com", "example.com/"+recordsImportScopeZone)
+	}
+	if _, errs := validateDomainIsNotSubdomain(domain, "domain"); len(errs) > 0 {
+		return "", false, fmt.Errorf("unexpected import ID %q: %w", id, errs[0])
+	}
+	return strings.ToLower(domain), hasScope, nil
+}
+
+// importRecordsState imports a domain by one of two IDs. Read cannot see the
+// configuration, so it cannot tell the records a configuration declares from
+// the rest of the zone; the ID says which of the two the import is for.
+//
+// "example.com" stores no records. In MERGE the records in state are the ones
+// the resource owns, and the next apply deletes an owned record that the
+// configuration does not declare, so an import must not hand it records nobody
+// declared. A declared record that is already live is adopted by the first
+// apply (mergeRecords).
+//
+// "example.com/zone" stores every record, for a configuration that declares
+// the whole zone or is generated with -generate-config-out. The resource then
+// owns them all: one the configuration leaves out is planned for removal, as
+// for any record block removed from a MERGE configuration.
+//
+// Custom nameservers are one setting of the domain, not rows of a zone, and are
+// stored by both forms. The refresh Terraform runs after the import stores
+// email_type.
+func importRecordsState(ctx context.Context, data *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	domain, wholeZone, err := parseRecordsImportID(data.Id())
+	if err != nil {
+		return nil, err
+	}
+	client := meta.(*namecheap.Client)
+
+	data.SetId(domain)
+	if err := data.Set("domain", domain); err != nil {
+		return nil, err
+	}
+	if err := data.Set("mode", ncModeMerge); err != nil {
+		return nil, err
+	}
+
+	nsResponse, err := client.DomainsDNS.GetListWithContext(ctx, domain)
+	if err != nil {
+		// The same diagnostics a read gives: an API error alone does not say
+		// that the IP is not whitelisted or the domain is on another account.
+		return nil, firstDiagError(diagFromClientError(err))
+	}
+	if err := validateGetListResponse(nsResponse); err != nil {
+		return nil, fmt.Errorf("unable to read DNS state for domain %s: %w", domain, err)
+	}
+
+	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
+		nameservers, diags := readNameserversOverwrite(nsResponse)
+		if err := firstDiagError(diags); err != nil {
+			return nil, err
+		}
+		if err := data.Set("nameservers", *nameservers); err != nil {
+			return nil, err
+		}
+		return []*schema.ResourceData{data}, nil
+	}
+
+	if wholeZone {
+		records, _, _, diags := readRecordsOverwrite(ctx, domain, nil, client)
+		if err := firstDiagError(diags); err != nil {
+			return nil, err
+		}
+		if err := data.Set("record", *records); err != nil {
+			return nil, err
+		}
+	}
+
+	return []*schema.ResourceData{data}, nil
+}
+
+// firstDiagError returns the first error in diags as an error, for callers
+// that report through an error value, or nil when diags holds none.
+func firstDiagError(diags diag.Diagnostics) error {
+	for _, d := range diags {
+		if d.Severity != diag.Error {
+			continue
+		}
+		if d.Detail != "" {
+			return fmt.Errorf("%s: %s", d.Summary, d.Detail)
+		}
+		return fmt.Errorf("%s", d.Summary)
+	}
+	return nil
+}
+
+// customizeRecordsDiff runs the checks that fail a plan before it writes.
+func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	if err := checkModeSwitchDeletesNoUnlistedRecord(ctx, diff, meta); err != nil {
+		return err
+	}
+	return checkMXEHasMXERecord(ctx, diff, meta)
+}
+
+// checkModeSwitchDeletesNoUnlistedRecord fails the plan that takes an existing
+// resource from MERGE to OVERWRITE while the zone holds records that are neither
+// in the configuration nor in state.
+//
+// OVERWRITE deletes every record the configuration does not declare, but a plan
+// can list a removal only for a record in state, and a MERGE state holds the
+// records the resource declared. So this plan would show a change of mode and
+// nothing else, and the apply would delete the rest of the zone. That is the
+// plan an OVERWRITE configuration gets after an import by the plain domain
+// name, which stores no records.
+//
+// A record in state is not reported: the plan lists its removal, which is how
+// an import with the /zone ID lets a configuration delete the rest of a zone.
+// A new resource is not checked either; the apply warns about what it deletes.
+// A failed read skips the check and leaves the warning to the apply.
+func checkModeSwitchDeletesNoUnlistedRecord(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+	if diff.Id() == "" || diff.HasChange("domain") {
+		return nil
+	}
+	if !diff.HasChange("mode") || !diff.NewValueKnown("mode") {
+		return nil
+	}
+	priorMode, mode := diff.GetChange("mode")
+	if strings.ToUpper(priorMode.(string)) != ncModeMerge || strings.ToUpper(mode.(string)) != ncModeOverwrite {
+		return nil
+	}
+
+	config := diff.GetRawConfig()
+	// A record with a value not known until apply cannot be matched against the
+	// zone, and would be reported as one the configuration does not declare.
+	if !config.GetAttr("record").IsWhollyKnown() {
+		return nil
+	}
+	// With nameservers the apply delegates the domain and writes no records.
+	if nameservers := config.GetAttr("nameservers"); !nameservers.IsKnown() || (!nameservers.IsNull() && nameservers.LengthInt() > 0) {
+		return nil
+	}
+
+	priorRecords, records := diff.GetChange("record")
+	listed := append(records.(*schema.Set).List(), priorRecords.(*schema.Set).List()...)
+
+	client := meta.(*namecheap.Client)
+	domain := strings.ToLower(diff.Get("domain").(string))
+	unlisted, _, diags := unmanagedRecordsOverwrite(ctx, domain, listed, client)
+	if diags.HasError() || len(unlisted) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf("changing mode from %s to %s would delete %d record(s) of %s that are neither in the configuration "+
+		"nor in state, and the plan cannot list them:\n\n%s"+
+		"To delete them instead, import the resource again with the ID %q, which stores every record of the zone, "+
+		"so that the plan lists each record it removes:\n\n"+
+		"  terraform state rm <address>\n"+
+		"  terraform import <address> %s",
+		ncModeMerge, ncModeOverwrite, len(unlisted), domain, describeRecordsToKeep(unlisted),
+		domain+"/"+recordsImportScopeZone, domain+"/"+recordsImportScopeZone)
+}
+
+// checkMXEHasMXERecord fails the plan when email_type = "MXE" would leave the
 // zone with no MXE record. Namecheap accepts that write and puts the zone on
 // MXE with nothing to publish, so the domain is left without a mail server.
 //
@@ -148,7 +317,7 @@ func validateDomainIsNotSubdomain(val interface{}, key string) (warns []string, 
 // another resource manages counts too, so when the configuration has none the
 // live zone is read, once per plan that writes; a failed read skips the check
 // and leaves it to the apply.
-func customizeRecordsDiff(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
+func checkMXEHasMXERecord(ctx context.Context, diff *schema.ResourceDiff, meta interface{}) error {
 	config := diff.GetRawConfig()
 	if emailType := configuredEmailType(config); emailType == nil || *emailType != namecheap.EmailTypeMXE {
 		return nil
@@ -288,7 +457,14 @@ func resourceRecordCreate(ctx context.Context, data *schema.ResourceData, meta i
 
 	var diags diag.Diagnostics
 
-	if mode == ncModeMerge && records != nil {
+	// A MERGE configuration with email_type and nothing else still sets the mail
+	// mode: it is written with the records the zone already has. Without this
+	// the create wrote nothing, state said the mode was set, and it took a
+	// second apply to set it. OVERWRITE is left out: with no records it would
+	// delete the whole zone, and its next plan lists those removals first.
+	mailModeOnly := emailType != nil && records == nil && nameservers == nil
+
+	if mode == ncModeMerge && (records != nil || mailModeOnly) {
 		recordDiags := createRecordsMerge(ctx, domain, emailType, records, client)
 		if recordDiags.HasError() {
 			return recordDiags
@@ -371,7 +547,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			_ = data.Set("nameservers", *realNameservers)
 		}
 
-		if mode == ncModeOverwrite || mode == ncModeImport {
+		if mode == ncModeOverwrite {
 			realNameservers, nsDiags := readNameserversOverwrite(nsResponse)
 			if nsDiags.HasError() {
 				return nsDiags
@@ -400,7 +576,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 			}
 		}
 
-		if mode == ncModeOverwrite || mode == ncModeImport {
+		if mode == ncModeOverwrite {
 			realRecords, realEmailType, unmanagedRecords, recordDiags := readRecordsOverwrite(ctx, domain, records, client)
 			if recordDiags.HasError() {
 				return recordDiags
@@ -411,9 +587,7 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 				_ = data.Set("email_type", *realEmailType)
 			}
 
-			// Refresh-time warning only for state mode - IMPORT is adopting
-			// these records, not about to delete them (#65, #250).
-			if mode == ncModeOverwrite && len(unmanagedRecords) > 0 {
+			if len(unmanagedRecords) > 0 {
 				diags = append(diags, buildUnmanagedDeletionWarning(domain, unmanagedRecords, "will delete"))
 			}
 		}
@@ -421,10 +595,6 @@ func resourceRecordRead(ctx context.Context, data *schema.ResourceData, meta int
 		if nameservers != nil {
 			_ = data.Set("nameservers", []string{})
 		}
-	}
-
-	if mode == ncModeImport {
-		_ = data.Set("mode", ncModeMerge)
 	}
 
 	return diags
