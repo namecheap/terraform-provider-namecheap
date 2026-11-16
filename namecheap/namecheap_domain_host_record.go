@@ -483,7 +483,7 @@ func resourceNamecheapDomainHostRecordImport(ctx context.Context, data *schema.R
 	client := meta.(*namecheap.Client)
 	found, live, diags := hostRecordLookup(ctx, client, strings.ToLower(domain), want)
 	if diags.HasError() {
-		return nil, hostRecordImportError(domain, diags)
+		return nil, importDiagError(domain, diags)
 	}
 	if !found {
 		return nil, fmt.Errorf("no %s record for %q pointing at %q exists on %s; "+
@@ -596,16 +596,6 @@ func hostRecordAmbiguousError(domain string, want namecheap.DomainsDNSHostRecord
 			len(matches), domain, derefString(want.RecordType), derefString(want.HostName), derefString(want.Address),
 			strings.Join(candidates, "\n")),
 	}}
-}
-
-// hostRecordImportError flattens diagnostics into the single error the importer
-// interface allows, keeping the detail: for an ambiguous match that detail is the
-// list of candidates, which is the whole value of the message.
-func hostRecordImportError(domain string, diags diag.Diagnostics) error {
-	if diags[0].Detail == "" {
-		return fmt.Errorf("reading %s during import: %s", domain, diags[0].Summary)
-	}
-	return fmt.Errorf("reading %s during import: %s: %s", domain, diags[0].Summary, diags[0].Detail)
 }
 
 // hostRecordWriteError turns an SDK write failure into diagnostics that name the

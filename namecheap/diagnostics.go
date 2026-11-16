@@ -77,3 +77,20 @@ func diagFromClientError(err error) diag.Diagnostics {
 
 	return diag.FromErr(err)
 }
+
+// importDiagError turns diagnostics into the single error an importer returns,
+// or nil when diags holds no error. It reports the first error and keeps its
+// detail: the detail is where the remediation text of an API error is, and for
+// an ambiguous record match it is the list of candidates.
+func importDiagError(domain string, diags diag.Diagnostics) error {
+	for _, d := range diags {
+		if d.Severity != diag.Error {
+			continue
+		}
+		if d.Detail == "" {
+			return fmt.Errorf("reading %s during import: %s", domain, d.Summary)
+		}
+		return fmt.Errorf("reading %s during import: %s: %s", domain, d.Summary, d.Detail)
+	}
+	return nil
+}
