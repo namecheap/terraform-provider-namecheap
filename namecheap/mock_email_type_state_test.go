@@ -51,10 +51,12 @@ resource "namecheap_domain_records" "test" {
 			CheckDestroy:      mockCheckEmailType(m, domain, "GMAIL"),
 			Steps: []resource.TestStep{
 				{
+					// The config declares the zone's only record, so this is the
+					// whole-zone import.
 					Config:             config("GMAIL"),
 					ResourceName:       resourceName,
 					ImportState:        true,
-					ImportStateId:      domain,
+					ImportStateId:      domain + "/zone",
 					ImportStatePersist: true,
 					ImportStateCheck: func(states []*terraform.InstanceState) error {
 						if got := states[0].Attributes["email_type"]; got != "GMAIL" {

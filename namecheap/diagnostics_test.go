@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
@@ -81,4 +82,37 @@ func TestDiagFromClientError_Fallthrough(t *testing.T) {
 			assert.Equal(t, c.err.Error(), diags[0].Summary)
 		})
 	}
+}
+
+// TestImportDiagError covers the one place that turns diagnostics into the
+// single error an importer returns, for every resource that imports.
+func TestImportDiagError(t *testing.T) {
+	t.Run("keeps the detail", func(t *testing.T) {
+		// For an ambiguous record match the detail is the list of candidates,
+		// which is the whole message.
+		err := importDiagError("example.com", diag.Diagnostics{{
+			Severity: diag.Error,
+			Summary:  "Ambiguous DNS record on example.com",
+			Detail:   "  - TTL 300\n  - TTL 7200",
+		}})
+		assert.EqualError(t, err, "reading example.com during import: Ambiguous DNS record on example.com:   - TTL 300\n  - TTL 7200")
+	})
+
+	t.Run("no detail", func(t *testing.T) {
+		err := importDiagError("example.com", diag.Diagnostics{{Severity: diag.Error, Summary: "Domain not found"}})
+		assert.EqualError(t, err, "reading example.com during import: Domain not found")
+	})
+
+	t.Run("skips a warning that comes before the error", func(t *testing.T) {
+		err := importDiagError("example.com", diag.Diagnostics{
+			{Severity: diag.Warning, Summary: "Unmanaged records"},
+			{Severity: diag.Error, Summary: "Domain not found"},
+		})
+		assert.EqualError(t, err, "reading example.com during import: Domain not found")
+	})
+
+	t.Run("no error", func(t *testing.T) {
+		assert.NoError(t, importDiagError("example.com", nil))
+		assert.NoError(t, importDiagError("example.com", diag.Diagnostics{{Severity: diag.Warning, Summary: "Unmanaged records"}}))
+	})
 }

@@ -54,6 +54,11 @@ rather than added a second time: the provider writes it once, with the `ttl` and
 the resource owns it from then on. Removing it from the configuration, or destroying the resource, deletes it, even if
 it existed before Terraform. Declaring nameservers that already exist still fails with a duplicate error.
 
+-> You do not need to import a domain to manage some of its records in `MERGE` mode: declare the records and apply.
+The plan shows every declared record as added, including one that already exists on the domain, because a plan compares
+the configuration with Terraform's state and not with the zone. See the
+[importing guide](importing.md#namecheap_domain_records-two-import-ids).
+
 The `MERGE` mode allows you to control records related to the same domain as a different resources. Declare each record
 in one resource only: two resources declaring the same record both own it, and destroying either one deletes it.
 
@@ -106,6 +111,15 @@ The provider cannot make `OVERWRITE` safe by itself — deleting anything not in
 Each warning lists every record about to be deleted (type, host, address, TTL, MX preference where relevant) and includes a ready-to-paste `record { ... }` block per record. Paste the blocks you want to keep into your configuration and re-run `terraform plan` — it should come back empty, confirming those records are now adopted rather than pending deletion.
 
 Both warnings only ever run against data the read step already fetched, so they add at most one extra API call (the apply-time re-check) — never anything during `plan`/refresh beyond the read `OVERWRITE` already performs.
+
+#### Switching an existing resource from `MERGE` to `OVERWRITE`
+
+This is the one case the provider refuses instead of warning. A `MERGE` state holds only the records the resource declared, so the plan of the switch could show a change of `mode` and nothing else, while the apply would delete every other record of the zone. The plan fails while the zone holds a record that is neither in the configuration nor in state, and lists each such record with a ready-to-paste `record { ... }` block. The same applies to an `OVERWRITE` configuration after `terraform import` by the plain domain name, which stores no records. There are two ways on:
+
+- **Keep the records:** paste the blocks into the configuration and plan again.
+- **Delete the records:** import the resource again with the `<domain>/zone` ID (`terraform state rm`, then `terraform import`). That import stores every record of the zone, so the plan lists each one it removes. See the [importing guide](importing.md#namecheap_domain_records-two-import-ids).
+
+The check costs one extra API call, on plans that change `mode` only.
 
 If you'd rather not review this list every time a shared domain drifts, use [`MERGE`](#merge) mode instead — it only ever touches the records it manages.
 

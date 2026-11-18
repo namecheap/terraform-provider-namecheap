@@ -3,7 +3,6 @@ package namecheap_provider
 import (
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/namecheap/go-namecheap-sdk/v2/namecheap"
 	"github.com/stretchr/testify/assert"
 )
@@ -236,25 +235,6 @@ func TestDomainHostRecordAmbiguousErrorListsCandidates(t *testing.T) {
 		{Name: namecheap.String("@"), Type: namecheap.String("MX"), Address: namecheap.String("mail.example.com."), TTL: namecheap.Int(1800), MXPref: namecheap.Int(10)},
 	})
 	assert.Contains(t, mxDiags[0].Detail, "MX preference 10", "for MX the preference is what a user has to look at")
-}
-
-// TestDomainHostRecordImportErrorKeepsDetail covers the flattening of diagnostics into
-// the single error the importer interface allows: dropping the detail would throw
-// away the ambiguous-match candidate list, which is the whole message.
-func TestDomainHostRecordImportErrorKeepsDetail(t *testing.T) {
-	withDetail := hostRecordImportError("example.com", diag.Diagnostics{{
-		Severity: diag.Error,
-		Summary:  "Ambiguous DNS record on example.com",
-		Detail:   "  - TTL 300\n  - TTL 7200",
-	}})
-	assert.ErrorContains(t, withDetail, "Ambiguous DNS record on example.com")
-	assert.ErrorContains(t, withDetail, "TTL 7200")
-
-	bare := hostRecordImportError("example.com", diag.Diagnostics{{
-		Severity: diag.Error,
-		Summary:  "Domain not found",
-	}})
-	assert.ErrorContains(t, bare, "reading example.com during import: Domain not found")
 }
 
 // TestDomainHostRecordLookupMatchesNormalized proves the lookup compares records the

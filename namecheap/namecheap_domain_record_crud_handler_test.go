@@ -14,58 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestReadImportMode_NamecheapDNS_ConvertsModeToMerge(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		command := r.FormValue("Command")
-
-		switch command {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(true, nil))
-		case "namecheap.domains.dns.getHosts":
-			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
-				{Name: "@", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
-			}))
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	resource := resourceNamecheapDomainRecords()
-	data := resource.TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeImport)
-
-	diags := resourceRecordRead(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
-}
-
-func TestReadImportMode_CustomNameservers_ConvertsModeToMerge(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		command := r.FormValue("Command")
-
-		switch command {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(false, []string{"ns1.custom.com", "ns2.custom.com"}))
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	resource := resourceNamecheapDomainRecords()
-	data := resource.TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	_ = data.Set("mode", ncModeImport)
-
-	diags := resourceRecordRead(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-	assert.Equal(t, ncModeMerge, data.Get("mode").(string))
-}
-
 func TestResourceRecordCreate_MergeWithRecords(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
@@ -415,35 +363,6 @@ func TestResourceRecordRead_OverwriteWarnsAboutUnmanagedRecords(t *testing.T) {
 		assert.Contains(t, diags[0].Summary, "will delete 1 record(s)")
 		assert.Contains(t, diags[0].Detail, "api")
 	}
-}
-
-func TestResourceRecordRead_ImportDoesNotWarnAboutUnmanagedRecords(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		switch r.FormValue("Command") {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(true, nil))
-		case "namecheap.domains.dns.getHosts":
-			_, _ = fmt.Fprint(w, getHostsXML("NONE", []hostEntry{
-				{Name: "www", Type: "A", Address: "1.2.3.4", MXPref: 10, TTL: 1800},
-				{Name: "api", Type: "A", Address: "5.6.7.8", MXPref: 10, TTL: 1800},
-			}))
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	// Mimic `terraform import`: the importer only sets domain and mode; there
-	// are no prior-state records to compare against, and import is adopting
-	// everything it finds, not about to delete it.
-	_ = data.Set("mode", ncModeImport)
-
-	diags := resourceRecordRead(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-	assert.Empty(t, diags, "IMPORT must never warn about unmanaged deletion")
 }
 
 func TestResourceRecordRead_MergeWithCustomNameservers(t *testing.T) {
@@ -850,36 +769,6 @@ func TestResourceRecordRead_MergeWithEmailType(t *testing.T) {
 	diags := resourceRecordRead(context.TODO(), data, client)
 	assert.False(t, diags.HasError())
 	assert.Equal(t, "MX", data.Get("email_type").(string))
-}
-
-func TestResourceRecordRead_ImportStoresEmailType(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		switch r.FormValue("Command") {
-		case "namecheap.domains.dns.getList":
-			_, _ = fmt.Fprint(w, getListXML(true, nil))
-		case "namecheap.domains.dns.getHosts":
-			_, _ = fmt.Fprint(w, getHostsXML("MX", []hostEntry{
-				{Name: "@", Type: "MX", Address: "mail.test.com", MXPref: 10, TTL: 1800},
-			}))
-		}
-	}))
-	defer server.Close()
-
-	client := newTestClient(server.URL)
-	data := resourceNamecheapDomainRecords().TestResourceData()
-	data.SetId("test.com")
-	_ = data.Set("domain", "test.com")
-	// Mimic `terraform import`: only domain and mode are populated by the
-	// importer; email_type is absent from state.
-	_ = data.Set("mode", ncModeImport)
-
-	diags := resourceRecordRead(context.TODO(), data, client)
-	assert.False(t, diags.HasError())
-	// Every read stores the zone's mail mode, so the import path picks up the
-	// "MX" the API reports even though email_type was absent from state.
-	assert.Equal(t, "MX", data.Get("email_type").(string))
-	assert.Equal(t, 1, data.Get("record").(*schema.Set).Len())
 }
 
 // Read of a domain on custom nameservers must reuse the getList response it

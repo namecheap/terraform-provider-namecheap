@@ -2,7 +2,7 @@
 page_title: "namecheap_domain_host_record Resource - terraform-provider-namecheap"
 subcategory: "DNS"
 description: |-
-  Manages a single DNS host record on a domain, leaving all other records untouched. Mutually exclusive with namecheap_domain_records for the same domain.
+  Manages a single DNS host record on a domain, leaving all other records untouched. On one domain it can sit next to a namecheap_domain_records that declares no records, and must not be combined with one that does.
 ---
 
 # namecheap_domain_host_record (Resource)
@@ -57,11 +57,40 @@ resource "namecheap_domain_host_record" "fleet" {
 
 ## Choosing between this and `namecheap_domain_records`
 
-~> **Do not point both at the same domain.** `namecheap_domain_records` manages a
-domain's entire record set; this resource manages one record within it. Used
-together on one domain they fight — the zone-level resource will delete records
-this one created (in `OVERWRITE` mode) or fight over ownership (in `MERGE`),
-because neither knows about the other.
+~> **Do not manage the records of one domain with both.** `namecheap_domain_records`
+with `record` blocks manages a set of records; this resource manages one record.
+Used together on one domain they fight — the zone-level resource will delete
+records this one created (in `OVERWRITE` mode) or fight over ownership (in
+`MERGE`), because neither knows about the other.
+
+The one combination that works is a mail-only `namecheap_domain_records`: `MERGE`
+mode (the default), `email_type` and **no** `record` blocks. It holds no records,
+so it leaves the records you manage alone, and each record gets its own
+`namecheap_domain_host_record`:
+
+```terraform
+# The domain's mail mode, and no records.
+resource "namecheap_domain_records" "mail" {
+  domain     = "example.com"
+  email_type = "GMAIL"
+}
+
+# One resource per record this configuration owns. Every other record in the
+# zone, such as one a dynamic DNS client keeps up to date, is left alone.
+resource "namecheap_domain_host_record" "www" {
+  domain   = "example.com"
+  hostname = "www"
+  type     = "A"
+  address  = "203.0.113.10"
+}
+```
+
+Import the mail-only resource by the plain domain name (`example.com`, not
+`example.com/zone`); see the [importing guide](../guides/importing.md).
+
+-> An apply that sets `email_type` removes the two default parking records of a
+new domain (the `www` CNAME to `parkingpage.namecheap.com` and the `@` URL
+redirect), as creating any `namecheap_domain_records` does.
 
 - **Use `namecheap_domain_host_record`** when different records are owned by
   different people, modules or workspaces, or when you want `for_each` over a map

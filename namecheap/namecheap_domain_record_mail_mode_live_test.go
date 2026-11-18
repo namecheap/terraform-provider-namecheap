@@ -237,10 +237,12 @@ func TestAccNamecheapDomainRecordsMailMode(t *testing.T) {
 			),
 			Steps: []resource.TestStep{
 				{
+					// The config declares the zone's only record, so this is the
+					// whole-zone import.
 					Config:             config(namecheap.EmailTypeGmail),
 					ResourceName:       "namecheap_domain_records.mail-mode",
 					ImportState:        true,
-					ImportStateId:      *testAccDomain,
+					ImportStateId:      *testAccDomain + "/zone",
 					ImportStatePersist: true,
 					ImportStateCheck: func(states []*terraform.InstanceState) error {
 						if got := states[0].Attributes["email_type"]; got != namecheap.EmailTypeGmail {
