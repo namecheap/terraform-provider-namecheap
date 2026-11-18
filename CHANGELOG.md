@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.10.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.11...v2.10.0) (2026-11-18)
+
+
+### Features
+
+* import namecheap_domain_records with the ID example.com/zone to store every record of the zone, for a configuration that declares the whole zone; an OVERWRITE configuration imported by the plain domain name now fails its plan and names this ID ([442f138](https://github.com/namecheap/terraform-provider-namecheap/commit/442f1384fb60272c6aa3a8167798e7a50ef9f19e))
+* nameservers of namecheap_domain_records is the domain's whole list in MERGE mode, as it already is in OVERWRITE. After upgrading, a MERGE configuration that declares only some of a domain's nameservers plans the removal of the others, and one without nameservers on a domain delegated outside Terraform plans the return to Namecheap DNS; the first refresh warns and prints the nameservers line that keeps the domain as it is. Declare a domain's nameservers in one resource ([1ba2965](https://github.com/namecheap/terraform-provider-namecheap/commit/1ba29658a2e5777c2008f5b21bfca2ff9dec3d95))
+
+
+### Bug Fixes
+
+* a domain spelled in another case than the one in state no longer plans a replacement of namecheap_domain_records ([442f138](https://github.com/namecheap/terraform-provider-namecheap/commit/442f1384fb60272c6aa3a8167798e7a50ef9f19e))
+* a MERGE namecheap_domain_records with email_type and no records sets the mail mode on the first apply instead of the second ([442f138](https://github.com/namecheap/terraform-provider-namecheap/commit/442f1384fb60272c6aa3a8167798e7a50ef9f19e))
+* a nameserver added to a domain outside Terraform now shows in the plan of a MERGE namecheap_domain_records as removed ([1ba2965](https://github.com/namecheap/terraform-provider-namecheap/commit/1ba29658a2e5777c2008f5b21bfca2ff9dec3d95))
+* a plan that changes records on a domain delegated in the dashboard now lists the nameservers the apply removes; a MERGE apply used to move the domain back to Namecheap DNS with only the records in the plan ([1ba2965](https://github.com/namecheap/terraform-provider-namecheap/commit/1ba29658a2e5777c2008f5b21bfca2ff9dec3d95))
+* a plan that switches namecheap_domain_records from MERGE to OVERWRITE now fails while the zone holds records that are neither in the configuration nor in state, instead of deleting them during the apply; the error lists each record as a paste-ready record block ([442f138](https://github.com/namecheap/terraform-provider-namecheap/commit/442f1384fb60272c6aa3a8167798e7a50ef9f19e))
+* declaring a nameserver the domain already uses no longer fails with "Duplicate nameserver" ([1ba2965](https://github.com/namecheap/terraform-provider-namecheap/commit/1ba29658a2e5777c2008f5b21bfca2ff9dec3d95))
+* terraform import of namecheap_domain_records by the domain name (example.com) no longer stores the zone's records, so the first apply of a MERGE configuration no longer deletes the records it does not declare ([442f138](https://github.com/namecheap/terraform-provider-namecheap/commit/442f1384fb60272c6aa3a8167798e7a50ef9f19e))
+
 ## [2.9.11](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.10...v2.9.11) (2026-11-12)
 
 
