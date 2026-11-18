@@ -198,7 +198,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 	if err != nil {
 		// The same diagnostics a read gives: an API error alone does not say
 		// that the IP is not whitelisted or the domain is on another account.
-		return nil, firstDiagError(diagFromClientError(err))
+		return nil, importDiagError(domain, diagFromClientError(err))
 	}
 	if err := validateGetListResponse(nsResponse); err != nil {
 		return nil, fmt.Errorf("unable to read DNS state for domain %s: %w", domain, err)
@@ -206,7 +206,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 
 	if !*nsResponse.DomainDNSGetListResult.IsUsingOurDNS {
 		nameservers, diags := readNameservers(nsResponse)
-		if err := firstDiagError(diags); err != nil {
+		if err := importDiagError(domain, diags); err != nil {
 			return nil, err
 		}
 		if err := data.Set("nameservers", *nameservers); err != nil {
@@ -217,7 +217,7 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 
 	if wholeZone {
 		records, _, _, diags := readRecordsOverwrite(ctx, domain, nil, client)
-		if err := firstDiagError(diags); err != nil {
+		if err := importDiagError(domain, diags); err != nil {
 			return nil, err
 		}
 		if err := data.Set("record", *records); err != nil {
@@ -226,21 +226,6 @@ func importRecordsState(ctx context.Context, data *schema.ResourceData, meta int
 	}
 
 	return []*schema.ResourceData{data}, nil
-}
-
-// firstDiagError returns the first error in diags as an error, for callers
-// that report through an error value, or nil when diags holds none.
-func firstDiagError(diags diag.Diagnostics) error {
-	for _, d := range diags {
-		if d.Severity != diag.Error {
-			continue
-		}
-		if d.Detail != "" {
-			return fmt.Errorf("%s: %s", d.Summary, d.Detail)
-		}
-		return fmt.Errorf("%s", d.Summary)
-	}
-	return nil
 }
 
 // customizeRecordsDiff runs the checks that fail a plan before it writes.

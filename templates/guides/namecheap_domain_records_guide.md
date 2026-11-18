@@ -54,6 +54,11 @@ rather than added a second time: the provider writes it once, with the `ttl` and
 the resource owns it from then on. Removing it from the configuration, or destroying the resource, deletes it, even if
 it existed before Terraform.
 
+-> You do not need to import a domain to manage some of its records in `MERGE` mode: declare the records and apply.
+The plan shows every declared record as added, including one that already exists on the domain, because a plan compares
+the configuration with Terraform's state and not with the zone. See the
+[importing guide](importing.md#namecheap_domain_records-two-import-ids).
+
 The `MERGE` mode allows you to control records related to the same domain as a different resources. Declare each record
 in one resource only: two resources declaring the same record both own it, and destroying either one deletes it.
 
