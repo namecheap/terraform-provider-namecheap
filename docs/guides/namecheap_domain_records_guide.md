@@ -336,7 +336,8 @@ nameservers should be inserted as custom nameservers.
 - Applying it replaces the nameservers the domain has, including ones set in the Namecheap dashboard.
 - Every refresh and import reads all of the domain's nameservers into state, so a nameserver added outside Terraform shows in the plan as removed.
 - A configuration without `nameservers` means Namecheap DNS. If the domain is delegated, the plan lists its nameservers as removed, and the apply moves the domain back to Namecheap DNS before it writes any record.
-- Destroying a resource that holds nameservers returns the domain to Namecheap DNS.
+- Destroying a resource that holds nameservers returns the domain to Namecheap DNS. The plan of the destroy shows this only as the `nameservers` lines being removed.
+- To stop managing a domain's nameservers and keep them, remove the resource from state instead of destroying it: `terraform state rm`, or a `removed` block with `destroy = false` on Terraform 1.7 and later.
 - Declare a domain's nameservers in one resource only.
 
 -> **Declare the nameservers of every delegated domain.** When a refresh finds a nameserver that state does not hold,
