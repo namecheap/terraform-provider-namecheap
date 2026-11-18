@@ -894,8 +894,10 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 		})
 	})
 
-	t.Run("ns_on_conflict_merge", func(t *testing.T) {
-		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
+	// The configured nameservers are the domain's whole delegation in MERGE as
+	// in OVERWRITE: a change of the list replaces it.
+	t.Run("ns_update_merge", func(t *testing.T) {
+		var domainNSResponse namecheap.DomainsDNSGetListCommandResponse
 
 		resource.Test(t, resource.TestCase{
 			PreCheck: func() {
@@ -903,10 +905,29 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 			},
 			ProviderFactories: testAccProviderFactories,
 			CheckDestroy: resource.ComposeTestCheckFunc(
-				testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-				testAccDomainNameserversDefault(&domainNameserversResponse),
+				testAccDomainNameserversAPIFetch(&domainNSResponse),
+				testAccDomainNameserversDefault(&domainNSResponse),
 			),
 			Steps: []resource.TestStep{
+				{
+					Config: fmt.Sprintf(`
+						resource "namecheap_domain_records" "my-domain" {
+							domain = "%s"
+							mode = "MERGE"
+
+							nameservers = [
+								"dns1.namecheaphosting.com",
+								"dns2.namecheaphosting.com",
+							]
+						}
+					`, *testAccDomain),
+					Check: resource.ComposeTestCheckFunc(
+						testAccDomainNameserversAPIFetch(&domainNSResponse),
+						testAccDomainNameserversLength(&domainNSResponse, 2),
+						testAccDomainNameserversContain(&domainNSResponse, "dns1.namecheaphosting.com"),
+						testAccDomainNameserversContain(&domainNSResponse, "dns2.namecheaphosting.com"),
+					),
+				},
 				{
 					Config: fmt.Sprintf(`
 						resource "namecheap_domain_records" "my-domain" {
@@ -920,81 +941,10 @@ func TestAccNamecheapDomainRecords(t *testing.T) {
 						}
 					`, *testAccDomain),
 					Check: resource.ComposeTestCheckFunc(
-						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-						testAccDomainNameserversLength(&domainNameserversResponse, 2),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1467.awsdns-55.org"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
-					),
-				},
-				{
-					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain" {
-							domain = "%[1]s"
-							mode = "MERGE"
-
-							nameservers = [
-								"ns-1467.awsdns-55.org",
-								"ns-1076.awsdns-06.org",
-							]
-						}
-
-						resource "namecheap_domain_records" "my-domain-two" {
-							domain = "%[1]s"
-							mode = "MERGE"
-
-							nameservers = [
-								"ns-1467.awsdns-55.org",
-							]
-						}
-					`, *testAccDomain),
-					ExpectError: regexp.MustCompile("Error: Duplicate nameserver"),
-				},
-			},
-		})
-	})
-
-	t.Run("ns_parallel_merge", func(t *testing.T) {
-		var domainNameserversResponse namecheap.DomainsDNSGetListCommandResponse
-
-		resource.Test(t, resource.TestCase{
-			PreCheck: func() {
-				resetDomainNameservers(t)
-			},
-			ProviderFactories: testAccProviderFactories,
-			CheckDestroy: resource.ComposeTestCheckFunc(
-				testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-				testAccDomainNameserversDefault(&domainNameserversResponse),
-			),
-			Steps: []resource.TestStep{
-				{
-					Config: fmt.Sprintf(`
-						resource "namecheap_domain_records" "my-domain-one" {
-							domain = "%[1]s"
-							mode = "MERGE"
-
-							nameservers = [
-								"ns-1467.awsdns-55.org",
-								"ns-1076.awsdns-06.org",
-							]
-						}
-
-						resource "namecheap_domain_records" "my-domain-two" {
-							domain = "%[1]s"
-							mode = "MERGE"
-
-							nameservers = [
-								"dns1.namecheaphosting.com",
-								"dns2.namecheaphosting.com",
-							]
-						}
-					`, *testAccDomain),
-					Check: resource.ComposeTestCheckFunc(
-						testAccDomainNameserversAPIFetch(&domainNameserversResponse),
-						testAccDomainNameserversLength(&domainNameserversResponse, 4),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1467.awsdns-55.org"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "ns-1076.awsdns-06.org"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "dns1.namecheaphosting.com"),
-						testAccDomainNameserversContain(&domainNameserversResponse, "dns2.namecheaphosting.com"),
+						testAccDomainNameserversAPIFetch(&domainNSResponse),
+						testAccDomainNameserversLength(&domainNSResponse, 2),
+						testAccDomainNameserversContain(&domainNSResponse, "ns-1467.awsdns-55.org"),
+						testAccDomainNameserversContain(&domainNSResponse, "ns-1076.awsdns-06.org"),
 					),
 				},
 			},

@@ -389,6 +389,14 @@ func checkLiveTrailingDot(t *testing.T, host, recordType string) resource.TestCh
 func TestAccNamecheapDomainHostRecordMXPreference(t *testing.T) {
 	primaryMailHost := "mail1." + *testAccDomain
 	mailHost := "mail2." + *testAccDomain
+	probeMailHost := "mail3." + *testAccDomain
+
+	// A run that could not finish its cleanup leaves this test's MX records behind,
+	// and the seed below cannot be written over them. Take them out first, so one
+	// failed run does not fail every run after it.
+	if err := removeLiveMXLeftovers(primaryMailHost, mailHost, probeMailHost); err != nil {
+		t.Fatalf("failed to remove the MX records an earlier run left on %s: %v", *testAccDomain, err)
+	}
 
 	// The primary MX, and the EmailType=MX the API requires before any MX record can
 	// be written. This resource does not manage EmailType, so the zone has to arrive
@@ -404,10 +412,19 @@ func TestAccNamecheapDomainHostRecordMXPreference(t *testing.T) {
 		[]namecheap.RecordOption{namecheap.WithEmailType(restoreEmailType)},
 	)
 
+	// Registered after the seed, so it runs before the seed's own cleanup. A probe
+	// record that outlived its probe would make that cleanup invalid: the zone
+	// cannot leave MX while an MX record is still in it.
+	t.Cleanup(func() {
+		if err := removeLiveMXLeftovers(probeMailHost); err != nil {
+			t.Errorf("failed to remove the probe's MX record from %s: %v", *testAccDomain, err)
+		}
+	})
+
 	// With an MX zone set up, record what the API does with the two MX shapes it
 	// will not support, so the evidence is in the log rather than in a guess.
 	probeSameExchangeMXPair(t, primaryMailHost)
-	probeMXPreferenceChange(t, "mail3."+*testAccDomain)
+	probeMXPreferenceChange(t, probeMailHost)
 
 	config := func(pref int) string {
 		return fmt.Sprintf(`
@@ -548,6 +565,73 @@ func probeMXPreferenceChange(t *testing.T, exchange string) {
 	}
 }
 
+// liveMXRemoval is one write of the plan liveMXLeftoverRemovals builds: the record to
+// delete and the EmailType that write carries.
+type liveMXRemoval struct {
+	selector  namecheap.RecordSelector
+	emailType string
+}
+
+// liveMXLeftoverRemovals plans the removal of every MX record in zone that points at
+// one of exchanges. Each write keeps the zone on EmailType=MX while an MX record
+// remains after it. The write that removes the last MX record moves the zone to
+// NONE, because the API rejects an MX zone without an MX record.
+func liveMXLeftoverRemovals(zone []namecheap.DomainsDNSHostRecordDetailed, exchanges ...string) []liveMXRemoval {
+	leftover := make(map[string]bool, len(exchanges))
+	for _, exchange := range exchanges {
+		leftover[hostRecordNormalizedAddress(exchange)] = true
+	}
+
+	var removals []liveMXRemoval
+	otherMX := 0
+	for _, record := range zone {
+		if derefString(record.Type) != namecheap.RecordTypeMX {
+			continue
+		}
+		if !leftover[hostRecordNormalizedAddress(derefString(record.Address))] {
+			otherMX++
+			continue
+		}
+		removals = append(removals, liveMXRemoval{
+			selector: namecheap.RecordSelector{
+				HostName:   record.Name,
+				RecordType: record.Type,
+				Address:    record.Address,
+				MXPref:     namecheap.UInt8(uint8(derefInt(record.MXPref))),
+			},
+			emailType: namecheap.EmailTypeMX,
+		})
+	}
+
+	if otherMX == 0 && len(removals) > 0 {
+		removals[len(removals)-1].emailType = namecheap.EmailTypeNone
+	}
+	return removals
+}
+
+// removeLiveMXLeftovers deletes the MX records for exchanges from the test domain.
+// It reads the zone first and writes nothing when none of them is there.
+func removeLiveMXLeftovers(exchanges ...string) error {
+	if !liveTestConfigured() {
+		return nil
+	}
+
+	zone, err := liveZoneRecords()
+	if err != nil {
+		return err
+	}
+
+	for _, removal := range liveMXLeftoverRemovals(zone, exchanges...) {
+		if _, err := namecheapSDKClient.DomainsDNS.DeleteRecordsWithContext(
+			context.Background(), *testAccDomain, removal.selector,
+			namecheap.WithEmailType(removal.emailType)); err != nil {
+			return fmt.Errorf("removing MX %q at preference %d: %w",
+				derefString(removal.selector.Address), *removal.selector.MXPref, err)
+		}
+	}
+	return nil
+}
+
 // liveMXSummary renders the MX records for one exchange, for a probe's log line.
 func liveMXSummary(exchange string) string {
 	zone, err := liveZoneRecords()
@@ -660,4 +744,64 @@ resource "namecheap_domain_host_record" "adopted" {
 			},
 		},
 	})
+}
+
+// TestLiveMXLeftoverRemovals pins the plan the MX test's recovery follows, without the
+// API: which rows it takes out, and the EmailType each write carries.
+func TestLiveMXLeftoverRemovals(t *testing.T) {
+	mx := func(address string, pref int) namecheap.DomainsDNSHostRecordDetailed {
+		return namecheap.DomainsDNSHostRecordDetailed{
+			Name:    namecheap.String("@"),
+			Type:    namecheap.String(namecheap.RecordTypeMX),
+			Address: namecheap.String(address),
+			MXPref:  namecheap.Int(pref),
+		}
+	}
+	other := namecheap.DomainsDNSHostRecordDetailed{
+		Name:    namecheap.String("www"),
+		Type:    namecheap.String(namecheap.RecordTypeA),
+		Address: namecheap.String("192.0.2.10"),
+		MXPref:  namecheap.Int(10),
+	}
+
+	describe := func(removals []liveMXRemoval) []string {
+		out := make([]string, 0, len(removals))
+		for _, removal := range removals {
+			out = append(out, fmt.Sprintf("%s pref=%d as %s",
+				derefString(removal.selector.Address), *removal.selector.MXPref, removal.emailType))
+		}
+		return out
+	}
+
+	cases := []struct {
+		name string
+		zone []namecheap.DomainsDNSHostRecordDetailed
+		want []string
+	}{
+		{
+			name: "a clean zone needs no write",
+			zone: []namecheap.DomainsDNSHostRecordDetailed{other},
+		},
+		{
+			// The state a failed cleanup leaves: the seeded primary and the probe's row.
+			// The last removal moves the zone off MX, because an MX zone must keep an MX row.
+			name: "only leftovers hold the zone on MX",
+			zone: []namecheap.DomainsDNSHostRecordDetailed{other, mx("mail1.example.com.", 10), mx("mail3.example.com.", 20)},
+			want: []string{"mail1.example.com. pref=10 as MX", "mail3.example.com. pref=20 as NONE"},
+		},
+		{
+			name: "an MX row that is not a leftover keeps the zone on MX",
+			zone: []namecheap.DomainsDNSHostRecordDetailed{mx("mail3.example.com.", 30), mx("mx.elsewhere.example.", 5)},
+			want: []string{"mail3.example.com. pref=30 as MX"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := describe(liveMXLeftoverRemovals(tc.zone, "mail1.example.com", "mail3.example.com"))
+			if strings.Join(got, "; ") != strings.Join(tc.want, "; ") {
+				t.Errorf("removals = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

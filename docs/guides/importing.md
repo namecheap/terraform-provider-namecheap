@@ -111,8 +111,9 @@ the configuration is deleted on the next apply.
 -> **`MERGE` mode does not need an import.** Applying a `MERGE` configuration to
 a domain that was never imported gives the same result as importing by the plain
 domain name first: declared records that already exist are adopted, everything
-else is left alone. Import first when the domain uses custom nameservers, or
-when you want the plan to show an `email_type` change before it is made.
+else is left alone. Import first when the domain uses custom nameservers, so
+that the plan shows what happens to them, or when you want the plan to show an
+`email_type` change before it is made.
 
 ~> **`OVERWRITE` mode: import with `/zone`.** An `OVERWRITE` configuration
 deletes every record it does not declare. After a `/zone` import the plan lists
@@ -297,13 +298,19 @@ resource "namecheap_domain_records" "portfolio" {
 ```
 
 The plain domain name is deliberate here: it stores each domain's settings and
-none of its records, so the plan after the import is empty and no record is at
-risk. Add records afterwards, per domain, in `record` blocks or as
+none of its records, so no record is at risk and, for a domain on Namecheap DNS,
+the plan after the import is empty. Add records afterwards, per domain, in `record` blocks or as
 `namecheap_domain_host_record` resources. Do not adopt a portfolio with
 `mode = "OVERWRITE"` in the configuration: that mode owns the entire zone, so
 the plan after the import fails for every domain whose existing records the
 configuration does not list in full — see the
 [domain records guide](namecheap_domain_records_guide.md#overwrite).
+
+~> **Domains on custom nameservers.** The import stores a delegated domain's
+nameservers, and a configuration without `nameservers` means Namecheap DNS, so
+the plan lists them as removed. Applying that plan moves the domain off its DNS
+host. Give those domains their `nameservers`, or keep them out of this resource
+with `if !d.is_expired && d.is_our_dns`.
 
 -> A portfolio import reads the account listing, then makes three API calls per
 domain while it imports (four with `/zone`) and two per domain on every later
