@@ -17,6 +17,14 @@ Three workflows participate:
 [Conventional Commits](https://www.conventionalcommits.org/) on PR titles, which
 release-please parses to compute the version bump.
 
+`versioning.yml`, `release.yml` and `pr-title.yml` are thin callers: they set
+the triggers, permissions and secrets, and run the reusable workflows from
+[`namecheap/terraform-provider-workflows`](https://github.com/namecheap/terraform-provider-workflows),
+which the Namecheap Terraform providers share. Each caller pins a release of
+that repository by full commit SHA with the version in a comment, and
+Dependabot bumps both. Action versions, the GoReleaser and release Trivy
+versions, and the release-please setup are changed there, not here.
+
 ## Flow
 
 1. **Merge PRs to `master`.** PRs are squash-merged, so the (conventional) PR
@@ -35,6 +43,16 @@ release-please parses to compute the version bump.
    shipping. This is the only manual gate. Merging tags the commit `vX.Y.Z`.
 4. **`release.yml` publishes** the binaries for the new tag, and the Terraform
    Registry ingests the GitHub Release automatically (usually within minutes).
+   Verify a downloaded archive's build provenance with:
+
+   ```bash
+   gh attestation verify terraform-provider-namecheap_<version>_<os>_<arch>.zip \
+     -R namecheap/terraform-provider-namecheap \
+     --signer-repo namecheap/terraform-provider-workflows
+   ```
+
+   Releases made before the move to the shared workflows were attested by
+   this repository's own workflow; verify those without `--signer-repo`.
 
 > release-please authenticates with a GitHub App (`vars.APP_CLIENT_ID` /
 > `secrets.APP_PRIVATE_KEY`, the same App used by `ci.yml`), not the default

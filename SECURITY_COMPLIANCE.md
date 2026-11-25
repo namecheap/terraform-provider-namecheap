@@ -61,7 +61,9 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   `terraform-provider-namecheap_<tag>_sbom.cdx.json` (#177).
 - SBOM is produced by Trivy against the source tree, matching the CVE /
   license scans so the three views (scan report, workflow artifact,
-  release asset) are consistent.
+  release asset) are consistent. The release SBOM uses the Trivy version
+  pinned in the shared release workflow; keep `ci.yml`'s Trivy `version:`
+  equal to it.
 
 ## PR security summary
 
@@ -123,6 +125,13 @@ before `tar -xzf` / `unzip` runs.
   builds.
 - Release artifacts are GPG-signed (`_SHA256SUMS.sig`) and carry a GitHub-
   issued build-provenance attestation via `actions/attest-build-provenance`.
+  The release build runs in the shared
+  [`namecheap/terraform-provider-workflows`](https://github.com/namecheap/terraform-provider-workflows)
+  release workflow, pinned by commit SHA, so the attestation's signer is that
+  repository:
+  `gh attestation verify <zip> -R namecheap/terraform-provider-namecheap --signer-repo namecheap/terraform-provider-workflows`.
+  Releases made before the move were signed by this repository's own
+  workflow and verify without `--signer-repo`.
 
 ## Self-hosted runner supply chain
 
