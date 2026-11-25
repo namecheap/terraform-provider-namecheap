@@ -1,89 +1,53 @@
 name: CI
 
-# No workflow-level paths-ignore here, on purpose. This workflow's jobs are
-# required status checks, and a path-filtered required check is never reported
-# on PRs that touch only excluded files, which blocks them from merging
-# permanently. It would also stop versioning.yml's `workflow_run: [CI]` trigger
-# from firing on pushes that only touch release files, breaking the
-# release-please -> tag -> GoReleaser chain. Instead, the `changes` job below
-# detects what changed and the expensive jobs skip themselves via `if:` —
-# skipped checks DO satisfy branch protection, and the workflow still completes
-# so workflow_run still fires.
+# How the jobs fit together, and the invariants to keep when editing this
+# file, are in CI.md.
 on:
-  # Post-merge run only: PR branches are covered by pull_request, so each PR
-  # runs CI once. Pre-PR branches: use workflow_dispatch.
   push:
     branches:
       - master
-  # Primary CI trigger for all PRs, forks included. NOT pull_request_target, so
-  # fork PRs run with a read-only token and no secrets; the EC2 sandbox jobs
-  # additionally require a same-repo PR (see start-runner below).
+  # Not pull_request_target: fork PRs get a read-only token and no secrets.
   pull_request:
-  # Manual run on any ref under the dispatcher's identity — the path for live
-  # acceptance on Dependabot branches (see CLAUDE.md).
+  # Full run on any ref, including live acceptance on Dependabot branches.
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# No top-level concurrency group: it would drop queued runs. Only start-runner
+# serializes, because the sandbox EIP can serve one runner at a time.
+
 env:
-  # This repo's dedicated whitelisted sandbox Elastic IP allocation, consumed
-  # by start-runner's `eip-allocation-id` input and its EIP-resolve step.
-  # Sourced from a repo variable (not a literal) so another repo can adopt this
-  # workflow with its own dedicated EIP without editing YAML — mirroring the
-  # `vars.APP_CLIENT_ID` pattern used elsewhere. cleanup-ec2-runners.yml does
-  # not declare or use this: EIP release there only ever happens as an
-  # automatic AWS side effect of instance termination.
   SANDBOX_EIP_ALLOCATION_ID: ${{ vars.SANDBOX_EIP_ALLOCATION_ID }}
 
-# This workflow intentionally has NO top-level `concurrency` group. A shared
-# group serializes the whole workflow, but GitHub keeps only the newest queued
-# run per group and cancels older pending ones — so two PRs pushed seconds apart
-# silently drop each other's CI. Instead, the cheap `check`/`security` jobs run
-# in parallel across PRs (never cancelled), and only `start-runner` serializes —
-# it waits for older runs via ahmadnassri/action-workflow-queue so the single
-# whitelisted Elastic IP is never associated by two EC2 runners at once. See the
-# queue step in start-runner below.
-
 jobs:
-  # Gate job: decides whether the jobs below actually need to run for this
-  # change. `code` is false only when the diff touches nothing but root-level
-  # markdown (README/CHANGELOG/...), LICENSE, or the release-please manifest —
-  # most notably the release-please Release PR (CHANGELOG.md +
-  # .release-please-manifest.json) and its merge to master, which previously
-  # re-ran the full pipeline — self-hosted EC2 acceptance run included — twice
-  # per release on code that was already tested. docs/** and templates/**
-  # deliberately count as code: docs/ is published to the Terraform Registry at
-  # each release tag, so doc changes get the full pipeline like any
-  # user-visible change.
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read # paths-filter reads PR files via the API on pull_request events
-      checks: read # already-tested reads the merged PR head's "Acceptance test" check run
+      pull-requests: read # paths-filter reads PR files via the API
+      checks: read # already-tested reads the PR head's "Acceptance test" check
     outputs:
-      # workflow_dispatch is a maintainer explicitly asking for a full run (the
-      # documented path for live acceptance on Dependabot branches — see
-      # CLAUDE.md), and paths-filter has no base to diff against there anyway,
-      # so dispatch runs always count as code and bypass the filter entirely.
       code: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter-code.outputs.code }}
-      # 'false' only when already-tested proved this push to master is the
-      # exact tree that already passed live acceptance on its PR. Every other
-      # case — PRs, dispatch, a step that was skipped or failed — is 'true', so
-      # the gate fails open towards running the sandbox suite.
-      acceptance: ${{ steps.already-tested.outputs.skip == 'true' && 'false' || 'true' }}
+      # Live sandbox acceptance: trusted code with secrets (same-repo PR, push
+      # to master, dispatch), never Dependabot, and not a push whose tree
+      # already passed acceptance on its PR.
+      live: >-
+        ${{
+          (github.event_name == 'workflow_dispatch' || steps.filter-code.outputs.code == 'true') &&
+          steps.already-tested.outputs.skip != 'true' &&
+          github.actor != 'dependabot[bot]' &&
+          ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+           (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+           github.event_name == 'workflow_dispatch')
+        }}
     steps:
-      # Checkout is required for push events, where paths-filter diffs with git
-      # (pull_request events use the API and would not need it).
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ github.event_name != 'workflow_dispatch' }}
 
-      # With predicate-quantifier=every a file counts as `code` only if it
-      # matches ALL patterns, i.e. it is none of the ignored kinds. `*.md`
-      # (no globstar) matches root-level markdown only, so nested markdown —
-      # docs/**, templates/** — still counts as code on purpose.
+      # `every`: a file is code unless it is root-level markdown, LICENSE or the
+      # release-please manifest. Nested markdown (docs/, templates/) is code.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         if: ${{ github.event_name != 'workflow_dispatch' }}
         id: filter-code
@@ -95,16 +59,7 @@ jobs:
               - '!LICENSE'
               - '!.release-please-manifest.json'
 
-      # The post-merge push to master re-ran live acceptance on code its PR had
-      # just passed, doubling the load on the sandbox account the SDK and
-      # mcp-server suites share (20/min, 700/hour) — enough to fail healthy
-      # runs on the hourly quota. Skip it only when ALL of these hold:
-      #   1. the pushed commit is the squash-merge commit of a PR;
-      #   2. its git tree is identical to that PR's head commit tree — i.e. the
-      #      branch was up to date, so master now holds exactly what was tested;
-      #   3. the latest "Acceptance test" check run on that head succeeded.
-      # Anything else (direct push, stale branch, Dependabot PR whose acceptance
-      # was skipped, API error) leaves skip=false and acceptance runs as before.
+      # Post-merge acceptance skip; see CI.md. Any failure leaves skip=false.
       - name: Check whether this merge was already acceptance-tested
         id: already-tested
         if: ${{ github.event_name == 'push' && steps.filter-code.outputs.code == 'true' }}
@@ -143,20 +98,17 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # setup-go pins an exact go.mod version even with check-latest; passing
+      # the minor lets it pick the newest patch.
       - name: Resolve Go minor from go.mod
         id: gomod
-        # Extract just the MAJOR.MINOR (e.g. 1.26) from go.mod's `go` directive.
-        # Passing the full patch (1.26.3) to setup-go pins it exactly even with
-        # check-latest; the minor lets check-latest float to the newest patch.
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          # Latest patch of go.mod's Go minor (e.g. 1.26 -> 1.26.4) rather than
-          # a cached or exact-pinned patch, so the check job tests the newest.
           go-version: ${{ steps.gomod.outputs.minor }}
           check-latest: true
 
@@ -179,30 +131,19 @@ jobs:
       - name: Test
         run: make test
 
+      # Wrapper off so make sees terraform's real exit codes.
       - name: Set up Terraform
-        # For the mock acceptance suite below, which drives a real CLI. Wrapper
-        # off so the Makefile sees terraform's real exit codes.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
 
+      # The only place a same-repo PR runs the mock suite, and the source of
+      # CRUD coverage.
       - name: Mock acceptance tests (coverage)
-        # Runs on EVERY pull request, unlike the acceptance_mock matrix job below
-        # (forks and Dependabot only) and the live sandbox suite (same-repo only,
-        # and built without the `testacc` tag so it cannot see these tests at all).
-        # Without this step a same-repo PR never executes the mock suite.
-        #
-        # It is also where the CRUD coverage comes from: a resource's
-        # Create/Read/Update/Delete are only reachable through real Terraform, so
-        # `make test` alone reports them as untested. One engine is enough here —
-        # engine/version compatibility is the matrix job's job, not coverage's.
         run: make testacc-mock
 
+      # One upload for both profiles, so Codecov reports a single status.
       - name: Upload coverage to Codecov
-        # Both profiles go up in ONE call so Codecov merges them into a single
-        # report and computes one status. Two separate uploads would each trigger
-        # a status calculation, and the first — unit-only — would report the CRUD
-        # paths as uncovered until the second arrived.
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.out,coverage-acceptance.out
@@ -210,43 +151,24 @@ jobs:
           fail_ci_if_error: false
 
   docs:
-    # Registry documentation is assembled by tfplugindocs from templates and
-    # examples, so it can silently drift from either. This job regenerates it and
-    # fails if the committed tree differs, which makes a stale page a merge
-    # blocker rather than something noticed after release. It also type-checks
-    # every example against the provider built from this commit, so a snippet
-    # that no longer compiles cannot reach the registry.
-    #
-    # Note the pages currently hand-write their argument references rather than
-    # rendering them from the schema, so a changed Description does NOT move the
-    # published text — see the deferred migration in #256. What is enforced today
-    # is that every attribute HAS a usable description (unit tests) and that the
-    # committed tree matches what the templates produce.
-    #
-    # No credentials and no network calls to Namecheap: generation reads the
-    # schema from a locally built binary, and `terraform validate` runs behind a
-    # dev_overrides config, so this job is fork-safe.
     name: Docs
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve Go minor from go.mod
         id: gomod
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ steps.gomod.outputs.minor }}
           check-latest: true
 
       - name: Set up Terraform
-        # tfplugindocs shells out to `terraform providers schema`, and the
-        # example validation needs the same binary. Wrapper off so the Makefile
-        # sees terraform's real exit codes.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
@@ -258,31 +180,18 @@ jobs:
         run: make examples-validate
 
   security:
-    # Trivy scan covers three concerns in one job:
-    #  - SCA: CVEs in Go dependencies declared by go.mod / go.sum.
-    #  - IaC: misconfigurations in any Terraform or YAML at the
-    #    repo root (examples/, .github/workflows/, etc.).
-    #  - Secret scan: accidental tokens or keys checked into the tree.
-    # A separate step emits a CycloneDX SBOM as a workflow artifact so
-    # downstream tooling (dependency-track, release provenance, legal
-    # audits) can consume a signed inventory without re-running scans.
     name: Security scan (Trivy)
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Dependabot bumps the action, not `version:`; bump it by hand. Keep it
+      # equal to the release SBOM's Trivy in terraform-provider-workflows.
       - name: Trivy vuln + misconfig + secret + license scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          # Pin the Trivy binary to the latest scanner release instead of
-          # floating on the action's bundled default (v0.70.0 in v0.36.0), so
-          # scan behavior is reproducible. Dependabot's github-actions ecosystem
-          # bumps the action SHA but NOT this input — bump by hand after
-          # reviewing https://github.com/aquasecurity/trivy/releases. The
-          # release SBOM uses the Trivy version pinned in the shared release
-          # workflow (namecheap/terraform-provider-workflows); keep them equal.
           version: v0.71.2
           scan-type: fs
           scan-ref: .
@@ -291,19 +200,11 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
-          # License denylist lives in trivy.yaml at repo root; the
-          # action auto-loads it before each scanner runs.
           trivy-config: trivy.yaml
-          # trivy-action v0.36.0 uses actions/cache@v5 (Node 24) internally.
           cache: "true"
 
+      # All severities, never gates; feeds the security summary.
       - name: Trivy report (JSON, all severities, non-gating)
-        # Second Trivy pass that NEVER gates (exit-code 0) and drops the
-        # CRITICAL,HIGH + ignore-unfixed filters of the gating scan above, so
-        # the PR summary can show the full picture (MEDIUM/LOW and unfixed
-        # advisories included). The merge gate stays with the table scan above;
-        # this JSON is consumed only by the security-report job to render the
-        # human summary + artifact. Same pinned Trivy binary as above.
         if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -326,13 +227,9 @@ jobs:
           retention-days: 90
 
       - name: Generate CycloneDX SBOM
-        # Runs even if the scan above found HIGH/CRITICAL — the SBOM is
-        # a static inventory and should be produced regardless of
-        # gating outcome so consumers can see what went into the tree.
         if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          # Same pinned Trivy binary as the scan step above (keep in sync).
           version: v0.71.2
           scan-type: fs
           scan-ref: .
@@ -349,53 +246,32 @@ jobs:
           retention-days: 90
 
   govulncheck:
-    # Go-native vulnerability gate, complementary to the Trivy SCA scan above.
-    # Trivy matches go.sum module versions against advisory version ranges;
-    # govulncheck additionally does call-graph REACHABILITY analysis against the
-    # official Go vulnerability database (https://vuln.go.dev) plus the Go
-    # standard library for the toolchain in use. It fails only when a vulnerable
-    # symbol is actually reachable from this module's code, which keeps the gate
-    # low-noise (imported-but-uncalled vulns are reported but don't block) while
-    # still catching every exploitable path — including stdlib CVEs that Trivy's
-    # dependency scan doesn't cover. The advisory DB is fetched fresh each run,
-    # so detection stays current regardless of the pinned binary version.
     name: Security scan (govulncheck)
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve Go minor from go.mod
         id: gomod
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          # Latest patch of go.mod's Go minor (matches the check job) so stdlib
-          # advisories already fixed in a newer patch aren't reported against us.
           go-version: ${{ steps.gomod.outputs.minor }}
           check-latest: true
 
+      # Not in go.mod, so Dependabot doesn't track it; bump by hand. Fails only
+      # on vulnerabilities in called code.
       - name: Run govulncheck
-        # Pin the binary so a govulncheck release can't silently change scan
-        # behavior. govulncheck is installed via `go install`, not declared in
-        # go.mod (keeping it out of the shipped module graph and the SBOM), so
-        # Dependabot's gomod ecosystem does NOT track it — bump this line by
-        # hand after reviewing https://github.com/golang/vuln/releases.
-        # Exit code 3 (a vuln in CALLED code) fails the job; imported-but-
-        # uncalled findings are informational and do not gate.
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
           govulncheck ./...
 
+      # Never gates; feeds the security summary.
       - name: govulncheck JSON report (non-gating)
-        # Re-run in JSON purely to feed the PR security summary; never gates
-        # (|| true). The text run above stays the authoritative reachability
-        # gate. Invoked by absolute path in case GOPATH/bin isn't on PATH for
-        # this step. Runs even if the gate above failed so the summary can
-        # show exactly which vulnerabilities blocked the build.
         if: ${{ !cancelled() }}
         run: |
           GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
@@ -409,42 +285,27 @@ jobs:
           path: govulncheck.json
           retention-days: 90
 
+  # Reporting only: the gates are the security and govulncheck jobs, whose
+  # results the summary shows as-is.
   security-report:
-    # Consolidates every security scan into ONE human-readable summary, posted
-    # as a sticky PR comment (the visibility ask) and also written to the run's
-    # job summary + uploaded as the `security-summary` artifact. REPORTING ONLY
-    # — it never gates. The authoritative merge gates remain the `security`
-    # (Trivy) and `govulncheck` jobs above; their pass/fail is surfaced verbatim
-    # in the summary via needs.*.result, so a green comment can never mask a red
-    # gate.
     name: Security scan summary
     needs: [changes, security, govulncheck]
-    # Run even when a gate above failed — that's when the summary matters most.
-    # But not when the changes gate skipped the scans entirely: there are no
-    # scan artifacts to summarize on a docs-only change.
     if: ${{ !cancelled() && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read # checkout + read go.mod for the dependency overview
-      pull-requests: write # post/update the sticky summary comment
-      security-events: read # read open CodeQL alerts to enrich the summary
+      contents: read
+      pull-requests: write # sticky summary comment
+      security-events: read # open CodeQL alerts for the summary
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download scan artifacts
-        # Pulls trivy-json, sbom-cyclonedx and govulncheck-json (uploaded by the
-        # jobs above) into one directory. merge-multiple flattens them so the
-        # files land at scan-artifacts/<file> regardless of artifact name.
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: scan-artifacts
           merge-multiple: true
 
       - name: Fetch open CodeQL alerts (best effort)
-        # Default-setup CodeQL runs outside this workflow; its open alerts for
-        # this ref are pulled via the API only to enrich the summary. Never
-        # fails the job — code scanning disabled, or an analysis that hasn't
-        # finished for this ref yet, just yields an empty list.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -474,16 +335,11 @@ jobs:
           path: security-summary.md
           retention-days: 90
 
+      # Skipped where the token is read-only: Dependabot and fork PRs.
       - name: Post or update PR comment
-        # Skip whenever the token is read-only and commenting would 403:
-        # Dependabot events (secrets redacted) and fork pull_requests (read-only
-        # GITHUB_TOKEN). Same-repo PRs and manual dispatch runs post the sticky
-        # summary. The job summary + artifact are produced regardless.
         if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           GH_TOKEN: ${{ github.token }}
-          # Empty except on pull_request events, where GITHUB_REF_NAME is
-          # "<N>/merge" and the branch lookup below would find nothing.
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -uo pipefail
@@ -510,21 +366,9 @@ jobs:
             echo "Posted new summary comment on PR #${pr}."
           fi
 
+  # Engine/version matrix of the mock suite, and the acceptance path for fork
+  # and Dependabot PRs, which have no secrets for the live suite.
   acceptance_mock:
-    # Fork-safe, credential-free acceptance tests against the in-process stateful
-    # mock (namecheap/mock_server_test.go). Runs on GitHub-hosted ubuntu-latest
-    # with NO secrets, and a terraform + OpenTofu version matrix that guards
-    # against engine/version-specific plan or state regressions.
-    #
-    # What this adds over the `check` job — which now runs the same suite on every
-    # PR, for coverage — is the engine/version matrix: the oldest supported
-    # Terraform, the newest, and OpenTofu. `check` proves the suite passes; this
-    # proves it passes on every engine the provider claims to support.
-    #
-    # It is also the FALLBACK acceptance path for pull requests that cannot reach
-    # the live sandbox suite below: fork PRs (secrets are redacted for them) and
-    # Dependabot PRs (same). Same-repo, non-Dependabot PRs run the live sandbox
-    # suite instead, so those two never both run on one PR.
     name: Mock acceptance (${{ matrix.engine }} ${{ matrix.version }})
     needs: [changes, check]
     if: ${{ needs.changes.outputs.code == 'true' && github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.actor == 'dependabot[bot]') }}
@@ -536,18 +380,18 @@ jobs:
           - engine: terraform
             version: "1.5.7" # minimum supported Terraform
           - engine: terraform
-            version: "1.17.0" # latest pinned series (mirrors the sandbox job)
+            version: "1.17.0" # same series as the live suite
           - engine: opentofu
             version: "1.12.3" # latest OpenTofu
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve Go minor from go.mod
         id: gomod
         run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ steps.gomod.outputs.minor }}
           check-latest: true
@@ -566,17 +410,9 @@ jobs:
           tofu_version: ${{ matrix.version }}
           tofu_wrapper: false
 
+      # Don't set TF_ACC_PROVIDER_NAMESPACE: import steps resolve the provider
+      # under the default namespaces (see TestAccMockDomainHostRecordImportFormats).
       - name: Mock acceptance tests
-        # ENGINE comes from the workflow-defined matrix (trusted), not from any
-        # ${{ github.event.* }} value, so it is safe to branch on in the shell.
-        # TF_ACC_PROVIDER_HOST retargets the reattached provider's address at
-        # the OpenTofu registry. Do NOT also set TF_ACC_PROVIDER_NAMESPACE: with
-        # it unset the harness registers the provider under both default
-        # namespaces ("-" and "hashicorp"), which is what import steps that
-        # carry an explicit Config resolve to — terraform-plugin-testing writes
-        # those configs verbatim, without the required_providers source it
-        # injects into apply steps, so a custom namespace 404s against the real
-        # registry (see TestAccMockDomainHostRecordImportFormats).
         env:
           ENGINE: ${{ matrix.engine }}
         run: |
@@ -592,37 +428,21 @@ jobs:
   start-runner:
     name: Start self-hosted EC2 runner
     needs: [changes, check, security, govulncheck]
-    # The live-API sandbox pipeline needs secrets.* (AWS creds, whitelisted EIP,
-    # NAMECHEAP_API_KEY), so it only runs where secrets are available AND the
-    # code is trusted: same-repo PRs, pushes to master (post-merge), and manual
-    # workflow_dispatch (write access required, so always a maintainer). Never
-    # fork PRs (redacted secrets; served by acceptance_mock instead) nor
-    # Dependabot events (same). The changes-gate term additionally skips the
-    # whole EC2 lifecycle — and its per-run AWS cost — when the diff touches
-    # only root markdown/LICENSE/the release-please manifest (most notably the
-    # Release PR and its merge commit), and the `acceptance` term skips it on a
-    # post-merge push whose exact tree already passed acceptance on its PR.
-    if: ${{ needs.changes.outputs.code == 'true' && needs.changes.outputs.acceptance == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ needs.changes.outputs.live == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read # action-workflow-queue lists workflow runs to wait on
+      actions: read # action-workflow-queue lists workflow runs
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
       public-ip: ${{ steps.eip-ip.outputs.public-ip }}
     steps:
+      # FIFO behind older runs, so only one runner holds the sandbox EIP.
       - name: Wait for older acceptance runs to finish (single sandbox EIP)
-        # The acceptance pipeline uses one whitelisted Elastic IP; two runs at
-        # once would both try to associate it. Queue this run (FIFO, no
-        # cancellation) behind any older in-progress CI run so only one holds
-        # the sandbox EIP at a time. The older run frees it when its
-        # stop-runner terminates the instance (termination auto-disassociates
-        # the EIP back to the account); this run's launch then associates it
-        # via eip-allocation-id.
         uses: ahmadnassri/action-workflow-queue@542658b3a8270cac81ae15d401b0d974732808ac # v1.2.0
         with:
-          timeout: 1800000 # 30 min cap for a backlog of queued acceptance runs
+          timeout: 1800000 # 30 min
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
@@ -637,26 +457,15 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
+      # TEMPORARY until namecheap/ec2-github-runner#76 is fixed: the action
+      # associates the EIP once, warn-only, and loses the race with the
+      # previous instance's termination. Wait until the EIP is free.
       - name: Wait for the sandbox EIP to be free
-        # TEMPORARY shim for namecheap/ec2-github-runner#76 — delete once
-        # fixed upstream and the pin is bumped. stop-runner's terminate is
-        # fire-and-forget and AWS releases the EIP only when the instance
-        # reaches `terminated`, so a back-to-back run can race the previous
-        # instance's shutdown. The action's AssociateAddress (no retry, no
-        # AllowReassociation, warn-only) loses that race silently and the
-        # runner boots without its whitelisted egress IP and never
-        # registers. One read-only poll when the EIP is free (the common
-        # case); waits only under contention; on timeout, warn and proceed.
         run: |
-          # Cap sized above the observed stop->terminated band (22-152s,
-          # see SECURITY_COMPLIANCE.md); only ever paid under contention.
-          # Loop bound, sleep, and warning all derive from these two values.
-          timeout_s=300
+          timeout_s=300 # above the observed 22-152s stop->terminated band
           interval_s=5
           attempts=$(( timeout_s / interval_s ))
           for i in $(seq 1 "$attempts"); do
-            # Assignment in the condition: a CLI failure (throttle, expired
-            # token) is a retryable poll tick, not a job failure under -e.
             if ! assoc="$(aws ec2 describe-addresses \
               --allocation-ids "$SANDBOX_EIP_ALLOCATION_ID" \
               --query 'Addresses[0].AssociationId' --output text)"; then
@@ -687,39 +496,19 @@ jobs:
           subnet-id: subnet-01c4ff5a
           security-group-id: sg-106ec76d
           iam-role-name: AmazonSSMRoleForInstancesQuickSetup
-          # SSE-EBS on the runner's root volume. Uses the launch
-          # account's default aws/ebs KMS key; AMI snapshot-id is
-          # dropped so AWS re-encrypts at launch time.
           encrypt-ebs: "true"
-          # Runs once, as root, during the launch bootstrap. Without this,
-          # scripts/hygiene-sweep.sh's `mkdir -p /opt/ci/jobs/current` fails
-          # outright: /opt is root-owned 755, and the actions-runner process
-          # (and everything run.sh spawns) runs as the unprivileged `runner`
-          # user, which has no write access to create a new directory
-          # directly under /opt.
-          pre-runner-script: |
-            mkdir -p /opt/ci
-            chown -R runner:runner /opt/ci
-          # The action associates this EIP early in its own bootstrap, which is
-          # what gives the instance outbound internet connectivity while it
-          # registers the runner. The single whitelisted sandbox EIP is also
-          # what the Namecheap sandbox API allows, so this association is
-          # load-bearing for the acceptance tests, not just for bootstrap.
+          # The sandbox API allows only this IP, and the instance needs it for
+          # egress while it registers.
           eip-allocation-id: ${{ env.SANDBOX_EIP_ALLOCATION_ID }}
           aws-resource-tags: >
             [
               { "Key": "Name", "Value": "github_runner" },
               { "Key": "GitHubRepository", "Value": "${{ github.repository }}" }
             ]
+      # The action's association is warn-only, so assert the EIP is on the
+      # launched instance. Read-only: re-associating would cut the runner off.
       - name: Resolve sandbox EIP public IP
         id: eip-ip
-        # Publish the whitelisted EIP's public IP for acceptance_test's
-        # credential-free "Verify sandbox EIP" gate, and ASSERT the
-        # association points at the launched instance — the action's
-        # AssociateAddress is warn-only, so without this check start-runner
-        # could go green with the EIP attached elsewhere. Read-only: never
-        # re-associates (that would change a registered runner's IP and
-        # sever it).
         env:
           LAUNCHED_INSTANCE_ID: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
         run: |
@@ -740,72 +529,32 @@ jobs:
 
   acceptance_test:
     name: Acceptance test
-    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
+    runs-on: ${{ needs.start-runner.outputs.label }}
     needs: [changes, start-runner]
-    # Same gate as start-runner: changes-gate `code` + `acceptance` + same-repo
-    # PRs + pushes to master + manual dispatch, never forks/Dependabot (those
-    # get acceptance_mock instead).
-    if: ${{ needs.changes.outputs.code == 'true' && needs.changes.outputs.acceptance == 'true' && github.actor != 'dependabot[bot]' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ needs.changes.outputs.live == 'true' }}
     steps:
-      # PRIMARY workspace-hygiene mechanism (git clean -ffdx before checkout).
-      # Runs before our own scripts exist on disk, so it — not a custom
-      # pre-checkout script — is what guarantees a clean $GITHUB_WORKSPACE at
-      # the start of every run.
-      - uses: actions/checkout@v7
-        with:
-          clean: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Pre-job hygiene sweep
-        # Runs AFTER checkout so the script is available. Only ever targets the
-        # custom JOB_HOME (the workspace is already handled above by
-        # checkout's clean: true). Self-heals + warns if a crashed/cancelled
-        # prior run left this non-empty (its own always() post-sweep skipped).
-        # TMPDIR is pointed at a subdirectory of JOB_HOME rather than the
-        # shared OS /tmp: Go's t.TempDir()/os.CreateTemp and
-        # terraform-plugin-testing's scratch dirs both default to $TMPDIR, and
-        # without this they'd write to /tmp, which neither this sweep nor the
-        # post-job sweep below ever touches -- leaving test artifacts/tfstate
-        # outside the swept path. Nesting it under JOB_HOME means it's wiped
-        # for free by the same pre/post sweep of that path.
-        run: |
-          scripts/hygiene-sweep.sh pre /opt/ci/jobs/current
-          mkdir -p /opt/ci/jobs/current/tmp
-          echo "HOME=/opt/ci/jobs/current" >> "$GITHUB_ENV"
-          echo "TMPDIR=/opt/ci/jobs/current/tmp" >> "$GITHUB_ENV"
-
+      # Latest Go patch of go.mod's minor, falling back to go.mod's exact
+      # version. Terraform: latest patch of tf_minor; a newer minor fails the
+      # build so a maintainer reviews it before bumping tf_minor/tf_fallback.
       - name: Resolve toolchain versions
         id: versions
         run: |
-          # Go: latest PATCH of the Go minor pinned by go.mod's `go` directive
-          # (the EC2 runner lacks setup-go tooling), mirroring check-latest:
-          # true in the check job. Patch bumps (1.26.3 -> 1.26.4) are picked up
-          # automatically. A newer Go minor is not auto-adopted and does not
-          # fail CI: we fall back to go.mod's exact version, which is also the
-          # floor the module requires.
           go_required="$(awk '/^go / {print $2; exit}' go.mod)"
           go_minor="$(printf '%s' "${go_required}" | cut -d. -f1,2)"
-          # go.dev/VERSION is Go's own latest-stable endpoint (text: goX.Y.Z);
-          # when go.mod's minor is current it IS the latest patch.
           latest_go="$(curl -fsSL https://go.dev/VERSION?m=text | head -1 | sed 's/^go//')"
           latest_minor="$(printf '%s' "${latest_go}" | cut -d. -f1,2)"
           if [ -n "${latest_go}" ] && [ "${latest_minor}" = "${go_minor}" ]; then
-            go_version="${latest_go}"   # latest patch in go.mod's minor series
+            go_version="${latest_go}"
           else
-            go_version="${go_required}" # newer minor / lookup unavailable: use go.mod's exact version
+            go_version="${go_required}"
           fi
           echo "Using Go ${go_version} (go.mod pins ${go_minor}.x)"
           echo "go_version=${go_version}" >> "$GITHUB_OUTPUT"
 
-          # Pin the Terraform MINOR series, not an exact patch. CI auto-installs
-          # the latest patch in this series, so patch bumps (1.15.5 -> 1.15.6)
-          # are picked up automatically and never fail. A newer minor/major
-          # release (1.16.0, 2.0.0) fails the build instead, so a maintainer can
-          # review possible behavior changes before bumping tf_minor/tf_fallback.
           tf_minor="1.17"
-          tf_fallback="1.17.0" # install target when the lookup is unavailable
-          # checkpoint API == the source `terraform` itself uses for upgrade
-          # notices (stable GA only, never RCs); current_version is the newest
-          # stable, so when our series is current it IS the latest patch.
+          tf_fallback="1.17.0" # when the lookup is unavailable
           latest_tf="$(curl -fsSL https://checkpoint-api.hashicorp.com/v1/check/terraform | sed -n 's/.*"current_version":"\([^"]*\)".*/\1/p')"
           latest_minor="${latest_tf%.*}"
           if [ -n "${latest_tf}" ] && [ "${latest_minor}" != "${tf_minor}" ] \
@@ -814,57 +563,39 @@ jobs:
             exit 1
           fi
           if [ -n "${latest_tf}" ] && [ "${latest_minor}" = "${tf_minor}" ]; then
-            tf_version="${latest_tf}"   # latest patch in the pinned series
+            tf_version="${latest_tf}"
           else
-            tf_version="${tf_fallback}" # lookup unavailable or lagging the series
+            tf_version="${tf_fallback}"
           fi
           echo "Using Terraform ${tf_version} (pinned series ${tf_minor}.x)"
           echo "tf_version=${tf_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Go (toolcache)
+      - name: Set up Go
         env:
           GO_VERSION: ${{ steps.versions.outputs.go_version }}
         run: |
-          go_version="$GO_VERSION"
-          go_dir="/opt/ci/toolcache/go-${go_version}"
-          if [ -x "${go_dir}/go/bin/go" ] && "${go_dir}/go/bin/go" version | grep -q "go${go_version} "; then
-            echo "Go ${go_version} already present in toolcache at ${go_dir}, skipping download."
-          else
-            tarball="go${go_version}.linux-amd64.tar.gz"
-            curl -fsSLo "${tarball}" "https://dl.google.com/go/${tarball}"
-            expected_go_sha="$(curl -fsSL "https://dl.google.com/go/${tarball}.sha256")"
-            echo "${expected_go_sha}  ${tarball}" | sha256sum -c -
-            rm -rf "${go_dir}"
-            mkdir -p "${go_dir}"
-            tar -C "${go_dir}" -xzf "${tarball}"
-          fi
-          echo "${go_dir}/go/bin" >> "$GITHUB_PATH"
-          echo "GOCACHE=/opt/ci/cache/go-build" >> "$GITHUB_ENV"
-          echo "GOMODCACHE=/opt/ci/cache/go-mod" >> "$GITHUB_ENV"
+          tarball="go${GO_VERSION}.linux-amd64.tar.gz"
+          curl -fsSLo "${RUNNER_TEMP}/${tarball}" "https://dl.google.com/go/${tarball}"
+          echo "$(curl -fsSL "https://dl.google.com/go/${tarball}.sha256")  ${RUNNER_TEMP}/${tarball}" | sha256sum -c -
+          tar -C "${RUNNER_TEMP}" -xzf "${RUNNER_TEMP}/${tarball}"
+          echo "${RUNNER_TEMP}/go/bin" >> "$GITHUB_PATH"
+          echo "GOCACHE=${RUNNER_TEMP}/go-build" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=${RUNNER_TEMP}/go-mod" >> "$GITHUB_ENV"
 
-      - name: Set up Terraform (toolcache)
+      - name: Set up Terraform
         env:
           TF_VERSION: ${{ steps.versions.outputs.tf_version }}
         run: |
-          tf_version="$TF_VERSION"
-          tf_dir="/opt/ci/toolcache/terraform-${tf_version}"
-          if [ -x "${tf_dir}/terraform" ] && "${tf_dir}/terraform" version | head -1 | grep -q "v${tf_version}$"; then
-            echo "Terraform ${tf_version} already present in toolcache at ${tf_dir}, skipping download."
-          else
-            curl -fsSLo terraform.zip "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_linux_amd64.zip"
-            expected_tf_sha="$(curl -fsSL "https://releases.hashicorp.com/terraform/${tf_version}/terraform_${tf_version}_SHA256SUMS" | awk -v f="terraform_${tf_version}_linux_amd64.zip" '$2==f {print $1}')"
-            echo "${expected_tf_sha}  terraform.zip" | sha256sum -c -
-            rm -rf "${tf_dir}"
-            mkdir -p "${tf_dir}"
-            unzip -o terraform.zip -d "${tf_dir}"
-          fi
-          echo "${tf_dir}" >> "$GITHUB_PATH"
-          echo "TF_ACC_TERRAFORM_PATH=${tf_dir}/terraform" >> "$GITHUB_ENV"
+          zip="terraform_${TF_VERSION}_linux_amd64.zip"
+          base="https://releases.hashicorp.com/terraform/${TF_VERSION}"
+          curl -fsSLo "${RUNNER_TEMP}/${zip}" "${base}/${zip}"
+          (cd "${RUNNER_TEMP}" && curl -fsSL "${base}/terraform_${TF_VERSION}_SHA256SUMS" | grep " ${zip}\$" | sha256sum -c -)
+          unzip -o "${RUNNER_TEMP}/${zip}" -d "${RUNNER_TEMP}/terraform"
+          echo "${RUNNER_TEMP}/terraform" >> "$GITHUB_PATH"
+          echo "TF_ACC_TERRAFORM_PATH=${RUNNER_TEMP}/terraform/terraform" >> "$GITHUB_ENV"
 
+      # Never run the live suite without the whitelisted IP.
       - name: Verify sandbox EIP
-        # Hard G5 assertion: never run tests without the whitelisted IP. Needs
-        # zero AWS credentials — the comparison is a plain public HTTP check
-        # against the IP start-runner already resolved and published.
         env:
           EXPECTED_IP: ${{ needs.start-runner.outputs.public-ip }}
         run: |
@@ -885,75 +616,21 @@ jobs:
           NAMECHEAP_TEST_DOMAIN: terraform-provider-test.net
           NAMECHEAP_USE_SANDBOX: true
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
-          # The suite drives two independent clients against one account: the
-          # provider under test, and the bare SDK client the test helpers use for
-          # setup/teardown. Each carries its own limiter, so leaving both at the
-          # default 20/min lets the suite emit up to 40/min against Namecheap's
-          # 20/min quota — the API answers 405, the SDK retries four times, and
-          # a healthy test fails as "after 4 attempts: retryable HTTP status".
-          # Half the quota each keeps the account total inside it. The helper
-          # client reads the same variable (see provider_test.go).
+          # Provider and test helpers each get half the account's 20/min
+          # quota. Retries are spaced to wait out the window; see CI.md.
           NAMECHEAP_REQUESTS_PER_MINUTE: 10
-          # Every retry is itself a request, so retrying quickly makes throttling
-          # worse: it spends quota without waiting out the window that rejected
-          # the call. Retry FEWER times, spaced FURTHER apart.
-          #
-          # The SDK doubles each delay from the base, clamps it to the cap, then
-          # jitters it to 50-100% of that value, so the figure that matters is the
-          # jittered MINIMUM. At 5 attempts with a 10s base and 60s cap the four
-          # delays are 10/20/40/60s nominal, so the minimum total is
-          # 5+10+20+30 = 65s — past the one-minute window on every run, for five
-          # requests. (A 5s base gives a 32.5s minimum and clears the window only
-          # about a third of the time; the stock 500ms/30s backoff spends eight
-          # requests and still averages under a minute.)
-          #
-          # Elapsed must cover the whole schedule or the last attempts never
-          # happen: 130s of backoff + 5x30s request timeout + limiter waits is
-          # ~310s, so 8m leaves headroom while staying well inside the suite's
-          # 30m go-test timeout.
           NAMECHEAP_MAX_RETRIES: 5
           NAMECHEAP_RETRY_BASE_DELAY: 10s
           NAMECHEAP_RETRY_MAX_DELAY: 60s
           NAMECHEAP_RETRY_MAX_ELAPSED: 8m
 
-      - name: Post-job hygiene sweep
-        # Last step, if: always() — this is what actually satisfies G6 ("no
-        # code/env/secrets survive the job"): it runs while the job still
-        # owns the instance, covering the window between job end and
-        # stop-runner's terminate. The next run's checkout clean: true only
-        # protects that NEXT run's start (on its own fresh instance), not
-        # this window. Guards for the one case where the script itself can't be on
-        # disk: checkout (the job's first step) failing outright. In that case
-        # nothing meaningful was written to JOB_HOME this run (HOME is only
-        # repointed there by "Pre-job hygiene sweep", which never got to run
-        # either) and $GITHUB_WORKSPACE holds at most a partial checkout, but
-        # this still cleans both paths inline instead of silently no-op'ing
-        # via a bare command-not-found failure.
-        if: always()
-        run: |
-          if [ -x scripts/hygiene-sweep.sh ]; then
-            scripts/hygiene-sweep.sh post "$GITHUB_WORKSPACE" /opt/ci/jobs/current
-          else
-            echo "::warning::scripts/hygiene-sweep.sh not found on disk (checkout likely failed this run) -- falling back to inline cleanup of \$GITHUB_WORKSPACE and /opt/ci/jobs/current"
-            rm -rf -- "$GITHUB_WORKSPACE" /opt/ci/jobs/current
-            mkdir -p -- "$GITHUB_WORKSPACE" /opt/ci/jobs/current
-          fi
-
+  # Not gated on `changes`: a started runner must always be stopped.
   stop-runner:
     name: Stop self-hosted EC2 runner
     needs:
       - start-runner
       - acceptance_test
     runs-on: ubuntu-latest
-    # Runs whenever a runner was actually started, regardless of the triggering
-    # event. The instance-id guard is the real safety condition: it is non-empty
-    # only when start-runner ran (same-repo PR or push to master), so this
-    # correctly tears the runner down for both those cases and no-ops otherwise
-    # — including when start-runner was skipped by the changes gate: always()
-    # keeps this condition evaluating even then, and the empty instance-id
-    # makes it skip cleanly rather than fail or hang. Deliberately NOT gated
-    # on needs.changes.outputs.code: if a runner exists it must be stopped,
-    # no matter what the gate said.
     if: ${{ always() && needs.start-runner.outputs.ec2-instance-id != '' }}
     steps:
       - name: Generate GitHub App token
@@ -971,10 +648,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Stop EC2 runner
-        # if: always() so a failure in "Generate GitHub App token" or
-        # "Configure AWS credentials" above doesn't skip stopping the
-        # instance.
-        if: always()
+        if: always() # even if a step above failed
         uses: namecheap/ec2-github-runner@9d745d6fb60fa206b168129c03893347d9562755 # main @ 2026-10-06: v4.0.3 + --no-default-labels (ec2-github-runner#83)
         with:
           mode: stop
@@ -982,23 +656,7 @@ jobs:
           label: ${{ needs.start-runner.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
 
-  # Summary job with two purposes:
-  # 1. A workflow run whose jobs were ALL skipped by the gate would otherwise
-  #    have no executed job, making the run-level conclusion (which gates
-  #    versioning.yml via workflow_run) ambiguous. This job executes on every
-  #    run that isn't cancelled, so the run always concludes success/failure.
-  #    `!cancelled()` rather than `always()`: a superseded PR run cancelled by
-  #    the concurrency group skips this job instead of spending a runner to
-  #    post a red check on a dead SHA (checks are evaluated per-SHA, so the
-  #    replacement run supplies the required check).
-  # 2. Branch protection can require just this one check instead of listing
-  #    every job: it fails if any needed job failed or was cancelled, and
-  #    passes when jobs succeeded or were legitimately skipped — by the
-  #    changes gate, or by the pre-existing fork/Dependabot/event conditions
-  #    on acceptance_mock and the EC2 jobs.
-  # Every job in this workflow MUST be listed in `needs` below; the first
-  # step asserts that, so a job missing from the list fails this check
-  # instead of silently escaping it.
+  # The single required check; see CI.md. Every other job must be in `needs`.
   ci-ok:
     name: CI OK
     runs-on: ubuntu-latest
@@ -1015,12 +673,8 @@ jobs:
       - stop-runner
     if: ${{ !cancelled() }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # "CI OK" only guards the jobs listed in its `needs`. A job added to the
-      # workflow but not to that list could fail without turning this check
-      # red — the exact gap this job exists to close — so assert the two lists
-      # match instead of relying on the note in CI.md.
       - name: Assert every job is watched by this gate
         run: |
           watched=$(yq '.jobs.ci-ok.needs[]' .github/workflows/ci.yml | sort)

@@ -91,8 +91,8 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
 
 ## CI / supply-chain pinning
 
-- Every third-party GitHub Action is pinned by 40-char commit SHA with a
-  trailing `# v<semver>` comment (#147, #161). Dependabot's `github-actions`
+- Every GitHub Action, first-party `actions/*` included, is pinned by
+  40-char commit SHA with a trailing `# v<semver>` comment (#147, #161). Dependabot's `github-actions`
   ecosystem (#150) rotates the SHA + comment atomically when a new version
   releases.
 - `namecheap/ec2-github-runner` is SHA-pinned for both the `start-runner`
@@ -138,7 +138,7 @@ before `tar -xzf` / `unzip` runs.
 The acceptance-test job runs on a fresh EC2 instance launched by the
 self-hosted runner action for every run and terminated by `stop-runner`
 afterwards (the #279 warm pool was removed under DEVOPS-22119). See
-[Runner lifecycle, hygiene sweeps, and the sandbox EIP](#runner-lifecycle-hygiene-sweeps-and-the-sandbox-eip)
+[Runner lifecycle and the sandbox EIP](#runner-lifecycle-and-the-sandbox-eip)
 below for the lifecycle/cleanup/EIP mechanics and the removal's measured
 rationale:
 
@@ -160,7 +160,7 @@ rationale:
   (see the dedicated sandbox EIP bullet below), so this within-repo queue is
   the only serialization needed — there is no cross-repo mutex.
 
-### Runner lifecycle, hygiene sweeps, and the sandbox EIP
+### Runner lifecycle and the sandbox EIP
 
 - **Per-run lifecycle.** `start-runner` launches a fresh instance for every
   acceptance run and `stop-runner` terminates it afterwards (the action's
@@ -176,19 +176,17 @@ rationale:
   [fork-safe PR gating](#fork-safe-pull-request-ci) below). The action's
   `max-lifetime-minutes` TTL (default 360) still arms on every launch as a
   self-destruct backstop for instances whose stop-runner never ran.
-- **Per-job hygiene sweeps.** Defense in depth kept from the warm-pool era —
-  cheap, and the "post" pass is still load-bearing: it wipes the job's
-  footprint while the job still owns the instance, covering the window
-  between job end and stop-runner's terminate. The checked-out workspace and
-  the per-job `$HOME` at `/opt/ci/jobs/current` are swept by
-  `scripts/hygiene-sweep.sh` both before ("pre", which lays out JOB_HOME;
-  its leftover `::warning::` is inert on a fresh instance and would only
-  fire again if disks were ever reused) and after ("post", `if: always()`,
-  the step that guarantees no code, env vars, or secrets remain on the
-  disk) every job. The initial workspace freshness guarantee at the very
-  start of a run instead comes from `actions/checkout`'s own `clean: true`,
-  since our script can't run before the repo it lives in has been checked
-  out.
+- **No state between runs.** Every job starts on a new disk and the disk is
+  destroyed when the instance terminates, so nothing from one run reaches
+  the next. The job writes no secrets to disk: `NAMECHEAP_API_KEY` reaches
+  the test process as an environment variable, and the workspace is the
+  public source tree plus test scratch files. The per-job hygiene sweeps
+  (`scripts/hygiene-sweep.sh`) from the warm-pool era were removed: on a
+  fresh instance the "pre" sweep had nothing to clean, and the "post" sweep
+  only covered the seconds between job end and termination. If stop-runner
+  fails, the leak reaper below terminates the instance within about 50
+  minutes (20-minute age threshold plus the 30-minute schedule), and the
+  action's TTL is the backstop behind that.
 - **Dedicated sandbox EIP.** The whitelisted Elastic IP
   (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input,
   which associates it during every launch — that is what gives the instance
