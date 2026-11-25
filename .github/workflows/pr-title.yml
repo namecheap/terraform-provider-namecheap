@@ -14,4 +14,4 @@ jobs:
     name: PR Title
     permissions:
       pull-requests: read
-    uses: namecheap/terraform-provider-workflows/.github/workflows/pr-title.yml@dd301c63e4d08c2b84a7512b2e618d49e6432c4e # v1.0.0
+    uses: namecheap/terraform-provider-workflows/.github/workflows/pr-title.yml@453070d6bf48c7d66dfcc18d44180783ef7ea3f7 # v1.0.1
