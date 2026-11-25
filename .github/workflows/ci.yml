@@ -280,7 +280,9 @@ jobs:
           # floating on the action's bundled default (v0.70.0 in v0.36.0), so
           # scan behavior is reproducible. Dependabot's github-actions ecosystem
           # bumps the action SHA but NOT this input — bump by hand after
-          # reviewing https://github.com/aquasecurity/trivy/releases.
+          # reviewing https://github.com/aquasecurity/trivy/releases. The
+          # release SBOM uses the Trivy version pinned in the shared release
+          # workflow (namecheap/terraform-provider-workflows); keep them equal.
           version: v0.71.2
           scan-type: fs
           scan-ref: .

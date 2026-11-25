@@ -1,11 +1,13 @@
 name: Versioning
 
-# Runs release-please after CI succeeds on master. release-please opens (and
-# keeps updating) a "Release PR" that bumps the version and regenerates
-# CHANGELOG.md from Conventional Commit history. Merging that Release PR creates
-# the vX.Y.Z tag, which triggers release.yml. See RELEASE.md for the full flow.
+# Runs release-please after every successful CI run on master. The job, its
+# fork guard and the App token live in namecheap/terraform-provider-workflows,
+# pinned by commit SHA. See RELEASE.md.
 on:
-  workflow_run:
+  # workflow_run runs with secrets, so a run triggered from a fork could be
+  # dangerous. Here it checks out no code and runs only release-please, and
+  # the called workflow skips runs that did not succeed or came from a fork.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["CI"]
     types:
       - completed
@@ -19,38 +21,15 @@ concurrency:
   group: release-please
   cancel-in-progress: false
 
-# The default GITHUB_TOKEN needs nothing — every write goes through the App
-# token generated below.
+# The default GITHUB_TOKEN needs nothing: every write goes through the App
+# token.
 permissions: {}
 
 jobs:
-  release-please:
-    # Only act on a green master (or a manual dispatch). workflow_run fires for
-    # failed CI runs too, so the conclusion guard is required. The branch filter
-    # matches the run's HEAD branch name, which a fork PR can spoof by naming
-    # its branch "master" — hence the head_repository guard.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
-    runs-on: ubuntu-latest
-    steps:
-      # A GitHub App token (not the default GITHUB_TOKEN) is mandatory here:
-      # events authored by GITHUB_TOKEN do not re-trigger other workflows, so a
-      # token-authored tag would never start release.yml. App-authored events do.
-      # Reuses the same App credentials as ci.yml; the App must grant
-      # `contents: write` and `pull-requests: write`.
-      - name: Generate GitHub App token
-        id: generate-token
-        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
-        with:
-          client-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-
-      - name: Release Please
-        id: release
-        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        with:
-          config-file: .release-please-config.json
-          manifest-file: .release-please-manifest.json
-          token: ${{ steps.generate-token.outputs.token }}
+  versioning:
+    name: Versioning
+    uses: namecheap/terraform-provider-workflows/.github/workflows/versioning.yml@dd301c63e4d08c2b84a7512b2e618d49e6432c4e # v1.0.0
+    with:
+      app-client-id: ${{ vars.APP_CLIENT_ID }}
+    secrets:
+      app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
