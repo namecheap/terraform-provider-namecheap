@@ -191,12 +191,9 @@ The self-hosted EC2 runner behind `acceptance_test` is launched fresh for
 every run and terminated afterwards, so each job starts from a pristine
 disk (the #279 warm pool was removed under DEVOPS-22119 — measurements and
 rationale live in
-[SECURITY_COMPLIANCE.md](SECURITY_COMPLIANCE.md#runner-lifecycle-hygiene-sweeps-and-the-sandbox-eip)).
-Fork PRs keep going through `acceptance_mock`,
-unchanged. Per-job disk (the checked-out workspace, `$HOME`, dotfiles) is
-still wiped both before and after every run as defense in depth. A scheduled
-leak reaper
-([`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml),
+[SECURITY_COMPLIANCE.md](SECURITY_COMPLIANCE.md#runner-lifecycle-and-the-sandbox-eip)).
+Fork PRs keep going through `acceptance_mock`, unchanged. A scheduled leak
+reaper ([`cleanup-ec2-runners.yml`](.github/workflows/cleanup-ec2-runners.yml),
 every 30 minutes; `workflow_dispatch` with `dry_run: true` by default for a
 manual preview) terminates any instance a crashed or cancelled run leaves
 behind.

@@ -45,6 +45,55 @@ behind. The [post-merge acceptance skip](#post-merge-acceptance-skip) then
 drops the live suite from the merge run too when it would only re-test the
 PR's tree, leaving **one** live acceptance run per change.
 
+## The CI jobs
+
+`ci.yml` keeps only short comments; the reasons behind its jobs are here.
+
+- **`check`** runs `go mod verify`, the tidy check, `make check`,
+  golangci-lint, unit tests and the mock acceptance suite, and uploads both
+  coverage profiles to Codecov in one call so Codecov reports one status.
+  The mock suite runs here on every PR because it is the only place a
+  same-repo PR executes it, and resource CRUD paths are only reachable
+  through real Terraform. Go is the newest patch of `go.mod`'s minor:
+  setup-go pins an exact version even with `check-latest`, so the job passes
+  it the minor.
+- **`docs`** regenerates the registry docs with tfplugindocs and fails if the
+  committed tree differs, then type-checks every example against the
+  provider built from the commit. It needs no credentials. The pages
+  hand-write their argument references (see #256), so a changed schema
+  description does not change the published text.
+- **`security` (Trivy)** gates on CRITICAL/HIGH fixable findings across
+  vulnerabilities, misconfigurations, secrets and licenses (denylist in
+  `trivy.yaml`). A second, non-gating pass writes every finding to JSON for
+  the summary, and a third writes the CI SBOM artifact.
+- **`govulncheck`** complements Trivy with reachability: it fails only when
+  vulnerable code is actually called, and it covers standard-library
+  advisories for the Go toolchain in use.
+- **`security-report`** combines both scans, the SBOM and open CodeQL alerts
+  into one summary, posted as a sticky PR comment and to the job summary. It
+  never gates; it shows the gates' results as they are.
+- **`acceptance_mock`** runs the mock suite across Terraform 1.5.7 (the
+  oldest supported), the live suite's Terraform series and OpenTofu. It runs
+  only for fork and Dependabot PRs, which have no secrets for the live suite.
+- **`start-runner` → `acceptance_test` → `stop-runner`** run the live suite
+  on a fresh EC2 instance with the whitelisted sandbox EIP (see
+  [SECURITY_COMPLIANCE.md](SECURITY_COMPLIANCE.md#runner-lifecycle-and-the-sandbox-eip)).
+  The workflow has no top-level `concurrency` group, because one would drop
+  queued runs; instead `start-runner` queues behind older runs, so only one
+  instance holds the EIP. It also waits for the EIP to be released by the
+  previous instance (a temporary shim for `ec2-github-runner#76`) and asserts
+  the EIP is on the new instance, and `acceptance_test` refuses to run if its
+  public IP differs. `acceptance_test` installs the newest Go patch of
+  `go.mod`'s minor and the newest Terraform patch of the pinned series; a new
+  Terraform minor fails the run so a maintainer reviews it before bumping
+  `tf_minor`.
+- **Rate limits in the live suite.** The provider and the test helpers each
+  have their own limiter, so each gets 10 requests/minute, half the
+  account's 20/minute quota. Retries are fewer and further apart: with a 10s
+  base, 60s cap and 50–100% jitter, the four delays of five attempts add up
+  to at least 65s, which outlasts the one-minute window. `8m` max elapsed
+  covers that schedule plus request timeouts and limiter waits.
+
 ## The changes gate
 
 The first job in CI, `changes` (check name "Detect Changes"), uses
@@ -86,7 +135,7 @@ and a burst of runs across the three repos within one hour has failed healthy
 suites with `after 5 attempts: namecheap: retryable HTTP status`.
 
 So on a push to `master`, the `changes` job's "already-tested" step skips live
-acceptance (output `acceptance=false`, which `start-runner` and
+acceptance (its `live` output is `false`, which `start-runner` and
 `acceptance_test` check) only when **all** of these hold:
 
 1. the pushed commit is the squash-merge commit of a PR;
@@ -167,8 +216,10 @@ GoReleaser start that much sooner.
   watches. This is enforced — `ci-ok`'s first step diffs its `needs:`
   against the workflow's job list and fails on drift.
 - **New expensive jobs should take the gate**: `needs: changes` +
-  `if: needs.changes.outputs.code == 'true'` (combined with any
-  event/actor conditions the job needs, as `start-runner` does).
+  `if: needs.changes.outputs.code == 'true'`, plus any event or actor
+  conditions the job needs. A job that needs the live sandbox uses
+  `needs.changes.outputs.live` instead, which already combines `code`, the
+  post-merge skip and the trusted-event conditions.
 - **Never gate `stop-runner` on `changes`** — its `always()` + instance-id
   guard is what guarantees a started runner is always stopped.
 - **The gate's ignore list must stay a subset of "files that can't affect the
