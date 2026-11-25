@@ -27,8 +27,14 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
 
 ## Vulnerability, misconfig, secret, and license scanning
 
-- [Trivy](https://trivy.dev) runs on every code-touching push and PR in the
-  `security` job with `scanners: vuln,misconfig,secret,license` (#166, #176).
+The scans below run in the shared `security-scan.yml` from
+[terraform-provider-workflows](https://github.com/namecheap/terraform-provider-workflows), which `ci.yml` calls as its `Security` job pinned by commit SHA.
+Trivy and govulncheck versions are pinned there once, and Dependabot bumps
+the caller's SHA.
+
+- [Trivy](https://trivy.dev) runs on every code-touching push and PR as
+  `Security / Security scan (Trivy)` with
+  `scanners: vuln,misconfig,secret,license` (#166, #176).
   Changes gated away as non-code — root-level markdown, `LICENSE`, the
   release-please manifest — skip the scan jobs (see [CI.md](CI.md)); nothing
   in that set can alter the module graph or the shipped artifacts.
@@ -42,10 +48,11 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   (package + license combination) to `trivy.yaml`, with a justification and
   a reviewer from outside the requesting team.
 - [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) runs on
-  every code-touching push and PR in the `govulncheck` job as a Go-native gate complementary to
-  Trivy (#233). It performs call-graph **reachability** analysis against the Go
-  vulnerability database (<https://vuln.go.dev>) and the standard library for
-  the pinned Go toolchain, and **fails the build when a vulnerable symbol is
+  every code-touching push and PR as `Security / Security scan (govulncheck)`,
+  a Go-native gate complementary to Trivy (#233). It performs call-graph
+  **reachability** analysis against the Go vulnerability database
+  (<https://vuln.go.dev>) and the standard library of the Go version in
+  `go.mod` (the `toolchain` line, which releases build with), and **fails the build when a vulnerable symbol is
   reachable from this module's code** — catching exploitable paths (including
   stdlib CVEs) that Trivy's version-range dependency scan does not cover.
   Imported-but-uncalled vulnerabilities are reported but do not block, so the
@@ -61,14 +68,14 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   `terraform-provider-namecheap_<tag>_sbom.cdx.json` (#177).
 - SBOM is produced by Trivy against the source tree, matching the CVE /
   license scans so the three views (scan report, workflow artifact,
-  release asset) are consistent. The release SBOM uses the Trivy version
-  pinned in the shared release workflow; keep `ci.yml`'s Trivy `version:`
-  equal to it.
+  release asset) are consistent. The CI scan and the release SBOM share one
+  Trivy version, pinned in the shared repository, whose CI fails if the two
+  differ.
 
 ## PR security summary
 
-- The `security-report` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
-  consolidates every scan into one Markdown report and posts it as a **sticky
+- The `Security / Security scan summary` job (the shared workflow with
+  `report: true`) consolidates every scan into one Markdown report and posts it as a **sticky
   PR comment** (one comment, updated in place per push), the run's **job
   summary**, and the **`security-summary`** workflow artifact (90-day
   retention) (#234).
@@ -78,7 +85,7 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   overview (SBOM component count, `go.mod` direct/indirect split, license
   breakdown).
 - It is **reporting only and never gates.** The per-scan pass/fail shown in the
-  summary is taken verbatim from the `security` and `govulncheck` gate jobs
+  summary is taken verbatim from the Trivy and govulncheck gate jobs
   (`needs.*.result`), so a green comment can never mask a red gate. The merge
   gates remain exactly as described above.
 - Source data comes from non-gating JSON passes of the same scanners
@@ -86,8 +93,10 @@ CI gates (in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), `check` job
   the `trivy-json` / `govulncheck-json` / `sbom-cyclonedx` artifacts. Secret
   findings list the rule and location only — never the matched value.
 - The comment is posted with the default `GITHUB_TOKEN` (`pull-requests: write`,
-  scoped to the `security-report` job). Dependabot runs skip the comment (their
-  token is read-only) but still produce the job summary and artifact.
+  granted only to the `Security` job). Dependabot and fork runs skip the
+  comment (their token is read-only) but still produce the job summary and
+  artifact. The summary script runs from the shared repository at the pinned
+  commit, not from this repository.
 
 ## CI / supply-chain pinning
 

@@ -11,7 +11,7 @@ mechanics.
 
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
-| CI | `.github/workflows/ci.yml` | PR, push to `master`, manual | Lint/unit/mock-acceptance (`check`), registry docs (`docs`), Trivy + govulncheck gates, security summary, fork-facing mock matrix, and the live sandbox acceptance suite on a self-hosted EC2 runner |
+| CI | `.github/workflows/ci.yml` | PR, push to `master`, manual | Lint/unit/mock-acceptance (`check`), registry docs (`docs`), Trivy + govulncheck gates and security summary (shared `Security` job), fork-facing mock matrix, and the live sandbox acceptance suite on a self-hosted EC2 runner |
 | Versioning | `.github/workflows/versioning.yml` (shared) | After every CI run on `master` (`workflow_run`), manual | release-please: opens/updates the Release PR; creates the `vX.Y.Z` tag when it merges |
 | Release | `.github/workflows/release.yml` (shared) | Push of a `v*` tag | GoReleaser: builds, GPG-signs, attests and publishes binaries + release SBOM |
 | PR Title Check | `.github/workflows/pr-title.yml` (shared) | PR | Enforces Conventional Commit PR titles (they become the squash-commit subjects release-please reads); reports as `PR Title / Conventional PR Title` |
@@ -66,16 +66,20 @@ PR's tree, leaving **one** live acceptance run per change.
   provider built from the commit. It needs no credentials. The pages
   hand-write their argument references (see #256), so a changed schema
   description does not change the published text.
-- **`security` (Trivy)** gates on CRITICAL/HIGH fixable findings across
-  vulnerabilities, misconfigurations, secrets and licenses (denylist in
-  `trivy.yaml`). A second, non-gating pass writes every finding to JSON for
-  the summary, and a third writes the CI SBOM artifact.
-- **`govulncheck`** complements Trivy with reachability: it fails only when
-  vulnerable code is actually called, and it covers standard-library
-  advisories for the Go toolchain in use.
-- **`security-report`** combines both scans, the SBOM and open CodeQL alerts
-  into one summary, posted as a sticky PR comment and to the job summary. It
-  never gates; it shows the gates' results as they are.
+- **`security`** calls the shared `security-scan.yml` from
+  [terraform-provider-workflows](https://github.com/namecheap/terraform-provider-workflows) with `report: true`. It reports three checks:
+  - `Security / Security scan (Trivy)` gates on CRITICAL/HIGH fixable
+    findings across vulnerabilities, misconfigurations, secrets and licenses
+    (denylist in `trivy.yaml`).
+  - `Security / Security scan (govulncheck)` fails only when vulnerable code
+    is actually called. It uses the Go version from `go.mod` (the
+    `toolchain` line), the one releases build with, so a standard-library
+    CVE fails it until `toolchain` is bumped.
+  - `Security / Security scan summary` combines both scans, a CycloneDX SBOM
+    and open CodeQL alerts into one summary, posted as a sticky PR comment
+    and to the job summary. It never gates.
+
+  `start-runner` waits for this job, so a failed scan skips the live suite.
 - **`acceptance_mock`** runs the mock suite across Terraform 1.5.7 (the
   oldest supported), the live suite's Terraform series and OpenTofu. It runs
   only for fork and Dependabot PRs, which have no secrets for the live suite.
@@ -120,7 +124,7 @@ classify anyway.
 What runs when (rows are change kinds, columns are jobs; the pre-existing
 fork/Dependabot/event conditions still apply on top of the gate):
 
-| Change | Check / Docs / Trivy / govulncheck / summary | Mock acceptance matrix | EC2 start → acceptance → stop | CI OK |
+| Change | Check / Docs / Security | Mock acceptance matrix | EC2 start → acceptance → stop | CI OK |
 |---|---|---|---|---|
 | Code, workflows, `docs/**`, `templates/**`, `examples/**` — same-repo PR or push to `master` | runs | skipped (fork/Dependabot only) | runs | pass |
 | Push to `master` that squash-merges a PR whose head has the **same tree** and a **passing** `Acceptance test` | runs | skipped | skipped ([post-merge skip](#post-merge-acceptance-skip)) | pass |
@@ -151,8 +155,8 @@ Every other case runs acceptance as before: direct pushes, a PR that was behind
 `master` (the merge combined it with code it was never tested against),
 Dependabot PRs (their PR acceptance is skipped for lack of secrets, so the
 post-merge run is their only live coverage), and any API lookup failure. The
-step writes its decision and reason to the run's job summary. Check, Trivy,
-govulncheck and the rest still run on every post-merge push, and `CI OK` still
+step writes its decision and reason to the run's job summary. Check, Docs,
+Security and the rest still run on every post-merge push, and `CI OK` still
 concludes the run, so `versioning.yml` fires as usual.
 
 ### Why a gate job instead of workflow-level `paths-ignore`
@@ -160,8 +164,8 @@ concludes the run, so `versioning.yml` fires as usual.
 `paths-ignore` on the CI triggers looks simpler but breaks two things:
 
 1. **Required checks are never reported on filtered PRs.** The "Protect
-   master" ruleset requires the `Check`, `Security scan (Trivy)` and
-   `Security scan (govulncheck)` checks; if the workflow doesn't trigger at
+   master" ruleset requires the `Check`, `Security / Security scan (Trivy)`
+   and `Security / Security scan (govulncheck)` checks; if the workflow doesn't trigger at
    all, those checks stay "Expected" forever and a docs-only PR can never be
    merged. A job skipped by an `if:` condition, by contrast, reports
    "skipped" — which **does** satisfy branch protection.
