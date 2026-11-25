@@ -12,10 +12,14 @@ mechanics.
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
 | CI | `.github/workflows/ci.yml` | PR, push to `master`, manual | Lint/unit/mock-acceptance (`check`), registry docs (`docs`), Trivy + govulncheck gates, security summary, fork-facing mock matrix, and the live sandbox acceptance suite on a self-hosted EC2 runner |
-| Versioning | `.github/workflows/versioning.yml` | After every CI run on `master` (`workflow_run`), manual | release-please: opens/updates the Release PR; creates the `vX.Y.Z` tag when it merges |
-| Release | `.github/workflows/release.yml` | Push of a `v*` tag | GoReleaser: builds, GPG-signs, attests and publishes binaries + release SBOM |
-| PR Title Check | `.github/workflows/pr-title.yml` | PR | Enforces Conventional Commit PR titles (they become the squash-commit subjects release-please reads) |
+| Versioning | `.github/workflows/versioning.yml` (shared) | After every CI run on `master` (`workflow_run`), manual | release-please: opens/updates the Release PR; creates the `vX.Y.Z` tag when it merges |
+| Release | `.github/workflows/release.yml` (shared) | Push of a `v*` tag | GoReleaser: builds, GPG-signs, attests and publishes binaries + release SBOM |
+| PR Title Check | `.github/workflows/pr-title.yml` (shared) | PR | Enforces Conventional Commit PR titles (they become the squash-commit subjects release-please reads); reports as `PR Title / Conventional PR Title` |
 | Cleanup EC2 runners | `.github/workflows/cleanup-ec2-runners.yml` | Cron (30-min leak reaper), manual | Terminates EC2 runner instances leaked by crashed/cancelled runs |
+
+(shared): a thin caller of a reusable workflow in
+[`namecheap/terraform-provider-workflows`](https://github.com/namecheap/terraform-provider-workflows),
+pinned by commit SHA; see [RELEASE.md](RELEASE.md).
 
 Checks that live outside these workflows: CodeQL (GitHub default setup), the
 DCO bot, and the `security/snyk (Namecheap)` integration.

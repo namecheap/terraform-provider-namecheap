@@ -1,74 +1,34 @@
 name: Release
 
+# Cuts a release whenever a `v*` tag is pushed. The release-please bot opens a
+# release PR on every merge to master; merging that PR creates the tag and
+# triggers this workflow. See RELEASE.md for the full flow.
+#
+# The build itself (GoReleaser, GPG signing, build provenance attestation,
+# CycloneDX SBOM) lives in namecheap/terraform-provider-workflows, pinned by commit SHA.
+# Dependabot bumps the SHA and the version comment.
 on:
   push:
     tags:
       - v*
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+permissions: {}
 
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Unshallow
-        run: git fetch --prune --unshallow
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.PASSPHRASE }}
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
-        with:
-          # Pin the GoReleaser binary to an exact version so a breaking
-          # upstream minor release (has happened: v2 config schema) can't
-          # silently break a tagged release. Bump this line when the
-          # maintainer has reviewed the release notes at
-          # https://github.com/goreleaser/goreleaser/releases.
-          version: v2.15.4
-          args: release --clean
-        env:
-          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Find checksums file
-        id: checksums
-        run: echo "path=$(ls dist/*_SHA256SUMS)" >> "$GITHUB_OUTPUT"
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-checksums: ${{ steps.checksums.outputs.path }}
-
-      - name: Generate CycloneDX SBOM for release
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          # Keep the Trivy binary in sync with the CI scan (.github/workflows/ci.yml).
-          version: v0.71.2
-          scan-type: fs
-          scan-ref: .
-          format: cyclonedx
-          output: terraform-provider-namecheap_${{ github.ref_name }}_sbom.cdx.json
-
-      - name: Attach SBOM to release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ github.ref_name }}" \
-            "terraform-provider-namecheap_${{ github.ref_name }}_sbom.cdx.json" \
-            --clobber
+  release:
+    name: Release
+    # The called workflow can only use what is granted here: contents to
+    # publish the GitHub Release, id-token and attestations to attest build
+    # provenance.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: namecheap/terraform-provider-workflows/.github/workflows/release.yml@453070d6bf48c7d66dfcc18d44180783ef7ea3f7 # v1.0.1
+    with:
+      # Attach terraform-provider-namecheap_<tag>_sbom.cdx.json to the release;
+      # see SECURITY_COMPLIANCE.md.
+      sbom: true
+    secrets:
+      gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+      passphrase: ${{ secrets.PASSPHRASE }}
