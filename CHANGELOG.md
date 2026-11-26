@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.10.1](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.10.0...v2.10.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/hashicorp/terraform-plugin-sdk/v2 from 2.40.1 to 2.41.1 ([#401](https://github.com/namecheap/terraform-provider-namecheap/issues/401)) ([158329e](https://github.com/namecheap/terraform-provider-namecheap/commit/158329e3562b324a44ef3aa231e29835ceb36770))
+* **deps:** bump Go toolchain to 1.26.11 ([#407](https://github.com/namecheap/terraform-provider-namecheap/issues/407)) ([f306251](https://github.com/namecheap/terraform-provider-namecheap/commit/f306251132934dd2e889924368459ca12b84f660))
+
 ## [2.10.0](https://github.com/namecheap/terraform-provider-namecheap/compare/v2.9.11...v2.10.0) (2026-11-18)
 
 
