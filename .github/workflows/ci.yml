@@ -189,7 +189,7 @@ jobs:
       contents: read
       pull-requests: write # sticky summary comment
       security-events: read # open CodeQL alerts for the summary
-    uses: namecheap/terraform-provider-workflows/.github/workflows/security-scan.yml@7ef9d6abe17fefeb269cd485bcf4c41401592700 # v1.1.0
+    uses: namecheap/terraform-provider-workflows/.github/workflows/security-scan.yml@6939aa96ddb124c103ac748edf490c7013c7e851 # v1.1.1
     with:
       report: true
 
