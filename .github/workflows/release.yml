@@ -24,7 +24,7 @@ jobs:
       contents: write
       id-token: write
       attestations: write
-    uses: namecheap/terraform-provider-workflows/.github/workflows/release.yml@6939aa96ddb124c103ac748edf490c7013c7e851 # v1.1.1
+    uses: namecheap/terraform-provider-workflows/.github/workflows/release.yml@a999875767b285b80f3478eaa5c73c1adb38d7f6 # v1.1.2
     with:
       # Attach terraform-provider-namecheap_<tag>_sbom.cdx.json to the release;
       # see SECURITY_COMPLIANCE.md.

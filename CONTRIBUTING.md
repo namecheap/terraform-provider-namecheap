@@ -189,7 +189,7 @@ sandbox before merge.
 
 The self-hosted EC2 runner behind `acceptance_test` is launched fresh for
 every run and terminated afterwards, so each job starts from a pristine
-disk (the #279 warm pool was removed under DEVOPS-22119 — measurements and
+disk (the #279 warm pool was removed — measurements and
 rationale live in
 [SECURITY_COMPLIANCE.md](SECURITY_COMPLIANCE.md#runner-lifecycle-and-the-sandbox-eip)).
 Fork PRs keep going through `acceptance_mock`, unchanged. A scheduled leak

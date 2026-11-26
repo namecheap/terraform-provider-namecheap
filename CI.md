@@ -165,9 +165,10 @@ concludes the run, so `versioning.yml` fires as usual.
 `paths-ignore` on the CI triggers looks simpler but breaks two things:
 
 1. **Required checks are never reported on filtered PRs.** The "Protect
-   master" ruleset requires the `Check` and `CI OK` checks; if the workflow
-   doesn't trigger at all, those checks stay "Expected" forever and a docs-only
-   PR can never be merged. A job skipped by an `if:` condition, by contrast,
+   master" ruleset requires the `Check`, `CI OK` and
+   `PR Title / Conventional PR Title` checks; if the workflow doesn't trigger
+   at all, those checks stay "Expected" forever and a docs-only PR can never be
+   merged. A job skipped by an `if:` condition, by contrast,
    reports "skipped" — which **does** satisfy branch protection. The
    exception is a job that calls a reusable workflow: when skipped it reports
    only under its own name (`Security`), never as
@@ -191,10 +192,10 @@ regardless of anything else in the run. The scheduled
 
 ### The CI OK job
 
-`ci-ok` (check name "CI OK") runs on every non-cancelled run
-(`if: ${{ !cancelled() }}` — a superseded PR run cancelled by the concurrency
-group skips it instead of posting a red check on a dead SHA), checks every
-other job's result, and fails if any of them failed or was cancelled
+`ci-ok` (check name "CI OK") runs on every run that isn't cancelled
+(`if: ${{ !cancelled() }}`; in a cancelled run it reports "cancelled", which
+does not satisfy a required check), checks every other job's result, and
+fails if any of them failed or was cancelled
 ("skipped" is fine — whether from the gate or from the pre-existing
 fork/Dependabot conditions). It also asserts that its own `needs:` list
 matches the workflow's job list, so a newly added job can't silently escape

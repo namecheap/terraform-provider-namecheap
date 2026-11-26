@@ -13,7 +13,8 @@ the bottom.
   with an exact version or pseudo-version.
 - [`go.sum`](go.sum) records a cryptographic hash for each module; re-fetches
   that don't match the hash fail the build.
-- Go toolchain version is pinned in `go.mod` (currently `go 1.25.9`).
+- The Go version is pinned in `go.mod`: the `go` line is the minimum, and the
+  `toolchain` line is the version releases build with and govulncheck scans.
 - No `vendor/` tree. Module resolution goes through `GOPROXY` with `go.sum`
   as the integrity authority; removing vendor kept the auditable chain
   (`go.mod` → `go.sum` → GOPROXY) while shedding 29 MB of committed churn
@@ -157,7 +158,7 @@ before `tar -xzf` / `unzip` runs.
 
 The acceptance-test job runs on a fresh EC2 instance launched by the
 self-hosted runner action for every run and terminated by `stop-runner`
-afterwards (the #279 warm pool was removed under DEVOPS-22119). See
+afterwards (the #279 warm pool was removed). See
 [Runner lifecycle and the sandbox EIP](#runner-lifecycle-and-the-sandbox-eip)
 below for the lifecycle/cleanup/EIP mechanics and the removal's measured
 rationale:
@@ -185,7 +186,7 @@ rationale:
 - **Per-run lifecycle.** `start-runner` launches a fresh instance for every
   acceptance run and `stop-runner` terminates it afterwards (the action's
   default `reuse: terminate`). The #279 warm pool (`reuse: stop` +
-  `reuse-pool-tag: sandbox-acceptance`) was removed under DEVOPS-22119: on
+  `reuse-pool-tag: sandbox-acceptance`) was removed: on
   this repo's baked AMI a warm restart registered in the same ~70s as a cold
   launch, while parking the instance added a 22-152s stop-wait to every run
   and an EIP-drift failure class. A fresh disk per run also removes the
@@ -208,7 +209,7 @@ rationale:
   minutes (20-minute age threshold plus the 30-minute schedule), and the
   action's TTL is the backstop behind that.
 - **Dedicated sandbox EIP.** The whitelisted Elastic IP
-  (`eipalloc-1796f61b`) is passed to the action's `eip-allocation-id` input,
+  (repository variable `SANDBOX_EIP_ALLOCATION_ID`) is passed to the action's `eip-allocation-id` input,
   which associates it during every launch — that is what gives the instance
   connectivity during its own bootstrap (the fix for the CloudTrail-confirmed
   cold-boot failures) and is also the IP the Namecheap sandbox API allows.
@@ -279,19 +280,14 @@ rationale:
   reaper never touches the EIP directly — it is released as an automatic
   AWS side effect of instance termination. `workflow_dispatch` exposes a
   `dry_run` input (default `true`) for safe manual runs.
-- **One EIP per repo (no cross-repo mutex).** `eipalloc-1796f61b` was
-  previously shared with `namecheap/mcp-server-namecheap`'s acceptance
-  workflow, which could silently reassociate ("steal") it mid-run. That is
-  why this pipeline once carried a cross-repo lock (`scripts/eip-mutex.sh`
-  with `wait-until-free` reaping + `verify`). That lock — its script, its two
+- **One EIP per repo (no cross-repo mutex).** The sandbox EIP was once shared
+  with `namecheap/mcp-server-namecheap`'s acceptance workflow, which could
+  silently reassociate ("steal") it mid-run. That is why this pipeline once
+  carried a cross-repo lock (`scripts/eip-mutex.sh` with `wait-until-free`
+  reaping + `verify`). Each repository now has its own whitelisted EIP
+  (namecheap/terraform-provider-namecheap#282,
+  namecheap/mcp-server-namecheap#16), and the lock — its script, its two
   workflow steps, and the `ec2:DisassociateAddress` grant — has been removed.
-  The migration to a genuine per-repo split is **in progress, not complete**:
-  `mcp-server-namecheap`'s acceptance workflow is disabled as an interim
-  stopgap so it no longer touches this IP, and giving it its own dedicated EIP
-  (after which the disable is lifted) is still open work. Tracked under the
-  "Dedicated per-repo sandbox EIP" milestone:
-  namecheap/terraform-provider-namecheap#282 (this repo) and
-  namecheap/mcp-server-namecheap#16 (the dedicated EIP for that repo).
 
 ## Fork-safe pull-request CI
 

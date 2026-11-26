@@ -87,4 +87,7 @@ then tag and push:
 runs on the tag; the next release-please run reconciles its state. Caveat: in
 this path GoReleaser creates the GitHub Release with an **empty body** (its
 changelog is disabled — release-please owns release notes in the normal flow);
-edit the Release afterwards and paste the CHANGELOG entry in by hand.
+edit the Release afterwards and paste the CHANGELOG entry in by hand. Because
+`.goreleaser.yml` sets `draft: true`, that Release is also created as a
+**draft**: publish it once the assets are attached, or the Terraform Registry
+never sees the version.
