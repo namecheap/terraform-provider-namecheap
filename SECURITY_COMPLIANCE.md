@@ -107,6 +107,14 @@ the caller's SHA.
   40-char commit SHA with a trailing `# v<semver>` comment (#147, #161). Dependabot's `github-actions`
   ecosystem (#150) rotates the SHA + comment atomically when a new version
   releases.
+- `ahmadnassri/action-workflow-queue` is a Docker action whose `action.yml`
+  names its image by tag, so a SHA pin of the action would not freeze the
+  code. `start-runner` holds the AWS and App keys, so the step uses the image
+  directly by digest (`docker://…@sha256:…`). Dependabot does not track it;
+  bump the digest by hand.
+- The App tokens minted in `start-runner`, `stop-runner` and
+  `cleanup-ec2-runners.yml` are narrowed to `administration: write`, the only
+  permission the self-hosted runner endpoints need.
 - `namecheap/ec2-github-runner` is SHA-pinned for both the `start-runner`
   and `stop-runner` jobs at the same SHA (#149). Rotations are tracked
   as single-line PRs (#159, #164, #165).
@@ -164,8 +172,8 @@ rationale:
   [`CONTRIBUTING.md`](CONTRIBUTING.md#dependabot-prs-maintainers).
 - AMI comes from `DEVOPS/hardened-amazon-linux2023` (internal).
 - Only one acceptance run may hold this repo's whitelisted Elastic IP at a
-  time. `start-runner` serializes access with the SHA-pinned
-  `ahmadnassri/action-workflow-queue` action (MIT), which queues a newer run
+  time. `start-runner` serializes access with the digest-pinned
+  `ahmadnassri/action-workflow-queue` image (MIT), which queues a newer run
   behind older in-progress ones (FIFO, no cancellation). This replaces the
   former shared `concurrency` group, which silently cancelled pending runs
   when PRs were pushed close together. The EIP is dedicated to this repository
