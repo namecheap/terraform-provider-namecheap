@@ -266,10 +266,15 @@ jobs:
       public-ip: ${{ steps.eip-ip.outputs.public-ip }}
     steps:
       # FIFO behind older runs, so only one runner holds the sandbox EIP.
+      # The action is a Docker image referenced by tag, which a SHA pin of the
+      # action does not freeze; this job holds AWS and App keys, so the image
+      # is pinned by digest. Inputs the action would default are passed here.
       - name: Wait for older acceptance runs to finish (single sandbox EIP)
-        uses: ahmadnassri/action-workflow-queue@542658b3a8270cac81ae15d401b0d974732808ac # v1.2.0
+        uses: docker://ghcr.io/ahmadnassri/action-workflow-queue@sha256:97df572a56aabf00d05dd252004192877ba0c80fee6e8d9775b9c060f4b2004d # 1.2.0
         with:
+          github-token: ${{ github.token }}
           timeout: 1800000 # 30 min
+          delay: 10000
       - name: Generate GitHub App token
         id: app-token
         uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
@@ -278,6 +283,7 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          permission-administration: write # self-hosted runner registration and removal only
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
@@ -468,6 +474,7 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
+          permission-administration: write # self-hosted runner registration and removal only
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
