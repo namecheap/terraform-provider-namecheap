@@ -28,7 +28,7 @@ permissions: {}
 jobs:
   versioning:
     name: Versioning
-    uses: namecheap/terraform-provider-workflows/.github/workflows/versioning.yml@453070d6bf48c7d66dfcc18d44180783ef7ea3f7 # v1.0.1
+    uses: namecheap/terraform-provider-workflows/.github/workflows/versioning.yml@7ef9d6abe17fefeb269cd485bcf4c41401592700 # v1.1.0
     with:
       app-client-id: ${{ vars.APP_CLIENT_ID }}
     secrets:

@@ -1,5 +1,5 @@
 # Trivy policy file — auto-loaded from repo root by `trivy fs`.
-# Applied to every CI run of the `security` job in .github/workflows/ci.yml.
+# Applied by the Security job in .github/workflows/ci.yml (shared security scan).
 #
 # License policy: denylist the copyleft and source-available licenses we
 # cannot ship in a Terraform provider distributed via the public registry.

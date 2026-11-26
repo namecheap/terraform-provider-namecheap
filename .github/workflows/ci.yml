@@ -179,192 +179,19 @@ jobs:
       - name: Examples type-check against this provider
         run: make examples-validate
 
+  # Trivy and govulncheck gates plus the summary comment, from the shared
+  # workflow; see CI.md.
   security:
-    name: Security scan (Trivy)
-    runs-on: ubuntu-latest
+    name: Security
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Dependabot bumps the action, not `version:`; bump it by hand. Keep it
-      # equal to the release SBOM's Trivy in terraform-provider-workflows.
-      - name: Trivy vuln + misconfig + secret + license scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.71.2
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig,secret,license
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
-          format: table
-          trivy-config: trivy.yaml
-          cache: "true"
-
-      # All severities, never gates; feeds the security summary.
-      - name: Trivy report (JSON, all severities, non-gating)
-        if: ${{ !cancelled() }}
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.71.2
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig,secret,license
-          exit-code: "0"
-          format: json
-          output: trivy-results.json
-          trivy-config: trivy.yaml
-          cache: "true"
-
-      - name: Upload Trivy JSON report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: trivy-json
-          path: trivy-results.json
-          retention-days: 90
-
-      - name: Generate CycloneDX SBOM
-        if: ${{ !cancelled() }}
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.71.2
-          scan-type: fs
-          scan-ref: .
-          format: cyclonedx
-          output: sbom.cdx.json
-          cache: "true"
-
-      - name: Upload SBOM artifact
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: sbom-cyclonedx
-          path: sbom.cdx.json
-          retention-days: 90
-
-  govulncheck:
-    name: Security scan (govulncheck)
-    runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.code == 'true' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Resolve Go minor from go.mod
-        id: gomod
-        run: echo "minor=$(awk '/^go / {print $2; exit}' go.mod | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: ${{ steps.gomod.outputs.minor }}
-          check-latest: true
-
-      # Not in go.mod, so Dependabot doesn't track it; bump by hand. Fails only
-      # on vulnerabilities in called code.
-      - name: Run govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
-          govulncheck ./...
-
-      # Never gates; feeds the security summary.
-      - name: govulncheck JSON report (non-gating)
-        if: ${{ !cancelled() }}
-        run: |
-          GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
-          "$GOVULNCHECK" -format json ./... > govulncheck.json || true
-
-      - name: Upload govulncheck JSON report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: govulncheck-json
-          path: govulncheck.json
-          retention-days: 90
-
-  # Reporting only: the gates are the security and govulncheck jobs, whose
-  # results the summary shows as-is.
-  security-report:
-    name: Security scan summary
-    needs: [changes, security, govulncheck]
-    if: ${{ !cancelled() && needs.changes.outputs.code == 'true' }}
-    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write # sticky summary comment
       security-events: read # open CodeQL alerts for the summary
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download scan artifacts
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          path: scan-artifacts
-          merge-multiple: true
-
-      - name: Fetch open CodeQL alerts (best effort)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api "repos/${GITHUB_REPOSITORY}/code-scanning/alerts?ref=${GITHUB_REF}&state=open&per_page=100" \
-            > scan-artifacts/codeql-alerts.json 2>/dev/null || echo '[]' > scan-artifacts/codeql-alerts.json
-
-      - name: Build security summary
-        env:
-          SECURITY_RESULT: ${{ needs.security.result }}
-          GOVULNCHECK_RESULT: ${{ needs.govulncheck.result }}
-          COMMIT_SHA: ${{ github.sha }}
-          BRANCH: ${{ github.ref_name }}
-        run: |
-          bash scripts/security-summary.sh \
-            scan-artifacts/trivy-results.json \
-            scan-artifacts/govulncheck.json \
-            scan-artifacts/sbom.cdx.json \
-            go.mod \
-            scan-artifacts/codeql-alerts.json \
-            > security-summary.md
-          cat security-summary.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload summary artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: security-summary
-          path: security-summary.md
-          retention-days: 90
-
-      # Skipped where the token is read-only: Dependabot and fork PRs.
-      - name: Post or update PR comment
-        if: ${{ github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -uo pipefail
-          marker='<!-- security-scan-summary -->'
-          pr="${EVENT_PR_NUMBER:-}"
-          if [ -z "${pr}" ]; then
-            pr="$(gh pr list --head "${GITHUB_REF_NAME}" --state open \
-                    --json number --jq '.[0].number // empty')"
-          fi
-          if [ -z "${pr}" ]; then
-            echo "No open PR for branch ${GITHUB_REF_NAME}; summary is on the job summary + artifact only."
-            exit 0
-          fi
-          existing="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${pr}/comments?per_page=100" \
-                        --jq "map(select(.body | startswith(\"${marker}\"))) | .[0].id // empty")"
-          jq -Rs '{body: .}' security-summary.md > comment-payload.json
-          if [ -n "${existing}" ]; then
-            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
-              --input comment-payload.json >/dev/null
-            echo "Updated existing summary comment #${existing} on PR #${pr}."
-          else
-            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${pr}/comments" \
-              --input comment-payload.json >/dev/null
-            echo "Posted new summary comment on PR #${pr}."
-          fi
+    uses: namecheap/terraform-provider-workflows/.github/workflows/security-scan.yml@7ef9d6abe17fefeb269cd485bcf4c41401592700 # v1.1.0
+    with:
+      report: true
 
   # Engine/version matrix of the mock suite, and the acceptance path for fork
   # and Dependabot PRs, which have no secrets for the live suite.
@@ -427,7 +254,7 @@ jobs:
 
   start-runner:
     name: Start self-hosted EC2 runner
-    needs: [changes, check, security, govulncheck]
+    needs: [changes, check, security]
     if: ${{ needs.changes.outputs.live == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -665,8 +492,6 @@ jobs:
       - check
       - docs
       - security
-      - govulncheck
-      - security-report
       - acceptance_mock
       - start-runner
       - acceptance_test
