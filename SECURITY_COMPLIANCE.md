@@ -59,6 +59,9 @@ the caller's SHA.
   gate stays low-noise. The binary is pinned (`@v1.3.0`) and bumped by hand
   (it's not in `go.mod`, so Dependabot doesn't track it); the advisory DB is
   fetched fresh on every run, so detection stays current regardless.
+- Both gates also run weekly on `master` from
+  `security-scheduled.yml`, so an advisory published while nothing changes
+  still fails a run.
 
 ## Software Bill of Materials (SBOM)
 

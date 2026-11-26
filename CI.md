@@ -12,6 +12,7 @@ mechanics.
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
 | CI | `.github/workflows/ci.yml` | PR, push to `master`, manual | Lint/unit/mock-acceptance (`check`), registry docs (`docs`), Trivy + govulncheck gates and security summary (shared `Security` job), fork-facing mock matrix, and the live sandbox acceptance suite on a self-hosted EC2 runner |
+| Scheduled security scan | `.github/workflows/security-scheduled.yml` | Weekly (Mondays 06:17 UTC), manual | The same Trivy and govulncheck gates on `master`, without the summary, to catch advisories published since the last change; a failure emails whoever last edited the schedule |
 | Versioning | `.github/workflows/versioning.yml` (shared) | After every CI run on `master` (`workflow_run`), manual | release-please: opens/updates the Release PR; creates the `vX.Y.Z` tag when it merges |
 | Release | `.github/workflows/release.yml` (shared) | Push of a `v*` tag | GoReleaser: builds, GPG-signs, attests and publishes binaries + release SBOM |
 | PR Title Check | `.github/workflows/pr-title.yml` (shared) | PR | Enforces Conventional Commit PR titles (they become the squash-commit subjects release-please reads); reports as `PR Title / Conventional PR Title` |
