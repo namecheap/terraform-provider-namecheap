@@ -165,11 +165,14 @@ concludes the run, so `versioning.yml` fires as usual.
 `paths-ignore` on the CI triggers looks simpler but breaks two things:
 
 1. **Required checks are never reported on filtered PRs.** The "Protect
-   master" ruleset requires the `Check`, `Security / Security scan (Trivy)`
-   and `Security / Security scan (govulncheck)` checks; if the workflow doesn't trigger at
-   all, those checks stay "Expected" forever and a docs-only PR can never be
-   merged. A job skipped by an `if:` condition, by contrast, reports
-   "skipped" — which **does** satisfy branch protection.
+   master" ruleset requires the `Check` and `CI OK` checks; if the workflow
+   doesn't trigger at all, those checks stay "Expected" forever and a docs-only
+   PR can never be merged. A job skipped by an `if:` condition, by contrast,
+   reports "skipped" — which **does** satisfy branch protection. The
+   exception is a job that calls a reusable workflow: when skipped it reports
+   only under its own name (`Security`), never as
+   `Security / Security scan (…)`, so those checks can't be required; `CI OK`
+   fails when either scan fails.
 2. **The release chain dies.** `versioning.yml` triggers on
    `workflow_run: [CI]` for `master`. If a push to `master` doesn't start CI
    at all, that event never fires — release-please wouldn't run after the
